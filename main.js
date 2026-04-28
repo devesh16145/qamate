@@ -237,7 +237,13 @@ ipcMain.handle('get-run-history', async () => {
 // IPC: Get run artifacts (videos, screenshots, report)
 // ──────────────────────────────────────
 ipcMain.handle('get-run-artifacts', async (event, runId) => {
-  const runDir = path.join(RESULTS_DIR, runId);
+  // Accept either a run ID (e.g. "2026-04-28_20-21-59") or full folder path
+  let runDir;
+  if (path.isAbsolute(runId)) {
+    runDir = runId;
+  } else {
+    runDir = path.join(RESULTS_DIR, runId);
+  }
   if (!fs.existsSync(runDir)) return { videos: [], screenshots: [], report: null };
 
   const videosDir = path.join(runDir, 'videos');

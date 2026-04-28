@@ -409,6 +409,7 @@ body {
 /* Results Panel */
 .results-panel {
     padding: 20px;
+    overflow-y: auto;
 }
 
 .result-card {
@@ -489,6 +490,11 @@ body {
     letter-spacing: 1px;
 }
 
+.history-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
 .history-item {
     padding: 12px;
     border-bottom: 1px solid var(--border-color);
@@ -504,7 +510,25 @@ body {
     display: flex;
     justify-content: space-between;
     font-size: 12px;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+}
+
+.history-tc-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.history-tc-tag {
+    font-size: 9px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
 }
 
 .history-stats {
