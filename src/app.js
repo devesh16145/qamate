@@ -56,15 +56,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="module-header">
                     <span class="toggle-icon">▼</span>
                     <span class="module-title">${icon} ${flow.name} (${flow.test_cases.length})</span>
+                    <div class="module-actions">
+                        <button class="select-all-btn" title="Select all">All</button>
+                        <button class="deselect-all-btn" title="Deselect all">None</button>
+                    </div>
                 </div>
                 <div class="test-case-list">
                     ${flow.test_cases.map(tc => `
-                        <div class="test-case-item-container" style="display:flex; justify-content:space-between; align-items:center; padding-right:10px;">
-                            <label class="test-case-item" title="${tc.description}\n\nPreconditions: ${tc.preconditions || 'None'}\nExpected: ${tc.expected_result || ''}" style="flex-grow:1;">
+                        <div class="test-case-item-container">
+                            <label class="test-case-item" title="Preconditions: ${tc.preconditions || 'None'}\nExpected: ${tc.expected_result || ''}">
                                 <input type="checkbox" data-tc-id="${tc.tc_id}" data-module="${flow.id}">
-                                <span>${tc.tc_id}: ${truncate(tc.description, 40)}</span>
+                                <div class="tc-info">
+                                    <span class="tc-id">${tc.tc_id}</span>
+                                    <span class="tc-desc">${tc.description}</span>
+                                </div>
                             </label>
-                            <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure Data" style="font-size:16px;">🗄️</button>
+                            <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
                         </div>
                     `).join('')}
                 </div>
@@ -72,13 +79,22 @@ document.addEventListener('DOMContentLoaded', async () => {
             flowTree.appendChild(moduleEl);
 
             // Toggle collapse/expand
-            moduleEl.querySelector('.module-header').addEventListener('click', () => {
+            moduleEl.querySelector('.module-header').addEventListener('click', (e) => {
+                if (e.target.closest('.module-actions')) return;
                 const list = moduleEl.querySelector('.test-case-list');
                 const toggleIcon = moduleEl.querySelector('.toggle-icon');
                 list.classList.toggle('hidden');
                 toggleIcon.textContent = list.classList.contains('hidden') ? '▶' : '▼';
             });
             
+            // Select All / Deselect All
+            moduleEl.querySelector('.select-all-btn').addEventListener('click', () => {
+                moduleEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+            });
+            moduleEl.querySelector('.deselect-all-btn').addEventListener('click', () => {
+                moduleEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+            });
+
             // Configure Data button listeners
             moduleEl.querySelectorAll('.config-data-btn').forEach(btn => {
                 btn.addEventListener('click', () => openDataModal(btn.dataset.module, btn.dataset.tcId));
@@ -135,9 +151,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Search ──
     flowSearch.addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();
-        document.querySelectorAll('.test-case-item').forEach(item => {
+        document.querySelectorAll('.test-case-item-container').forEach(item => {
             const text = item.textContent.toLowerCase();
-            item.style.display = text.includes(query) ? 'flex' : 'none';
+            item.style.display = text.includes(query) ? '' : 'none';
         });
     });
 

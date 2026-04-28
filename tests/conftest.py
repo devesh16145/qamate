@@ -12,6 +12,8 @@ Provides fixtures for:
 import pytest
 import os
 import json
+import re
+import time
 
 
 # ── Config loading ──
@@ -115,7 +117,15 @@ def pytest_runtest_makereport(item, call):
 
 @pytest.fixture(autouse=True)
 def capture_screenshot_on_failure(page, request, results_dir):
-    """After each test, capture a screenshot if the test failed."""
+    """After each test, capture a screenshot if the test failed.
+    Also stashes the video path for later renaming."""
+    # Stash video path for rename after page close
+    try:
+        if page.video:
+            request.node._video_path = page.video.path()
+    except Exception:
+        pass
+
     yield
     rep = getattr(request.node, "rep_call", None)
     if rep and rep.failed:
@@ -126,6 +136,39 @@ def capture_screenshot_on_failure(page, request, results_dir):
             page.screenshot(path=os.path.join(screenshot_dir, f"{tc_name}_FAILED.png"))
         except Exception:
             pass  # Page may already be closed
+
+
+def _extract_tc_id(node_name):
+    """Extract TC ID from pytest node name. e.g. test_TC_CATALOG_001_... -> TC-CATALOG-001"""
+    tc_name = node_name.split("[")[0]
+    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
+    if match:
+        return match.group(1).replace("_", "-")
+    return tc_name
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    """After all fixtures teardown (page closed), rename video to TC ID."""
+    yield
+    video_path = getattr(item, "_video_path", None)
+    if not video_path:
+        return
+
+    tc_id = _extract_tc_id(item.name)
+    new_path = os.path.join(os.path.dirname(video_path), f"{tc_id}.webm")
+
+    # Wait briefly for video file to be finalized after page close
+    for _ in range(10):
+        if os.path.exists(video_path):
+            break
+        time.sleep(0.3)
+
+    try:
+        if os.path.exists(video_path):
+            os.rename(video_path, new_path)
+    except Exception:
+        pass  # File may be locked or already renamed
 
 # ── Test Data ──
 @pytest.fixture(scope="function")
