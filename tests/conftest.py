@@ -170,13 +170,15 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture(autouse=True)
-def capture_screenshot_on_failure(page, request, results_dir):
+def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
     """After each test, capture a screenshot AND page error text if the test failed.
     Also stashes the video path for later renaming."""
     # Stash video path for rename after page close
+    # In sequential mode, the video belongs to sequential_page, not the default page
+    active_page = sequential_page if sequential_page is not None else page
     try:
-        if page.video:
-            request.node._video_path = page.video.path()
+        if active_page.video:
+            request.node._video_path = active_page.video.path()
     except Exception:
         pass
 
@@ -187,9 +189,9 @@ def capture_screenshot_on_failure(page, request, results_dir):
         screenshot_dir = os.path.join(results_dir, "screenshots")
         os.makedirs(screenshot_dir, exist_ok=True)
 
-        # Capture screenshot
+        # Capture screenshot from the active page
         try:
-            page.screenshot(path=os.path.join(screenshot_dir, f"{tc_name}_FAILED.png"))
+            active_page.screenshot(path=os.path.join(screenshot_dir, f"{tc_name}_FAILED.png"))
         except Exception:
             pass
 
@@ -206,7 +208,7 @@ def capture_screenshot_on_failure(page, request, results_dir):
             errors = []
             for sel in error_selectors:
                 try:
-                    els = page.locator(sel)
+                    els = active_page.locator(sel)
                     for i in range(min(els.count(), 5)):
                         text = els.nth(i).text_content()
                         if text and text.strip():
@@ -216,7 +218,7 @@ def capture_screenshot_on_failure(page, request, results_dir):
 
             # Also capture the full page text for debugging
             try:
-                body_text = page.locator("body").text_content() or ""
+                body_text = active_page.locator("body").text_content() or ""
                 # Extract lines with error-related keywords
                 for line in body_text.split("\n"):
                     line = line.strip()
