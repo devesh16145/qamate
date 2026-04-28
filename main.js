@@ -244,9 +244,11 @@ ipcMain.handle('get-run-artifacts', async (event, runId) => {
   } else {
     runDir = path.join(RESULTS_DIR, runId);
   }
+  console.log('[get-run-artifacts] runId:', runId, '-> runDir:', runDir, 'exists:', fs.existsSync(runDir));
   if (!fs.existsSync(runDir)) return { videos: [], screenshots: [], report: null };
 
   const videosDir = path.join(runDir, 'videos');
+  console.log('[get-run-artifacts] videosDir:', videosDir, 'exists:', fs.existsSync(videosDir));
   const screenshotsDir = path.join(runDir, 'screenshots');
 
   const videos = fs.existsSync(videosDir)
