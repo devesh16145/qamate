@@ -115,6 +115,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         return str.length > len ? str.substring(0, len) + '...' : str;
     }
 
+    function guessFlowId(tcIds) {
+        // Map TC ID prefix to flow folder: TC-CATALOG-001 -> catalog, TC-SIGNIN-001 -> sign_in
+        if (!tcIds.length) return 'catalog';
+        const prefix = tcIds[0].split('-').slice(1, -1).join('-').toLowerCase();
+        const flowMap = { 'catalog': 'catalog', 'signin': 'sign_in' };
+        return flowMap[prefix] || prefix;
+    }
+
     // ── Render History ──
     async function renderHistory() {
         try {
@@ -130,10 +138,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const parts = (run.id || '').split('_');
                 const dateStr = parts[0] || 'Unknown';
                 const timeStr = (parts[1] || '').replace(/-/g, ':');
+
                 item.innerHTML = `
                     <div class="history-info">
                         <strong>${dateStr} ${timeStr}</strong>
-                        <span>${run.status || 'Unknown'}</span>
+                        <span class="history-status">${run.status || 'Unknown'}</span>
                     </div>
                     <div class="history-tc-list">
                         ${(run.tc_ids || []).map(id => `<span class="history-tc-tag">${id}</span>`).join('')}
@@ -141,16 +150,78 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <div class="history-stats">
                         ✅ ${run.passed || 0} | ❌ ${run.failed || 0} | ⏭ ${run.skipped || 0} | ⏱ ${run.duration || '—'}
                     </div>
+                    <div class="history-detail hidden"></div>
                 `;
-                item.onclick = () => {
-                    if (run.folder_path) {
-                        loadArtifacts(run.folder_path);
-                        showResultCard(run);
-                    } else if (run.id) {
-                        // Fallback: construct path from run ID
-                        loadArtifacts(run.id);
-                        showResultCard(run);
+
+                const detailEl = item.querySelector('.history-detail');
+
+                item.onclick = async () => {
+                    // Toggle expand/collapse
+                    const isExpanded = !detailEl.classList.contains('hidden');
+
+                    // Collapse all others
+                    historyList.querySelectorAll('.history-detail').forEach(d => d.classList.add('hidden'));
+
+                    if (isExpanded) {
+                        detailEl.classList.add('hidden');
+                        return;
                     }
+
+                    detailEl.classList.remove('hidden');
+                    detailEl.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px;">Loading...</div>';
+
+                    // Load artifacts
+                    const runPath = run.folder_path || run.id;
+                    if (runPath) loadArtifacts(runPath);
+                    showResultCard(run);
+
+                    // Load test data for this run's TCs
+                    const tcIds = run.tc_ids || [];
+                    const flowId = guessFlowId(tcIds);
+                    const items = tcIds.map(tcId => ({ flowId, tcId }));
+
+                    let html = '';
+                    if (items.length > 0) {
+                        try {
+                            const bulkData = await window.ats.getBulkTcData(items);
+                            html += `<div class="hd-section-title">Test Data</div>`;
+                            for (const [tcId, data] of Object.entries(bulkData)) {
+                                html += `<div class="hd-tc-block">
+                                    <div class="hd-tc-id">${tcId}</div>
+                                    <pre class="hd-tc-json">${JSON.stringify(data, null, 2)}</pre>
+                                </div>`;
+                            }
+                        } catch (e) {
+                            html += `<div style="color:var(--accent-red);font-size:10px;">Error loading data</div>`;
+                        }
+                    }
+
+                    // Check for artifacts inline
+                    try {
+                        const arts = await window.ats.getRunArtifacts(runPath);
+                        if (arts.videos.length > 0) {
+                            html += `<div class="hd-section-title">Videos</div>`;
+                            arts.videos.forEach(v => {
+                                html += `<div class="hd-artifact" data-path="${v.path}">🎬 ${v.name}</div>`;
+                            });
+                        }
+                        if (arts.screenshots.length > 0) {
+                            html += `<div class="hd-section-title">Screenshots</div>`;
+                            arts.screenshots.forEach(s => {
+                                html += `<div class="hd-artifact" data-path="${s.path}">📸 ${s.name}</div>`;
+                            });
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    detailEl.innerHTML = html || '<div style="font-size:11px;color:var(--text-muted);padding:4px;">No data</div>';
+
+                    // Attach click handlers for artifacts
+                    detailEl.querySelectorAll('.hd-artifact').forEach(el => {
+                        el.onclick = (ev) => {
+                            ev.stopPropagation();
+                            window.ats.openFile(el.dataset.path);
+                        };
+                    });
                 };
                 historyList.appendChild(item);
             });
@@ -638,26 +709,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Save template
+    // Save template — use inline input (prompt() doesn't work in Electron)
     tdTemplateSaveBtn.addEventListener('click', async () => {
         const parsed = parseEditorData();
         if (!parsed) return;
 
-        const name = prompt('Template name:');
-        if (!name || !name.trim()) return;
+        // Show inline name input
+        tdStatus.innerHTML = '';
+        const wrapper = document.createElement('span');
+        wrapper.innerHTML = `Name: <input id="td-template-name-input" type="text" placeholder="template name" style="background:rgba(0,0,0,0.3);border:1px solid var(--border-color);color:white;padding:2px 6px;border-radius:3px;font-size:11px;width:100px;outline:none;"> <button style="background:var(--accent-green);border:none;color:white;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;">OK</button> <button style="background:transparent;border:1px solid var(--border-color);color:var(--text-muted);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;">Cancel</button>`;
+        tdStatus.appendChild(wrapper);
+        const nameInput = document.getElementById('td-template-name-input');
+        nameInput.focus();
 
-        const res = await window.ats.saveTemplate({ name: name.trim(), data: parsed });
-        if (res.success) {
-            setTdStatus(`Template "${name.trim()}" saved`, 'saved');
-            addLog(`📋 Template "${name.trim()}" saved`, 'system');
-        } else {
-            setTdStatus('Template save failed: ' + res.error, 'error');
-        }
+        const okBtn = wrapper.querySelector('button:first-of-type');
+        const cancelBtn = wrapper.querySelector('button:last-of-type');
+
+        const doSave = async () => {
+            const name = nameInput.value.trim();
+            if (!name) { setTdStatus('Template name required', 'error'); return; }
+            const res = await window.ats.saveTemplate({ name, data: parsed });
+            if (res.success) {
+                setTdStatus(`Template "${name}" saved`, 'saved');
+                addLog(`📋 Template "${name}" saved`, 'system');
+            } else {
+                setTdStatus('Save failed: ' + res.error, 'error');
+            }
+        };
+
+        okBtn.onclick = doSave;
+        cancelBtn.onclick = () => setTdStatus('');
+        nameInput.onkeydown = (e) => { if (e.key === 'Enter') doSave(); if (e.key === 'Escape') setTdStatus(''); };
     });
 
     // Load template
     let templateDropdown = null;
-    tdTemplateLoadBtn.addEventListener('click', async () => {
+    tdTemplateLoadBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         // Close existing dropdown
         if (templateDropdown) { templateDropdown.remove(); templateDropdown = null; return; }
 
@@ -688,13 +776,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         }
 
-        tdTemplateLoadBtn.parentElement.style.position = 'relative';
-        tdTemplateLoadBtn.parentElement.appendChild(templateDropdown);
-        // Position below the button
+        // Position dropdown relative to the button
+        document.body.appendChild(templateDropdown);
         const rect = tdTemplateLoadBtn.getBoundingClientRect();
-        const parentRect = tdTemplateLoadBtn.parentElement.getBoundingClientRect();
-        templateDropdown.style.right = '0px';
-        templateDropdown.style.top = (tdTemplateLoadBtn.offsetTop + tdTemplateLoadBtn.offsetHeight + 4) + 'px';
+        templateDropdown.style.position = 'fixed';
+        templateDropdown.style.left = (rect.right - 160) + 'px';
+        templateDropdown.style.top = (rect.bottom + 4) + 'px';
     });
 
     // Close template dropdown on outside click
