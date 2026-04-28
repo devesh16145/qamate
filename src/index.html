@@ -114,6 +114,20 @@
                     </div>
                 </div>
 
+                <div id="test-data-section" class="test-data-section hidden">
+                    <div class="test-data-header">
+                        <h3>TEST DATA</h3>
+                        <div class="test-data-actions">
+                            <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
+                            <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Save Template</button>
+                            <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load Template</button>
+                        </div>
+                    </div>
+                    <div id="td-selected-info" class="td-selected-info"></div>
+                    <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
+                    <div id="td-status" class="td-status"></div>
+                </div>
+
                 <div id="artifacts-section" class="artifacts-section hidden">
                     <h3 id="artifacts-title">── ARTIFACTS ──</h3>
                     <div id="artifacts-list" class="artifacts-list">

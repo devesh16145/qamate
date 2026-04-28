@@ -362,3 +362,82 @@ ipcMain.handle('save-tc-data', async (event, { flowId, tcId, data }) => {
   }
 });
 
+// ──────────────────────────────────────
+// IPC: Bulk test data + Templates
+// ──────────────────────────────────────
+ipcMain.handle('get-bulk-tc-data', async (event, items) => {
+  // items = [{flowId, tcId}, ...]
+  const result = {};
+  for (const { flowId, tcId } of items) {
+    try {
+      const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+      if (fs.existsSync(dataFile)) {
+        const data = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
+        result[tcId] = data[tcId] || {};
+      } else {
+        result[tcId] = {};
+      }
+    } catch (e) {
+      result[tcId] = {};
+    }
+  }
+  return result;
+});
+
+ipcMain.handle('save-bulk-tc-data', async (event, items) => {
+  // items = [{flowId, tcId, data}, ...] — group by flowId to avoid file conflicts
+  const byFlow = {};
+  for (const { flowId, tcId, data } of items) {
+    if (!byFlow[flowId]) byFlow[flowId] = {};
+    byFlow[flowId][tcId] = data;
+  }
+  try {
+    for (const [flowId, updates] of Object.entries(byFlow)) {
+      const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+      let allData = {};
+      if (fs.existsSync(dataFile)) {
+        allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
+      }
+      Object.assign(allData, updates);
+      fs.writeFileSync(dataFile, JSON.stringify(allData, null, 4), 'utf-8');
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+const TEMPLATES_DIR = path.join(__dirname, 'templates');
+
+ipcMain.handle('save-template', async (event, { name, data }) => {
+  try {
+    if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
+    const file = path.join(TEMPLATES_DIR, `${name}.json`);
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('load-template', async (event, name) => {
+  try {
+    const file = path.join(TEMPLATES_DIR, `${name}.json`);
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('list-templates', async () => {
+  try {
+    if (!fs.existsSync(TEMPLATES_DIR)) return [];
+    return fs.readdirSync(TEMPLATES_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace('.json', ''));
+  } catch (e) {
+    return [];
+  }
+});
+
