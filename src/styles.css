@@ -551,6 +551,11 @@ body {
     letter-spacing: 1px;
 }
 
+.artifacts-list {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
 .artifact-group-title {
     font-size: 10px;
     text-transform: uppercase;
