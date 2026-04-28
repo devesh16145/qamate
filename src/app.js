@@ -16,9 +16,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const saveSettingsBtn = document.getElementById('save-settings-btn');
     const historyList = document.getElementById('history-list');
     const lastRunCard = document.getElementById('last-run-card');
+    const tdSection = document.getElementById('test-data-section');
+    const tdEditor = document.getElementById('td-editor');
+    const tdSelectedInfo = document.getElementById('td-selected-info');
+    const tdStatus = document.getElementById('td-status');
+    const tdSaveBtn = document.getElementById('td-save-btn');
+    const tdTemplateSaveBtn = document.getElementById('td-template-save-btn');
+    const tdTemplateLoadBtn = document.getElementById('td-template-load-btn');
 
     // ── State ──
     let allFlows = [];
+    let currentTdData = {};  // { tcId: { ...data }, ... }
+    let selectedTcItems = []; // [{flowId, tcId}, ...]
     let config = {};
     let isRunning = false;
     let totalTests = 0;
@@ -561,6 +570,153 @@ document.addEventListener('DOMContentLoaded', async () => {
         btn.addEventListener('click', (e) => {
             e.target.closest('.modal').classList.add('hidden');
         });
+    });
+
+    // ── Test Data Panel ──
+    async function refreshTestDataPanel() {
+        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"][data-tc-id]:checked'));
+        selectedTcItems = checkboxes.map(cb => ({
+            flowId: cb.dataset.module,
+            tcId: cb.dataset.tcId
+        }));
+
+        if (selectedTcItems.length === 0) {
+            tdSection.classList.add('hidden');
+            currentTdData = {};
+            return;
+        }
+
+        tdSection.classList.remove('hidden');
+        tdSelectedInfo.textContent = selectedTcItems.map(t => t.tcId).join(', ');
+
+        try {
+            currentTdData = await window.ats.getBulkTcData(selectedTcItems);
+            tdEditor.value = JSON.stringify(currentTdData, null, 2);
+            setTdStatus('');
+        } catch (e) {
+            setTdStatus('Error loading data: ' + e.message, 'error');
+        }
+    }
+
+    function setTdStatus(msg, type = '') {
+        tdStatus.textContent = msg;
+        tdStatus.className = `td-status ${type}`;
+        if (type === 'saved') {
+            setTimeout(() => { if (tdStatus.textContent === msg) tdStatus.textContent = ''; }, 3000);
+        }
+    }
+
+    function parseEditorData() {
+        try {
+            const parsed = JSON.parse(tdEditor.value);
+            setTdStatus('');
+            return parsed;
+        } catch (e) {
+            setTdStatus('Invalid JSON: ' + e.message, 'error');
+            return null;
+        }
+    }
+
+    // Save button
+    tdSaveBtn.addEventListener('click', async () => {
+        const parsed = parseEditorData();
+        if (!parsed) return;
+
+        const items = selectedTcItems.map(({ flowId, tcId }) => ({
+            flowId,
+            tcId,
+            data: parsed[tcId] || {}
+        }));
+
+        const res = await window.ats.saveBulkTcData(items);
+        if (res.success) {
+            currentTdData = parsed;
+            setTdStatus('Saved', 'saved');
+            addLog('💾 Test data saved for ' + items.length + ' test case(s)', 'system');
+        } else {
+            setTdStatus('Save failed: ' + res.error, 'error');
+        }
+    });
+
+    // Save template
+    tdTemplateSaveBtn.addEventListener('click', async () => {
+        const parsed = parseEditorData();
+        if (!parsed) return;
+
+        const name = prompt('Template name:');
+        if (!name || !name.trim()) return;
+
+        const res = await window.ats.saveTemplate({ name: name.trim(), data: parsed });
+        if (res.success) {
+            setTdStatus(`Template "${name.trim()}" saved`, 'saved');
+            addLog(`📋 Template "${name.trim()}" saved`, 'system');
+        } else {
+            setTdStatus('Template save failed: ' + res.error, 'error');
+        }
+    });
+
+    // Load template
+    let templateDropdown = null;
+    tdTemplateLoadBtn.addEventListener('click', async () => {
+        // Close existing dropdown
+        if (templateDropdown) { templateDropdown.remove(); templateDropdown = null; return; }
+
+        const templates = await window.ats.listTemplates();
+        templateDropdown = document.createElement('div');
+        templateDropdown.className = 'td-template-dropdown';
+
+        if (templates.length === 0) {
+            templateDropdown.innerHTML = '<div class="td-template-empty">No templates saved</div>';
+        } else {
+            templates.forEach(name => {
+                const item = document.createElement('div');
+                item.className = 'td-template-item';
+                item.textContent = name;
+                item.onclick = async () => {
+                    const data = await window.ats.loadTemplate(name);
+                    if (data) {
+                        // Merge template data into current editor
+                        const current = parseEditorData() || {};
+                        const merged = { ...current, ...data };
+                        tdEditor.value = JSON.stringify(merged, null, 2);
+                        setTdStatus(`Loaded template "${name}"`, 'saved');
+                    }
+                    templateDropdown.remove();
+                    templateDropdown = null;
+                };
+                templateDropdown.appendChild(item);
+            });
+        }
+
+        tdTemplateLoadBtn.parentElement.style.position = 'relative';
+        tdTemplateLoadBtn.parentElement.appendChild(templateDropdown);
+        // Position below the button
+        const rect = tdTemplateLoadBtn.getBoundingClientRect();
+        const parentRect = tdTemplateLoadBtn.parentElement.getBoundingClientRect();
+        templateDropdown.style.right = '0px';
+        templateDropdown.style.top = (tdTemplateLoadBtn.offsetTop + tdTemplateLoadBtn.offsetHeight + 4) + 'px';
+    });
+
+    // Close template dropdown on outside click
+    document.addEventListener('click', (e) => {
+        if (templateDropdown && !templateDropdown.contains(e.target) && e.target !== tdTemplateLoadBtn) {
+            templateDropdown.remove();
+            templateDropdown = null;
+        }
+    });
+
+    // Listen for checkbox changes to refresh test data panel
+    flowTree.addEventListener('change', (e) => {
+        if (e.target.type === 'checkbox' && e.target.dataset.tcId) {
+            refreshTestDataPanel();
+        }
+    });
+
+    // Also refresh when select-all/deselect-all is clicked
+    flowTree.addEventListener('click', (e) => {
+        if (e.target.closest('.select-all-btn') || e.target.closest('.deselect-all-btn')) {
+            setTimeout(refreshTestDataPanel, 50);
+        }
     });
 
     // Kick off

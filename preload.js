@@ -16,4 +16,9 @@ contextBridge.exposeInMainWorld('ats', {
   recordTest: (options) => ipcRenderer.invoke('record-test', options),
   getTcData: (options) => ipcRenderer.invoke('get-tc-data', options),
   saveTcData: (options) => ipcRenderer.invoke('save-tc-data', options),
+  getBulkTcData: (items) => ipcRenderer.invoke('get-bulk-tc-data', items),
+  saveBulkTcData: (items) => ipcRenderer.invoke('save-bulk-tc-data', items),
+  saveTemplate: (options) => ipcRenderer.invoke('save-template', options),
+  loadTemplate: (name) => ipcRenderer.invoke('load-template', name),
+  listTemplates: () => ipcRenderer.invoke('list-templates'),
 });
