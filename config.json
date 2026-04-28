@@ -1,0 +1,57 @@
+{
+  "environments": {
+    "dev": {
+      "name": "Development",
+      "base_url": "https://supplier-dev.agrim.app/",
+      "is_default": true
+    },
+    "staging": {
+      "name": "Staging",
+      "base_url": "https://supplier-staging.agrim.app/"
+    }
+  },
+  "users": [
+    {
+      "id": "user_1",
+      "email": "your_email_1@example.com",
+      "password": "your_password_1",
+      "label": "Seller 1"
+    },
+    {
+      "id": "user_2",
+      "email": "your_email_2@example.com",
+      "password": "your_password_2",
+      "label": "Seller 2"
+    },
+    {
+      "id": "user_3",
+      "email": "your_email_3@example.com",
+      "password": "your_password_3",
+      "label": "Seller 3"
+    },
+    {
+      "id": "user_4",
+      "email": "your_email_4@example.com",
+      "password": "your_password_4",
+      "label": "Seller 4"
+    }
+  ],
+  "execution": {
+    "default_mode": "headless",
+    "parallel_workers": 2,
+    "slow_motion_ms": 0,
+    "browser": "chromium",
+    "timeout_ms": 30000
+  },
+  "video": {
+    "enabled": true,
+    "resolution": {
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "screenshots": {
+    "on_every_step": true,
+    "on_failure": true
+  }
+}
