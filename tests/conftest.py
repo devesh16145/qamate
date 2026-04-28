@@ -163,7 +163,7 @@ def pytest_runtest_makereport(item, call):
 
 @pytest.fixture(autouse=True)
 def capture_screenshot_on_failure(page, request, results_dir):
-    """After each test, capture a screenshot if the test failed.
+    """After each test, capture a screenshot AND page error text if the test failed.
     Also stashes the video path for later renaming."""
     # Stash video path for rename after page close
     try:
@@ -175,13 +175,60 @@ def capture_screenshot_on_failure(page, request, results_dir):
     yield
     rep = getattr(request.node, "rep_call", None)
     if rep and rep.failed:
+        tc_name = request.node.name.split("[")[0]
         screenshot_dir = os.path.join(results_dir, "screenshots")
         os.makedirs(screenshot_dir, exist_ok=True)
-        tc_name = request.node.name.split("[")[0]
+
+        # Capture screenshot
         try:
             page.screenshot(path=os.path.join(screenshot_dir, f"{tc_name}_FAILED.png"))
         except Exception:
-            pass  # Page may already be closed
+            pass
+
+        # Capture visible page errors (toasts, alerts, validation errors)
+        try:
+            error_selectors = [
+                '[role="alert"]',
+                '[class*="toast"]',
+                '[class*="error-message"]',
+                '[class*="text-destructive"]',
+                '.text-red-500',
+                '[class*="error"]:visible',
+            ]
+            errors = []
+            for sel in error_selectors:
+                try:
+                    els = page.locator(sel)
+                    for i in range(min(els.count(), 5)):
+                        text = els.nth(i).text_content()
+                        if text and text.strip():
+                            errors.append(f"[{sel}] {text.strip()[:300]}")
+                except Exception:
+                    pass
+
+            # Also capture the full page text for debugging
+            try:
+                body_text = page.locator("body").text_content() or ""
+                # Extract lines with error-related keywords
+                for line in body_text.split("\n"):
+                    line = line.strip()
+                    if line and any(kw in line.lower() for kw in ["error", "fail", "invalid", "required", "cannot", "unable", "denied"]):
+                        if line not in errors:
+                            errors.append(f"[body] {line[:300]}")
+            except Exception:
+                pass
+
+            if errors:
+                error_log_path = os.path.join(screenshot_dir, f"{tc_name}_ERRORS.txt")
+                with open(error_log_path, "w", encoding="utf-8") as f:
+                    f.write(f"Test: {tc_name}\n")
+                    f.write(f"Result: FAILED\n")
+                    f.write(f"Errors found on page:\n")
+                    f.write("=" * 60 + "\n")
+                    for err in errors:
+                        f.write(err + "\n")
+        except Exception:
+            pass
 
 
 def _extract_tc_id(node_name):

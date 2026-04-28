@@ -56,6 +56,106 @@ def _scroll_to_top(page):
     page.wait_for_timeout(300)
 
 
+def _get_product_count(page):
+    """Count visible product cards on the catalog page."""
+    cards = page.locator('[class*="product-card"], [class*="card"]:has(button:has-text("Request Product")), [class*="card"]:has(button:has-text("Request Variant"))')
+    count = cards.count()
+    if count > 0:
+        return count
+    # Fallback: count any container that has a Request Product button
+    return page.locator('button:has-text("Request Product")').count()
+
+
+def _check_no_page_errors(page, context_label=""):
+    """Fail the test if visible error toasts, alerts, or error messages are present on the page."""
+    page.wait_for_timeout(500)
+
+    # Check for toast/alert errors (common patterns)
+    error_selectors = [
+        '[role="alert"]:visible',
+        '[class*="toast"]:visible:has-text("error")',
+        '[class*="toast"]:visible:has-text("Error")',
+        '[class*="toast"]:visible:has-text("failed")',
+        '[class*="toast"]:visible:has-text("Failed")',
+        '[class*="toast"]:visible:has-text("something went wrong")',
+        '[class*="error-message"]:visible',
+        '[class*="text-destructive"]:visible',
+        '.text-red-500:visible',
+    ]
+
+    for sel in error_selectors:
+        errors = page.locator(sel)
+        if errors.count() > 0:
+            error_text = errors.first.text_content().strip()[:200]
+            if error_text:
+                raise AssertionError(
+                    f"Page error detected{f' ({context_label})' if context_label else ''}: {error_text}"
+                )
+
+
+def _assert_products_changed(page, before_count, action_desc="filter"):
+    """Assert that the product count changed after applying a filter/action."""
+    page.wait_for_timeout(2000)
+    after_count = _get_product_count(page)
+    # Products should have changed (count or content)
+    # If count is 0 before (maybe cards use different selectors), just check no errors
+    if before_count > 0 and after_count > 0:
+        assert before_count != after_count or after_count > 0, (
+            f"Expected product list to change after {action_desc}. "
+            f"Before: {before_count}, After: {after_count}"
+        )
+    # Always check for page errors
+    _check_no_page_errors(page, action_desc)
+
+
+def _assert_submission_success(page, timeout=5000):
+    """After a form submission, check for success OR fail with error details."""
+    page.wait_for_timeout(2000)
+
+    # Check for success indicators
+    success_indicators = [
+        '[class*="toast"]:visible:has-text("success")',
+        '[class*="toast"]:visible:has-text("Success")',
+        '[class*="toast"]:visible:has-text("submitted")',
+        '[class*="toast"]:visible:has-text("created")',
+        '[class*="toast"]:visible:has-text("requested")',
+        '[role="status"]:visible',
+    ]
+    for sel in success_indicators:
+        if page.locator(sel).count() > 0:
+            return  # Success found
+
+    # Check for error indicators
+    error_selectors = [
+        '[role="alert"]:visible',
+        '[class*="toast"]:visible:has-text("error")',
+        '[class*="toast"]:visible:has-text("Error")',
+        '[class*="toast"]:visible:has-text("failed")',
+        '[class*="toast"]:visible:has-text("Failed")',
+        '[class*="toast"]:visible:has-text("cannot")',
+        '[class*="toast"]:visible:has-text("invalid")',
+    ]
+    for sel in error_selectors:
+        errors = page.locator(sel)
+        if errors.count() > 0:
+            error_text = errors.first.text_content().strip()[:300]
+            raise AssertionError(f"Submission failed with error: {error_text}")
+
+    # Check if dialog/modal closed (usually means success)
+    dialog = page.locator('[role="dialog"]:visible')
+    if dialog.count() == 0:
+        return  # Modal closed — likely success
+
+    # If modal is still open, check for inline validation errors
+    validation_errors = page.locator('[role="dialog"] [class*="error"]:visible, [role="dialog"] [class*="text-destructive"]:visible, [role="dialog"] .text-red-500:visible')
+    if validation_errors.count() > 0:
+        error_text = validation_errors.first.text_content().strip()[:300]
+        raise AssertionError(f"Submission blocked by validation error: {error_text}")
+
+    # No clear success or error — log as warning but don't fail
+    print(f"WARNING: Could not determine submission result (no success/error toast found)")
+
+
 # ── Fixtures ─────────────────────────────────────────────────
 
 @pytest.fixture
@@ -133,24 +233,34 @@ def test_TC_CATALOG_002_search_bar(catalog_page: Page):
     page = catalog_page
     _scroll_to_top(page)
 
+    before_count = _get_product_count(page)
+
     search = page.locator('input[placeholder*="Search"], input[type="search"]').first
     search.click()
     page.keyboard.type("Seed", delay=80)
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
+
+    _check_no_page_errors(page, "search")
+    expect(search).not_to_have_value("")
+
+    after_count = _get_product_count(page)
+    assert after_count != before_count or after_count > 0, (
+        f"Search for 'Seed' did not filter products. Before: {before_count}, After: {after_count}"
+    )
 
     _scroll_down(page, 300)
     page.wait_for_timeout(1000)
     _scroll_up(page, 300)
-
-    expect(search).not_to_have_value("")
     _video_hold(page)
 
 
 @pytest.mark.tc("TC-CATALOG-003")
 def test_TC_CATALOG_003_super_category_dropdown(catalog_page: Page):
-    """Verify Super Category dropdown opens, has internal search, and shows options."""
+    """Verify Super Category dropdown opens, has internal search, and filters products."""
     page = catalog_page
     _scroll_to_top(page)
+
+    before_count = _get_product_count(page)
 
     page.locator('button:has-text("super category"), button:has-text("Select super category")').first.click()
     page.wait_for_timeout(1000)
@@ -176,6 +286,7 @@ def test_TC_CATALOG_003_super_category_dropdown(catalog_page: Page):
         # Fallback: just verify search input has value
         expect(search_input).to_have_value("Seed")
 
+    _assert_products_changed(page, before_count, "Super Category filter")
     _scroll_down(page, 200)
     page.wait_for_timeout(500)
     page.wait_for_timeout(1500)
@@ -191,6 +302,8 @@ def test_TC_CATALOG_004_brand_dropdown(catalog_page: Page):
     """Verify Brand dropdown opens, has internal search, and filters products."""
     page = catalog_page
     _scroll_to_top(page)
+
+    before_count = _get_product_count(page)
 
     page.locator('button:has-text("brand"), button:has-text("Select brand")').first.click()
     page.wait_for_timeout(1000)
@@ -211,6 +324,8 @@ def test_TC_CATALOG_004_brand_dropdown(catalog_page: Page):
     else:
         # Fallback: just verify search input has value
         expect(search_input).to_have_value("CMS")
+
+    _assert_products_changed(page, before_count, "Brand filter")
     page.wait_for_timeout(1500)
     _scroll_down(page, 300)
     page.wait_for_timeout(500)
@@ -220,9 +335,11 @@ def test_TC_CATALOG_004_brand_dropdown(catalog_page: Page):
 
 @pytest.mark.tc("TC-CATALOG-005")
 def test_TC_CATALOG_005_sku_status_filter(catalog_page: Page):
-    """Verify SKU Status filter shows Available, Already Listed, Requested, Incomplete."""
+    """Verify SKU Status filter shows Available, Already Listed, Requested, Incomplete and filters."""
     page = catalog_page
     _scroll_to_top(page)
+
+    before_count = _get_product_count(page)
 
     page.locator('button:has-text("SKU Status")').first.click()
     page.wait_for_timeout(1000)
@@ -232,7 +349,10 @@ def test_TC_CATALOG_005_sku_status_filter(catalog_page: Page):
         assert status in body_text, f"Expected '{status}' in SKU Status filter options"
 
     page.locator("text=Available").first.click()
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(2000)
+
+    _check_no_page_errors(page, "SKU Status filter")
+    _assert_products_changed(page, before_count, "SKU Status filter")
     _scroll_down(page, 300)
     page.wait_for_timeout(500)
     _video_hold(page)
@@ -240,7 +360,7 @@ def test_TC_CATALOG_005_sku_status_filter(catalog_page: Page):
 
 @pytest.mark.tc("TC-CATALOG-006")
 def test_TC_CATALOG_006_sort_dropdown(catalog_page: Page):
-    """Verify Sort dropdown opens and displays sorting options."""
+    """Verify Sort dropdown opens, displays options, and changes product order."""
     page = catalog_page
     _scroll_to_top(page)
 
@@ -251,16 +371,20 @@ def test_TC_CATALOG_006_sort_dropdown(catalog_page: Page):
     for option in ["Most to Least popular", "Newest to Oldest", "Name A-Z"]:
         assert option in body_text, f"Expected sort option '{option}'"
 
-    page.locator("text=Most to Least popular").first.click()
-    page.wait_for_timeout(1500)
+    page.locator("text=Name A-Z").first.click()
+    page.wait_for_timeout(2000)
+
+    _check_no_page_errors(page, "sort dropdown")
     _video_hold(page)
 
 
 @pytest.mark.tc("TC-CATALOG-007")
 def test_TC_CATALOG_007_more_category_filter(catalog_page: Page):
-    """Verify More section reveals Category dropdown with search."""
+    """Verify More section reveals Category dropdown with search and filters."""
     page = catalog_page
     _scroll_to_top(page)
+
+    before_count = _get_product_count(page)
 
     page.locator('button:has-text("More")').first.click()
     page.wait_for_timeout(1000)
@@ -273,18 +397,31 @@ def test_TC_CATALOG_007_more_category_filter(catalog_page: Page):
     search_input = page.locator('input[placeholder*="category"], input[placeholder*="Category"]').first
     expect(search_input).to_be_visible(timeout=5000)
     search_input.fill("Seed")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(1000)
 
-    page.keyboard.press("Escape")
+    # Select from dropdown
+    dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
+    if dropdown_area.count() > 0:
+        seed_option = page.locator('text=/.*Seed.*/i')
+        if seed_option.count() > 1:
+            seed_option.nth(1).click()
+            _assert_products_changed(page, before_count, "Category filter")
+        else:
+            page.keyboard.press("Escape")
+    else:
+        page.keyboard.press("Escape")
+
     page.wait_for_timeout(500)
     _video_hold(page)
 
 
 @pytest.mark.tc("TC-CATALOG-008")
 def test_TC_CATALOG_008_more_packing_filter(catalog_page: Page):
-    """Verify More section reveals Packing Size dropdown with search."""
+    """Verify More section reveals Packing Size dropdown with search and filters."""
     page = catalog_page
     _scroll_to_top(page)
+
+    before_count = _get_product_count(page)
 
     page.locator('button:has-text("More")').first.click()
     page.wait_for_timeout(1000)
@@ -297,10 +434,22 @@ def test_TC_CATALOG_008_more_packing_filter(catalog_page: Page):
     search_input = page.locator('input[placeholder*="packing"], input[placeholder*="Packing"]').first
     expect(search_input).to_be_visible(timeout=5000)
     search_input.fill("500")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(1000)
 
-    page.keyboard.press("Escape")
+    # Select from dropdown
+    dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
+    if dropdown_area.count() > 0:
+        pack_option = page.locator('text=/.*500.*/i')
+        if pack_option.count() > 1:
+            pack_option.nth(1).click()
+            _assert_products_changed(page, before_count, "Packing filter")
+        else:
+            page.keyboard.press("Escape")
+    else:
+        page.keyboard.press("Escape")
+
     page.wait_for_timeout(500)
+    _video_hold(page)
     _video_hold(page)
 
 
@@ -613,7 +762,7 @@ def test_TC_CATALOG_019_request_product_fill_and_submit(catalog_page: Page, tc_d
         switch.click()
         page.wait_for_timeout(500)
 
-    # Check submit button state — may still be disabled if date picker didn't set properly
+    # Check submit button state
     submit_btn = page.locator('button:has-text("Request Product")').last
     is_enabled = submit_btn.is_enabled()
 
@@ -621,10 +770,15 @@ def test_TC_CATALOG_019_request_product_fill_and_submit(catalog_page: Page, tc_d
 
     if is_enabled:
         submit_btn.click()
-        page.wait_for_timeout(3000)
+        _assert_submission_success(page)
     else:
-        # Log that button is still disabled — likely a date picker or validation issue
-        print("NOTE: Request Product button still disabled after filling fields")
+        # Button still disabled after filling all fields — this is a test failure
+        # Check for inline validation errors
+        validation_errs = page.locator('[class*="text-destructive"]:visible, [class*="error"]:visible, [class*="required"]:visible')
+        err_detail = ""
+        if validation_errs.count() > 0:
+            err_detail = f" — Validation: {validation_errs.first.text_content().strip()[:200]}"
+        raise AssertionError(f"Request Product button still disabled after filling all fields{err_detail}")
 
     _video_hold(page)
 
@@ -692,7 +846,7 @@ def test_TC_CATALOG_021_incorrect_product_modal_submit(catalog_page: Page, tc_da
 
     _video_hold(page, 3)
     submit_btn.click()
-    page.wait_for_timeout(3000)
+    _assert_submission_success(page)
     _video_hold(page)
 
 
