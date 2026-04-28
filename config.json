@@ -13,26 +13,26 @@
   "users": [
     {
       "id": "user_1",
-      "email": "your_email_1@example.com",
-      "password": "your_password_1",
+      "email": "shruti_s@agrim.app",
+      "password": "Agrim@123",
       "label": "Seller 1"
     },
     {
       "id": "user_2",
-      "email": "your_email_2@example.com",
-      "password": "your_password_2",
+      "email": "shruti_srivastav425@agrim.app",
+      "password": "Agrim@123",
       "label": "Seller 2"
     },
     {
       "id": "user_3",
-      "email": "your_email_3@example.com",
-      "password": "your_password_3",
+      "email": "shruti_s@agrim.app",
+      "password": "Agrim@123",
       "label": "Seller 3"
     },
     {
       "id": "user_4",
-      "email": "your_email_4@example.com",
-      "password": "your_password_4",
+      "email": "shruti_srivastav425@agrim.app",
+      "password": "Agrim@123",
       "label": "Seller 4"
     }
   ],
