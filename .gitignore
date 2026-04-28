@@ -16,6 +16,7 @@ node_modules/
 
 # ATS runtime artifacts
 results/
+templates/
 tests/results/
 tests/**/results/
 *_explore*.py

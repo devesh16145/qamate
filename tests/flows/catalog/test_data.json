@@ -1,7 +1,7 @@
 {
     "TC-CATALOG-019": {
         "l": "10",
-        "b": "10",
+        "b": "60",
         "h": "10",
         "hsn": "12345678",
         "mrp": "500",
@@ -10,5 +10,6 @@
     "TC-CATALOG-021": {
         "comment": "The product image is incorrect and needs to be updated."
     },
-    "TC-CATALOG-009": {}
+    "TC-CATALOG-009": {},
+    "TC-CATALOG-018": {}
 }
