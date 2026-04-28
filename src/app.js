@@ -126,15 +126,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                         <strong>${dateStr} ${timeStr}</strong>
                         <span>${run.status || 'Unknown'}</span>
                     </div>
+                    <div class="history-tc-list">
+                        ${(run.tc_ids || []).map(id => `<span class="history-tc-tag">${id}</span>`).join('')}
+                    </div>
                     <div class="history-stats">
-                        ✅ ${run.passed || 0} | ❌ ${run.failed || 0} | ⏱ ${run.duration || '—'}
+                        ✅ ${run.passed || 0} | ❌ ${run.failed || 0} | ⏭ ${run.skipped || 0} | ⏱ ${run.duration || '—'}
                     </div>
                 `;
                 item.onclick = () => {
                     if (run.folder_path) {
-                        const runId = run.folder_path.split(/[/\\]/).pop();
-                        loadArtifacts(runId);
-                        // Show result card for this run
+                        loadArtifacts(run.folder_path);
+                        showResultCard(run);
+                    } else if (run.id) {
+                        // Fallback: construct path from run ID
+                        loadArtifacts(run.id);
                         showResultCard(run);
                     }
                 };
@@ -252,10 +257,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 renderHistory();
                 if (data.summary) {
                     showResultCard(data.summary);
-                    // Load artifacts for this run
                     if (data.summary.folder_path) {
-                        const runId = data.summary.folder_path.split(/[/\\]/).pop();
-                        loadArtifacts(runId);
+                        loadArtifacts(data.summary.folder_path);
                     }
                 }
                 break;
@@ -308,14 +311,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ── Artifacts (videos, screenshots, reports) ──
-    async function loadArtifacts(runId) {
+    async function loadArtifacts(runIdOrPath) {
         const section = document.getElementById('artifacts-section');
         const list = document.getElementById('artifacts-list');
+        const titleEl = document.getElementById('artifacts-title');
         list.innerHTML = '<div class="loading" style="font-size:11px;">Loading...</div>';
         section.classList.remove('hidden');
 
+        // Extract run timestamp for display
+        const runName = runIdOrPath.split(/[/\\]/).pop();
+        titleEl.textContent = `── ARTIFACTS: ${runName.replace(/_/g, ' ')} ──`;
+
         try {
-            const artifacts = await window.ats.getRunArtifacts(runId);
+            const artifacts = await window.ats.getRunArtifacts(runIdOrPath);
             list.innerHTML = '';
 
             if (artifacts.videos.length === 0 && artifacts.screenshots.length === 0 && !artifacts.report) {
