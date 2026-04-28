@@ -333,6 +333,25 @@ body {
     transform: none;
 }
 
+.run-options-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+}
+
+.run-opt-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.run-options-row .control-select {
+    flex: 1;
+    min-width: 0;
+}
+
 .danger-btn {
     background: var(--accent-red);
     color: white;

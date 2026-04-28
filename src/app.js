@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const envSelect = document.getElementById('env-select');
     const browserSelect = document.getElementById('browser-select');
     const zoomSelect = document.getElementById('viewport-select');
+    const userSelect = document.getElementById('user-select');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsModal = document.getElementById('settings-modal');
     const closeModalBtn = document.querySelector('.close-modal');
@@ -236,6 +237,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('mode-status').textContent = `Mode: ${config.execution.default_mode || 'headless'}`;
             document.getElementById('parallel-status').textContent = `Parallel: ${config.execution.parallel_workers || 1} workers`;
         }
+        // Populate user selector
+        if (config.users && config.users.length > 0) {
+            const prev = userSelect.value;
+            userSelect.innerHTML = config.users.map((u, i) =>
+                `<option value="${i}">${u.label || 'User ' + (i+1)} (${u.email})</option>`
+            ).join('');
+            // Restore previous selection if still valid
+            if (prev && parseInt(prev) < config.users.length) {
+                userSelect.value = prev;
+            }
+        }
     }
 
     // ── Search ──
@@ -269,7 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastRunCard.classList.add('hidden');
 
         addLog(`▶ Starting ${selectedTCs.length} test(s)...`, 'system');
-        addLog(`  Environment: ${envSelect.value} | Mode: ${config.execution?.default_mode || 'headless'} | Zoom: ${zoomSelect.value}%`, 'system');
+        addLog(`  Environment: ${envSelect.value} | Mode: ${config.execution?.default_mode || 'headless'} | Zoom: ${zoomSelect.value}% | User: ${config.users?.[userSelect.value]?.label || 'Default'}`, 'system');
 
         const options = {
             tc_ids: selectedTCs,
@@ -277,6 +289,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             mode: config.execution?.default_mode || 'headless',
             parallel: config.execution?.parallel_workers || 1,
             zoom: zoomSelect.value,
+            userIndex: parseInt(userSelect.value) || 0,
         };
 
         try {
