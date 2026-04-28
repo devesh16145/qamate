@@ -66,6 +66,13 @@
                         <label class="run-opt-label">User:</label>
                         <select id="user-select" class="control-select" title="Select user account for test execution"></select>
                     </div>
+                    <div class="run-options-row">
+                        <label class="run-opt-label">Mode:</label>
+                        <select id="exec-mode-select" class="control-select" title="Execution mode">
+                            <option value="sequential">Sequential (1 session)</option>
+                            <option value="parallel">Parallel (multiple workers)</option>
+                        </select>
+                    </div>
                     <div class="progress-section">
                         <div class="progress-bar-container">
                             <div id="progress-bar" class="progress-bar" style="width: 0%"></div>

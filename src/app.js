@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const browserSelect = document.getElementById('browser-select');
     const zoomSelect = document.getElementById('viewport-select');
     const userSelect = document.getElementById('user-select');
+    const execModeSelect = document.getElementById('exec-mode-select');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsModal = document.getElementById('settings-modal');
     const closeModalBtn = document.querySelector('.close-modal');
@@ -248,6 +249,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 userSelect.value = prev;
             }
         }
+        // Update parallel status based on exec mode
+        const execMode = execModeSelect.value;
+        document.getElementById('parallel-status').textContent =
+            execMode === 'parallel' ? `Parallel: ${config.execution?.parallel_workers || 1} workers` : 'Sequential: 1 session';
     }
 
     // ── Search ──
@@ -281,13 +286,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastRunCard.classList.add('hidden');
 
         addLog(`▶ Starting ${selectedTCs.length} test(s)...`, 'system');
-        addLog(`  Environment: ${envSelect.value} | Mode: ${config.execution?.default_mode || 'headless'} | Zoom: ${zoomSelect.value}% | User: ${config.users?.[userSelect.value]?.label || 'Default'}`, 'system');
+        addLog(`  Environment: ${envSelect.value} | Mode: ${execModeSelect.value} | Zoom: ${zoomSelect.value}% | User: ${config.users?.[userSelect.value]?.label || 'Default'}`, 'system');
 
         const options = {
             tc_ids: selectedTCs,
             env: envSelect.value,
             mode: config.execution?.default_mode || 'headless',
-            parallel: config.execution?.parallel_workers || 1,
+            execMode: execModeSelect.value,
+            parallel: execModeSelect.value === 'parallel' ? (config.execution?.parallel_workers || 1) : 1,
             zoom: zoomSelect.value,
             userIndex: parseInt(userSelect.value) || 0,
         };
@@ -810,6 +816,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target.type === 'checkbox' && e.target.dataset.tcId) {
             refreshTestDataPanel();
         }
+    });
+
+    // Update status bar when exec mode changes
+    execModeSelect.addEventListener('change', () => {
+        const execMode = execModeSelect.value;
+        document.getElementById('parallel-status').textContent =
+            execMode === 'parallel' ? `Parallel: ${config.execution?.parallel_workers || 1} workers` : 'Sequential: 1 session';
     });
 
     // Also refresh when select-all/deselect-all is clicked
