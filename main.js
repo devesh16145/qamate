@@ -201,6 +201,13 @@ ipcMain.handle('open-folder', async (event, folderPath) => {
   }
 });
 
+ipcMain.handle('open-file', async (event, filePath) => {
+  if (filePath) {
+    const abs = path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
+    shell.openPath(abs);
+  }
+});
+
 // ──────────────────────────────────────
 // IPC: Run history
 // ──────────────────────────────────────
@@ -224,6 +231,39 @@ ipcMain.handle('get-run-history', async () => {
     } catch (e) { /* ignore corrupt metadata */ }
     return { id: run, ...meta };
   });
+});
+
+// ──────────────────────────────────────
+// IPC: Get run artifacts (videos, screenshots, report)
+// ──────────────────────────────────────
+ipcMain.handle('get-run-artifacts', async (event, runId) => {
+  const runDir = path.join(RESULTS_DIR, runId);
+  if (!fs.existsSync(runDir)) return { videos: [], screenshots: [], report: null };
+
+  const videosDir = path.join(runDir, 'videos');
+  const screenshotsDir = path.join(runDir, 'screenshots');
+
+  const videos = fs.existsSync(videosDir)
+    ? fs.readdirSync(videosDir)
+        .filter(f => f.endsWith('.webm'))
+        .map(f => ({ name: f.replace('.webm', ''), path: path.join(videosDir, f) }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
+  const screenshots = fs.existsSync(screenshotsDir)
+    ? fs.readdirSync(screenshotsDir)
+        .filter(f => f.endsWith('.png'))
+        .map(f => ({ name: f.replace('_FAILED.png', ''), path: path.join(screenshotsDir, f) }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
+  const reportFile = fs.readdirSync(runDir).find(f => f.endsWith('.xlsx'));
+  const report = reportFile ? path.join(runDir, reportFile) : null;
+
+  const junitFile = fs.readdirSync(runDir).find(f => f.endsWith('.xml'));
+  const junit = junitFile ? path.join(runDir, junitFile) : null;
+
+  return { videos, screenshots, report, junit, folder: runDir };
 });
 
 // ──────────────────────────────────────

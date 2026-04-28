@@ -131,7 +131,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </div>
                 `;
                 item.onclick = () => {
-                    if (run.folder_path) window.ats.openFolder(run.folder_path);
+                    if (run.folder_path) {
+                        const runId = run.folder_path.split(/[/\\]/).pop();
+                        loadArtifacts(runId);
+                        // Show result card for this run
+                        showResultCard(run);
+                    }
                 };
                 historyList.appendChild(item);
             });
@@ -247,6 +252,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 renderHistory();
                 if (data.summary) {
                     showResultCard(data.summary);
+                    // Load artifacts for this run
+                    if (data.summary.folder_path) {
+                        const runId = data.summary.folder_path.split(/[/\\]/).pop();
+                        loadArtifacts(runId);
+                    }
                 }
                 break;
 
@@ -295,6 +305,72 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('open-folder-btn').onclick = () => {
             if (summary.folder_path) window.ats.openFolder(summary.folder_path);
         };
+    }
+
+    // ── Artifacts (videos, screenshots, reports) ──
+    async function loadArtifacts(runId) {
+        const section = document.getElementById('artifacts-section');
+        const list = document.getElementById('artifacts-list');
+        list.innerHTML = '<div class="loading" style="font-size:11px;">Loading...</div>';
+        section.classList.remove('hidden');
+
+        try {
+            const artifacts = await window.ats.getRunArtifacts(runId);
+            list.innerHTML = '';
+
+            if (artifacts.videos.length === 0 && artifacts.screenshots.length === 0 && !artifacts.report) {
+                list.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">No artifacts found</div>';
+                return;
+            }
+
+            // Videos
+            if (artifacts.videos.length > 0) {
+                const title = document.createElement('div');
+                title.className = 'artifact-group-title';
+                title.textContent = `Videos (${artifacts.videos.length})`;
+                list.appendChild(title);
+
+                artifacts.videos.forEach(v => {
+                    const item = document.createElement('div');
+                    item.className = 'artifact-item';
+                    item.innerHTML = `<span class="artifact-icon">🎬</span><span class="artifact-name">${v.name}</span>`;
+                    item.onclick = () => window.ats.openFile(v.path);
+                    list.appendChild(item);
+                });
+            }
+
+            // Screenshots (failures)
+            if (artifacts.screenshots.length > 0) {
+                const title = document.createElement('div');
+                title.className = 'artifact-group-title';
+                title.textContent = `Failed Screenshots (${artifacts.screenshots.length})`;
+                list.appendChild(title);
+
+                artifacts.screenshots.forEach(s => {
+                    const item = document.createElement('div');
+                    item.className = 'artifact-item fail-artifact';
+                    item.innerHTML = `<span class="artifact-icon">📸</span><span class="artifact-name">${s.name}</span>`;
+                    item.onclick = () => window.ats.openFile(s.path);
+                    list.appendChild(item);
+                });
+            }
+
+            // Report
+            if (artifacts.report) {
+                const title = document.createElement('div');
+                title.className = 'artifact-group-title';
+                title.textContent = 'Report';
+                list.appendChild(title);
+
+                const item = document.createElement('div');
+                item.className = 'artifact-item report-artifact';
+                item.innerHTML = `<span class="artifact-icon">📊</span><span class="artifact-name">Excel Report</span>`;
+                item.onclick = () => window.ats.openFile(artifacts.report);
+                list.appendChild(item);
+            }
+        } catch (err) {
+            list.innerHTML = `<div style="font-size:11px;color:var(--accent-red);">Error: ${err.message}</div>`;
+        }
     }
 
     // ── Settings Modal ──

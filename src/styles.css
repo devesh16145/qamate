@@ -512,6 +512,63 @@ body {
     color: var(--text-muted);
 }
 
+/* Artifacts Section */
+.artifacts-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.artifacts-section h3 {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+}
+
+.artifact-group-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    margin: 10px 0 6px 0;
+}
+
+.artifact-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.artifact-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.artifact-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.artifact-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+}
+
+.artifact-item.pass-artifact .artifact-name { color: var(--accent-green); }
+.artifact-item.fail-artifact .artifact-name { color: var(--accent-red); }
+.artifact-item.report-artifact .artifact-name { color: var(--accent-amber); }
+
 /* Modals */
 .modal {
     position: fixed;
