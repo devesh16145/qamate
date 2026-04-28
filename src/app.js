@@ -257,9 +257,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 renderHistory();
                 if (data.summary) {
                     showResultCard(data.summary);
-                    if (data.summary.folder_path) {
-                        loadArtifacts(data.summary.folder_path);
-                    }
+                    // Delay artifact loading slightly to ensure video rename completes
+                    setTimeout(() => {
+                        if (data.summary.folder_path) {
+                            loadArtifacts(data.summary.folder_path);
+                        }
+                    }, 2000);
                 }
                 break;
 
@@ -325,6 +328,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const artifacts = await window.ats.getRunArtifacts(runIdOrPath);
             list.innerHTML = '';
+
+            addLog(`📦 Loaded ${artifacts.videos.length} videos, ${artifacts.screenshots.length} screenshots`, 'system');
 
             if (artifacts.videos.length === 0 && artifacts.screenshots.length === 0 && !artifacts.report) {
                 list.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">No artifacts found</div>';
