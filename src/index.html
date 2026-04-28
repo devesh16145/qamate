@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agrim ATS - Automated Testing System</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-section">
+                <div class="logo-icon">🧪</div>
+                <h1>AGRIM ATS</h1>
+            </div>
+            <div class="header-controls">
+                <select id="env-select" class="control-select">
+                    <option value="dev">Development</option>
+                    <option value="staging">Staging</option>
+                </select>
+                <select id="browser-select" class="control-select">
+                    <option value="chromium">Chromium</option>
+                    <option value="firefox">Firefox</option>
+                    <option value="webkit">WebKit</option>
+                </select>
+                <select id="viewport-select" class="control-select" title="Browser zoom level">
+                    <option value="100">100% Zoom</option>
+                    <option value="80">80% Zoom</option>
+                    <option value="75">75% Zoom</option>
+                    <option value="60">60% Zoom</option>
+                </select>
+                <button id="settings-btn" class="icon-btn">⚙️ Settings</button>
+            </div>
+        </header>
+
+        <main class="app-content">
+            <!-- Left Panel: Flow Selector -->
+            <aside class="side-panel flow-panel">
+                <div class="panel-header">
+                    <h2>TEST FLOWS</h2>
+                    <div style="display:flex; gap:10px;">
+                        <button id="record-test-btn" class="secondary-btn">⏺ Record Test</button>
+                    </div>
+                    <div class="search-box" style="margin-top: 10px;">
+                        <input type="text" id="flow-search" placeholder="🔍 Search test cases...">
+                    </div>
+                </div>
+                <div id="flow-tree" class="flow-tree">
+                    <!-- Flows will be injected here -->
+                    <div class="loading">Loading flows...</div>
+                </div>
+            </aside>
+
+            <!-- Center Panel: Execution -->
+            <section class="main-panel execution-panel">
+                <div class="execution-controls">
+                    <div class="btn-group">
+                        <button id="run-btn" class="primary-btn">▶ RUN SELECTED</button>
+                        <button id="stop-btn" class="danger-btn" disabled>⏹ STOP</button>
+                    </div>
+                    <div class="progress-section">
+                        <div class="progress-bar-container">
+                            <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                        </div>
+                        <span id="progress-text">0% Completed (0/0)</span>
+                    </div>
+                </div>
+
+                <div class="log-section">
+                    <div class="panel-header">
+                        <h2>LIVE LOG</h2>
+                    </div>
+                    <div id="log-console" class="log-console">
+                        <div class="log-entry system">ATS System Ready. Select test cases and click Run.</div>
+                    </div>
+                </div>
+
+                <div class="status-bar">
+                    <span id="parallel-status">Parallel: 4 workers</span>
+                    <span id="mode-status">Mode: Headless</span>
+                </div>
+            </section>
+
+            <!-- Right Panel: Results -->
+            <aside class="side-panel results-panel">
+                <div class="panel-header">
+                    <h2>RESULTS</h2>
+                </div>
+                
+                <div id="last-run-card" class="result-card hidden">
+                    <div class="run-time" id="last-run-time">Last Run: Just now</div>
+                    <div class="stats-grid">
+                        <div class="stat-item passed">
+                            <span class="stat-val" id="stat-passed">0</span>
+                            <span class="stat-label">Passed</span>
+                        </div>
+                        <div class="stat-item failed">
+                            <span class="stat-val" id="stat-failed">0</span>
+                            <span class="stat-label">Failed</span>
+                        </div>
+                        <div class="stat-item skipped">
+                            <span class="stat-val" id="stat-skipped">0</span>
+                            <span class="stat-label">Skipped</span>
+                        </div>
+                    </div>
+                    <div class="duration-info">⏱ Duration: <span id="run-duration">0s</span></div>
+                    <div class="card-actions">
+                        <button id="view-report-btn" class="secondary-btn">📊 View Report</button>
+                        <button id="open-folder-btn" class="secondary-btn">📁 Open Folder</button>
+                    </div>
+                </div>
+
+                <div class="history-section">
+                    <h3>── HISTORY ──</h3>
+                    <div id="history-list" class="history-list">
+                        <!-- History items injected here -->
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group">
+                    <h3>Execution</h3>
+                    <div class="setting-item">
+                        <label>Default Mode</label>
+                        <select id="setting-mode">
+                            <option value="headless">Headless (Fast)</option>
+                            <option value="headed">Headed (Visible)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>Parallel Workers</label>
+                        <input type="number" id="setting-workers" min="1" max="8" value="4">
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <h3>User Credentials</h3>
+                    <div id="users-config-list">
+                        <!-- User inputs injected here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-settings-btn" class="primary-btn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Record Test Modal -->
+    <div id="record-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h2>Record New Test</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <label>Module / Flow</label>
+                    <select id="record-flow">
+                        <!-- Populated dynamically -->
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label>Test Case ID</label>
+                    <input type="text" id="record-tc-id" placeholder="e.g. TC-CATALOG-005">
+                </div>
+                <div class="setting-item">
+                    <label>Description</label>
+                    <input type="text" id="record-desc" placeholder="e.g. Verify item request">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="start-record-btn" class="primary-btn">Start Recording</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configure Data Modal -->
+    <div id="data-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Configure Test Data</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="data-tc-label" style="margin-bottom: 15px; font-weight: 500; color: var(--primary);"></p>
+                <div id="data-fields-container">
+                    <!-- Data fields injected here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-data-btn" class="primary-btn">Save Data</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

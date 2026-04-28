@@ -1,0 +1,32 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Playwright
+playwright-report/
+test-results/
+*.png
+*.webm
+
+# Node
+node_modules/
+
+# ATS runtime artifacts
+results/
+tests/results/
+tests/**/results/
+*_explore*.py
+_patch_*.py
+test_spawn.js
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

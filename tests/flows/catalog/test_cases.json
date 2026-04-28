@@ -1,0 +1,332 @@
+[
+    {
+        "tc_id": "TC-CATALOG-001",
+        "module": "Catalog",
+        "description": "Verify Catalog page loads with search bar, all filter dropdowns, and product cards",
+        "preconditions": "Seller is logged in with valid credentials",
+        "steps": [
+            "Log in with valid credentials",
+            "Navigate to /listing/catalog",
+            "Verify search bar visible",
+            "Verify Super Category dropdown visible",
+            "Verify Brand dropdown visible",
+            "Verify SKU Status filter visible",
+            "Verify Sort dropdown visible",
+            "Verify product cards present"
+        ],
+        "expected_result": "Catalog page loads with search bar, 4 filter dropdowns, and product cards"
+    },
+    {
+        "tc_id": "TC-CATALOG-002",
+        "module": "Catalog",
+        "description": "Verify search bar filters products in real-time by Brand, Product Name, or Category",
+        "preconditions": "Seller is on Catalog page with products available",
+        "steps": [
+            "Click search bar",
+            "Type a product keyword (e.g. Seed)",
+            "Wait for filtering",
+            "Scroll down and up to verify results",
+            "Verify search input has value"
+        ],
+        "expected_result": "Search bar filters products in real-time. Results update as you type."
+    },
+    {
+        "tc_id": "TC-CATALOG-003",
+        "module": "Catalog",
+        "description": "Verify Super Category dropdown opens, has internal search, and shows category options",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click Super Category dropdown",
+            "Verify search input appears inside dropdown",
+            "Type a category name in the search",
+            "Verify options appear after search",
+            "Scroll through options",
+            "Select an option"
+        ],
+        "expected_result": "Super Category dropdown opens with search input. Typing filters the list. Selecting an option filters products."
+    },
+    {
+        "tc_id": "TC-CATALOG-004",
+        "module": "Catalog",
+        "description": "Verify Brand dropdown opens, has internal search, and filters products by brand",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click Brand dropdown",
+            "Verify search input appears",
+            "Type a brand name to search",
+            "Verify brand options appear",
+            "Select a brand",
+            "Scroll to verify filtered products"
+        ],
+        "expected_result": "Brand dropdown opens with search. Selecting a brand filters the product list accordingly."
+    },
+    {
+        "tc_id": "TC-CATALOG-005",
+        "module": "Catalog",
+        "description": "Verify SKU Status filter shows all status options (Available, Already Listed, Requested, Incomplete)",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click SKU Status filter",
+            "Verify 'Available' option exists",
+            "Verify 'Already Listed' option exists",
+            "Verify 'Requested' option exists",
+            "Verify 'Incomplete' option exists",
+            "Click 'Available' to filter"
+        ],
+        "expected_result": "SKU Status filter shows 4 options. Clicking one filters products by that status."
+    },
+    {
+        "tc_id": "TC-CATALOG-006",
+        "module": "Catalog",
+        "description": "Verify Sort dropdown opens and displays all sorting options (Popular, Recently Added, Product Name, etc.)",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click Sort dropdown",
+            "Verify 'Popular' option exists",
+            "Verify 'Recently Added' option exists",
+            "Verify 'Product Name' option exists",
+            "Click 'Popular' to sort"
+        ],
+        "expected_result": "Sort dropdown shows all sorting options. Selecting one reorders the product list."
+    },
+    {
+        "tc_id": "TC-CATALOG-007",
+        "module": "Catalog",
+        "description": "Verify More section reveals Category dropdown with internal search",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click 'More' button",
+            "Verify Category dropdown appears",
+            "Click Category dropdown",
+            "Verify search input appears",
+            "Type a category name to search"
+        ],
+        "expected_result": "More section reveals Category dropdown. It has an internal search input that filters options."
+    },
+    {
+        "tc_id": "TC-CATALOG-008",
+        "module": "Catalog",
+        "description": "Verify More section reveals Packing Size dropdown with internal search",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click 'More' button",
+            "Verify Packing Size dropdown appears",
+            "Click Packing dropdown",
+            "Verify search input appears",
+            "Type a packing size to search"
+        ],
+        "expected_result": "More section reveals Packing Size dropdown. It has an internal search input."
+    },
+    {
+        "tc_id": "TC-CATALOG-009",
+        "module": "Catalog",
+        "description": "Verify All Products and Requested tabs toggle correctly",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Verify 'All Products' tab visible",
+            "Verify 'Requested' tab visible",
+            "Click 'Requested' tab",
+            "Scroll to verify content changes",
+            "Click back to 'All Products' tab"
+        ],
+        "expected_result": "Both tabs visible. Toggling between them changes the displayed product list."
+    },
+    {
+        "tc_id": "TC-CATALOG-010",
+        "module": "Catalog",
+        "description": "Verify catalog page scrolls smoothly and product cards persist after scrolling",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Scroll down 3 times (500px each)",
+            "Scroll back up 3 times",
+            "Verify product cards still visible"
+        ],
+        "expected_result": "Page scrolls smoothly. Product cards remain visible and interactive after scrolling."
+    },
+    {
+        "tc_id": "TC-CATALOG-011",
+        "module": "Catalog",
+        "description": "Verify Card Type 1 (Addable) has '+' button that opens Add Product Modal",
+        "preconditions": "Seller is on Catalog page with at least one addable product",
+        "steps": [
+            "Find a product card with '+' button",
+            "Click the '+' button",
+            "Verify Add Product modal opens"
+        ],
+        "expected_result": "Clicking '+' on an addable card opens the Add Product modal. (Skips if no addable card exists.)"
+    },
+    {
+        "tc_id": "TC-CATALOG-012",
+        "module": "Catalog",
+        "description": "Verify Card Type 2 (Manage Listing) button opens Edit Product Modal",
+        "preconditions": "Seller has at least one listed product",
+        "steps": [
+            "Find a product card with 'Manage Listing' button",
+            "Click 'Manage Listing'",
+            "Verify Edit Product modal opens"
+        ],
+        "expected_result": "Clicking 'Manage Listing' opens the Edit Product modal. (Skips if no listed card exists.)"
+    },
+    {
+        "tc_id": "TC-CATALOG-013",
+        "module": "Catalog",
+        "description": "Verify Card Type 3 (Incomplete) has 'Request Product' button that opens Request Product Modal",
+        "preconditions": "Seller is on Catalog page with incomplete products",
+        "steps": [
+            "Find a product card with 'Request Product' button",
+            "Click 'Request Product'",
+            "Verify Request Product modal opens",
+            "Verify HSN Code field visible",
+            "Verify Your Price field visible",
+            "Close modal"
+        ],
+        "expected_result": "Clicking 'Request Product' opens the modal with HSN Code, Your Price, and other required fields."
+    },
+    {
+        "tc_id": "TC-CATALOG-014",
+        "module": "Catalog",
+        "description": "Verify Card Type 4 (Requested) shows 'Requested' status badge",
+        "preconditions": "Seller has at least one requested product",
+        "steps": [
+            "Scroll through catalog",
+            "Find a card with 'Requested' badge"
+        ],
+        "expected_result": "At least one product card shows a 'Requested' status badge."
+    },
+    {
+        "tc_id": "TC-CATALOG-015",
+        "module": "Catalog",
+        "description": "Verify Card Type 5 (Item Blocked) shows blocked/OOS status",
+        "preconditions": "Seller has at least one blocked/OOS product",
+        "steps": [
+            "Check for 'Blocked', 'OOS', or 'Out of Stock' text on page"
+        ],
+        "expected_result": "Blocked/OOS cards show appropriate status text. (Skips if none found.)"
+    },
+    {
+        "tc_id": "TC-CATALOG-016",
+        "module": "Catalog",
+        "description": "Verify 'Incorrect?' link on product cards opens the Incorrect Product Modal with all fields",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click 'Incorrect?' on a product card",
+            "Verify modal opens",
+            "Verify textarea for comment visible",
+            "Verify 'Select Issue' dropdown visible",
+            "Verify 'Request Change' button visible",
+            "Close modal"
+        ],
+        "expected_result": "Incorrect Product modal opens with issue dropdown, comment textarea, and Request Change button."
+    },
+    {
+        "tc_id": "TC-CATALOG-017",
+        "module": "Catalog",
+        "description": "Verify 'Request Variant' link opens a modal with form fields",
+        "preconditions": "Seller is on Catalog page",
+        "steps": [
+            "Click 'Request Variant' on a product card",
+            "Verify modal opens",
+            "Verify input fields present",
+            "Close modal"
+        ],
+        "expected_result": "Request Variant modal opens with pre-filled form fields from the parent product."
+    },
+    {
+        "tc_id": "TC-CATALOG-018",
+        "module": "Catalog",
+        "description": "Verify Request Product modal shows all required fields (Master Pack, Dead Weight, L/B/H, HSN, Image, MRP, Your Price, Expiry, In Stock)",
+        "preconditions": "Seller opens Request Product modal",
+        "steps": [
+            "Open Request Product modal",
+            "Verify Master Pack input",
+            "Verify Dead Weight input",
+            "Verify L, B, H inputs",
+            "Verify HSN Code input",
+            "Verify file upload input",
+            "Verify Price (MRP) input",
+            "Verify Your Price input",
+            "Verify Expiry date picker",
+            "Verify In Stock toggle",
+            "Verify Request Product submit button",
+            "Close modal"
+        ],
+        "expected_result": "All fields from the PRD are present in the Request Product modal."
+    },
+    {
+        "tc_id": "TC-CATALOG-019",
+        "module": "Catalog",
+        "description": "Verify Request Product modal — fill all required fields (dimensions, HSN, image, MRP, price, expiry) and submit",
+        "preconditions": "Seller opens Request Product modal",
+        "steps": [
+            "Open Request Product modal",
+            "Fill L, B, H dimensions",
+            "Fill HSN Code",
+            "Upload test image",
+            "Fill MRP (Price)",
+            "Fill Your Price",
+            "Set Expiry date (future)",
+            "Ensure In Stock toggle is on",
+            "Verify Request Product button is enabled",
+            "Click submit",
+            "Verify modal closes or redirects"
+        ],
+        "expected_result": "After filling all required fields, the Request Product button enables. Clicking submit processes the request."
+    },
+    {
+        "tc_id": "TC-CATALOG-020",
+        "module": "Catalog",
+        "description": "Verify Request Variant modal shows pre-filled fields and form inputs",
+        "preconditions": "Seller opens Request Variant modal",
+        "steps": [
+            "Open Request Variant modal",
+            "Verify form fields present",
+            "Verify inputs have values (pre-filled from parent)",
+            "Close modal"
+        ],
+        "expected_result": "Request Variant modal opens with pre-filled fields inherited from the parent product."
+    },
+    {
+        "tc_id": "TC-CATALOG-021",
+        "module": "Catalog",
+        "description": "Verify Incorrect Product modal — select issue type, add comment, and submit",
+        "preconditions": "Seller opens Incorrect Product modal",
+        "steps": [
+            "Open Incorrect Product modal",
+            "Click 'Select an option' dropdown",
+            "Select an issue type (e.g. Image)",
+            "Fill comment in textarea",
+            "Verify Request Change button is enabled",
+            "Click submit"
+        ],
+        "expected_result": "After selecting issue and adding comment, the Request Change button enables and submission succeeds."
+    },
+    {
+        "tc_id": "TC-CATALOG-022",
+        "module": "Catalog",
+        "description": "Verify Add/Edit Product modal opens from Manage Listing and contains HSN, MRP, Your Price fields",
+        "preconditions": "Seller has at least one listed product",
+        "steps": [
+            "Click 'Manage Listing' on a product card",
+            "Verify modal opens",
+            "Verify HSN field present",
+            "Verify MRP field present",
+            "Verify Your Price field present",
+            "Close modal"
+        ],
+        "expected_result": "Add/Edit Product modal opens with HSN, MRP, Your Price, and other fields. (Skips if no listed product.)"
+    },
+    {
+        "tc_id": "TC-CATALOG-023",
+        "module": "Catalog",
+        "description": "Verify Create New Product modal opens from 'Could not find your product?' section with all fields",
+        "preconditions": "Seller scrolls to find the section (appears after every 10 items)",
+        "steps": [
+            "Scroll down to find 'Could not find your product?' section",
+            "Click 'Create New Product'",
+            "Verify modal opens",
+            "Verify Brand, Product Name, Packing, HSN, MRP, Your Price fields present",
+            "Close modal"
+        ],
+        "expected_result": "Create New Product modal opens with all required fields. (Skips if section not found.)"
+    }
+]

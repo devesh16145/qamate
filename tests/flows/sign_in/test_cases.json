@@ -1,0 +1,29 @@
+[
+  {
+    "tc_id": "TC-SIGNIN-001",
+    "module": "Sign In",
+    "description": "Verify Sign In page loads with all required UI elements",
+    "preconditions": "Application is deployed and accessible",
+    "steps": [
+      "Navigate to Sign In page",
+      "Check Email ID field is visible",
+      "Check Password field is visible",
+      "Check Sign In button is visible"
+    ],
+    "expected_result": "All three elements are visible on the page"
+  },
+  {
+    "tc_id": "TC-SIGNIN-002",
+    "module": "Sign In",
+    "description": "Verify Sign In button remains disabled until both Email and Password fields are filled",
+    "preconditions": "User is on Sign In page",
+    "steps": [
+      "Verify Sign In button is disabled when fields are empty",
+      "Enter email only",
+      "Verify button is still disabled",
+      "Enter password",
+      "Verify button is now enabled"
+    ],
+    "expected_result": "Sign In button is disabled when either field is empty, and enabled only when both fields are filled"
+  }
+]
