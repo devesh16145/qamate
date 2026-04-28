@@ -172,6 +172,37 @@ body {
 .module-title {
     font-size: 14px;
     font-weight: 600;
+    flex: 1;
+}
+
+.module-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.select-all-btn, .deselect-all-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+}
+
+.select-all-btn:hover {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--accent-green);
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+.deselect-all-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--accent-red);
+    border-color: rgba(239, 68, 68, 0.3);
 }
 
 .test-case-list {
@@ -179,15 +210,25 @@ body {
     margin-top: 4px;
 }
 
+.test-case-item-container {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 4px 8px 4px 0;
+    gap: 8px;
+}
+
 .test-case-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     padding: 6px 8px;
     font-size: 13px;
     color: var(--text-secondary);
     cursor: pointer;
     border-radius: 4px;
+    flex: 1;
+    min-width: 0;
 }
 
 .test-case-item:hover {
@@ -197,6 +238,56 @@ body {
 
 .test-case-item input[type="checkbox"] {
     accent-color: var(--accent-green);
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.tc-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.tc-id {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-green);
+    font-family: 'Consolas', 'Courier New', monospace;
+    letter-spacing: 0.3px;
+}
+
+.tc-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+.test-case-item:hover .tc-desc {
+    color: var(--text-primary);
+}
+
+.config-data-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+
+.config-data-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
 }
 
 /* Execution Panel */
