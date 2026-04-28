@@ -59,8 +59,20 @@ def _scroll_to_top(page):
 # ── Fixtures ─────────────────────────────────────────────────
 
 @pytest.fixture
-def catalog_page(page, test_user, base_url):
-    """Log in and navigate to the Catalog page."""
+def catalog_page(page, test_user, base_url, sequential_page):
+    """Log in and navigate to the Catalog page.
+    In sequential mode, reuses the session-scoped page (already logged in).
+    In parallel mode, logs in per test."""
+    if sequential_page is not None:
+        # Sequential mode: reuse session, just navigate to catalog
+        sequential_page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
+        sequential_page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
+            state="visible", timeout=20000
+        )
+        sequential_page.wait_for_timeout(1000)
+        return sequential_page
+
+    # Parallel mode: login per test
     _login(page, test_user, base_url)
     page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
     page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(

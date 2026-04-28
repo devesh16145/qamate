@@ -108,6 +108,42 @@ def browser_type_launch_args(browser_type_launch_args):
     }
 
 
+@pytest.fixture(scope="session")
+def sequential_page(browser_type, browser_type_launch_args, browser_context_args, test_user, base_url):
+    """Session-scoped page for sequential mode — login once, reuse for all tests.
+    Returns None when not in sequential mode (tests fall back to per-test login)."""
+    if os.environ.get("ATS_EXEC_MODE") != "sequential":
+        yield None
+        return
+
+    browser = browser_type.launch(**browser_type_launch_args)
+    ctx_args = {k: v for k, v in browser_context_args.items() if k != "record_video_dir"}
+    ctx_args["record_video_dir"] = browser_context_args.get("record_video_dir", "")
+    context = browser.new_context(**ctx_args)
+    page = context.new_page()
+    page.set_default_timeout(30000)
+    page.set_default_navigation_timeout(30000)
+
+    # Login once
+    page.goto(base_url + "login", wait_until="domcontentloaded")
+    email_field = page.locator('input[placeholder*="Email"], input[type="email"]').first
+    password_field = page.locator('input[type="password"]').first
+    sign_in_button = page.locator('button:has-text("Sign In"), button[type="submit"]').first
+    email_field.wait_for(state="visible", timeout=15000)
+    email_field.click()
+    page.keyboard.type(test_user["email"], delay=50)
+    password_field.click()
+    page.keyboard.type(test_user["password"], delay=50)
+    sign_in_button.click()
+    page.wait_for_timeout(3000)
+    page.wait_for_load_state("domcontentloaded")
+
+    yield page
+
+    context.close()
+    browser.close()
+
+
 @pytest.fixture(autouse=True)
 def set_page_timeouts(page):
     """Set generous but finite timeouts on every page to prevent infinite hangs."""

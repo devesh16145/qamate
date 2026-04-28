@@ -31,7 +31,7 @@ def log(message):
     emit({"event": "log", "message": str(message)})
 
 
-def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0):
+def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec_mode="sequential"):
     """Execute selected test cases via pytest subprocess."""
     start_time = time.time()
 
@@ -84,8 +84,8 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0):
     if mode != "headless":
         cmd.append("--headed")
 
-    # Don't use parallel if only 1 test or 1 worker
-    if parallel > 1 and len(tc_ids) > 1:
+    # Parallel only in parallel mode with multiple tests
+    if exec_mode == "parallel" and parallel > 1 and len(tc_ids) > 1:
         cmd.extend(["-n", str(min(parallel, len(tc_ids)))])
 
     log(f"Command: {' '.join(cmd)}")
@@ -105,6 +105,9 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0):
 
     # User index for test credentials
     test_env["ATS_USER_INDEX"] = str(user_index)
+
+    # Execution mode (sequential / parallel)
+    test_env["ATS_EXEC_MODE"] = exec_mode
 
     # ── Run pytest ──
     try:
@@ -239,17 +242,19 @@ def main():
             ats_root = data.get("ats_root", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             zoom = data.get("zoom", "")
             user_index = data.get("userIndex", 0)
+            exec_mode = data.get("execMode", "sequential")
 
             if not tc_ids:
                 log("ERROR: No test cases provided")
                 continue
 
             log(f"Received run command: {len(tc_ids)} tests")
+            log(f"Execution mode: {exec_mode}")
             if zoom:
                 log(f"Browser zoom: {zoom}%")
             log(f"User index: {user_index}")
             # Run in a thread so stdin remains readable (for stop commands)
-            t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index), daemon=True)
+            t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index, exec_mode), daemon=True)
             t.start()
 
         elif action == "stop":

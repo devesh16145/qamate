@@ -156,6 +156,7 @@ ipcMain.handle('run-tests', async (event, options) => {
     tc_ids: options.tc_ids,
     env: options.env,
     mode: options.mode,
+    execMode: options.execMode || 'sequential',
     parallel: options.parallel,
     zoom: options.zoom || '',
     userIndex: options.userIndex ?? 0,
