@@ -17,9 +17,8 @@ from playwright.sync_api import expect, Page
 
 # ── Helpers ──────────────────────────────────────────────────
 
-def _login(page, ats_config, base_url):
-    """Log in using the first configured seller account."""
-    user = ats_config["users"][0]
+def _login(page, test_user, base_url):
+    """Log in using the selected user account."""
     page.goto(base_url + "login", wait_until="domcontentloaded")
 
     email_field = page.locator('input[placeholder*="Email"], input[type="email"]').first
@@ -28,9 +27,9 @@ def _login(page, ats_config, base_url):
 
     email_field.wait_for(state="visible", timeout=15000)
     email_field.click()
-    page.keyboard.type(user["email"], delay=50)
+    page.keyboard.type(test_user["email"], delay=50)
     password_field.click()
-    page.keyboard.type(user["password"], delay=50)
+    page.keyboard.type(test_user["password"], delay=50)
     sign_in_button.click()
 
     page.wait_for_timeout(3000)
@@ -60,9 +59,9 @@ def _scroll_to_top(page):
 # ── Fixtures ─────────────────────────────────────────────────
 
 @pytest.fixture
-def catalog_page(page, ats_config, base_url):
+def catalog_page(page, test_user, base_url):
     """Log in and navigate to the Catalog page."""
-    _login(page, ats_config, base_url)
+    _login(page, test_user, base_url)
     page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
     page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
         state="visible", timeout=20000

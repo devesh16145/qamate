@@ -40,6 +40,16 @@ def ats_config():
 
 
 @pytest.fixture(scope="session")
+def test_user(ats_config):
+    """The selected user account for this test run."""
+    user_index = int(os.environ.get("ATS_USER_INDEX", "0"))
+    users = ats_config.get("users", [])
+    if user_index < len(users):
+        return users[user_index]
+    return users[0] if users else {"email": "", "password": "", "label": "Default"}
+
+
+@pytest.fixture(scope="session")
 def base_url(ats_config):
     """Base URL for the active environment (dev/staging)."""
     env_name = os.environ.get("ATS_ENV", "dev")

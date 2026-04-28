@@ -31,7 +31,7 @@ def log(message):
     emit({"event": "log", "message": str(message)})
 
 
-def run_tests(tc_ids, env, mode, parallel, ats_root, zoom=""):
+def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0):
     """Execute selected test cases via pytest subprocess."""
     start_time = time.time()
 
@@ -102,6 +102,9 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom=""):
     # Browser zoom override from UI selector
     if zoom:
         test_env["ATS_ZOOM"] = zoom
+
+    # User index for test credentials
+    test_env["ATS_USER_INDEX"] = str(user_index)
 
     # ── Run pytest ──
     try:
@@ -235,6 +238,7 @@ def main():
             parallel = data.get("parallel", 1)
             ats_root = data.get("ats_root", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             zoom = data.get("zoom", "")
+            user_index = data.get("userIndex", 0)
 
             if not tc_ids:
                 log("ERROR: No test cases provided")
@@ -243,8 +247,9 @@ def main():
             log(f"Received run command: {len(tc_ids)} tests")
             if zoom:
                 log(f"Browser zoom: {zoom}%")
+            log(f"User index: {user_index}")
             # Run in a thread so stdin remains readable (for stop commands)
-            t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom), daemon=True)
+            t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index), daemon=True)
             t.start()
 
         elif action == "stop":
