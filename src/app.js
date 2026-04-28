@@ -326,10 +326,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         titleEl.textContent = `── ARTIFACTS: ${runName.replace(/_/g, ' ')} ──`;
 
         try {
+            addLog(`📦 Loading artifacts for: ${runIdOrPath}`, 'system');
             const artifacts = await window.ats.getRunArtifacts(runIdOrPath);
             list.innerHTML = '';
 
-            addLog(`📦 Loaded ${artifacts.videos.length} videos, ${artifacts.screenshots.length} screenshots`, 'system');
+            addLog(`📦 Found ${artifacts.videos.length} videos, ${artifacts.screenshots.length} screenshots`, 'system');
 
             if (artifacts.videos.length === 0 && artifacts.screenshots.length === 0 && !artifacts.report) {
                 list.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">No artifacts found</div>';
