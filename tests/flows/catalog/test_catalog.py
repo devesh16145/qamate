@@ -576,35 +576,25 @@ def test_TC_CATALOG_019_request_product_fill_and_submit(catalog_page: Page, tc_d
     yp.click()
     yp.fill(tc_data.get("your_price", "450"))
 
-    # Expiry — click the Month/Year button to open calendar
+    # Expiry date — react-day-picker calendar
+    # Step 1: Open the calendar
     page.locator('button:has-text("Month/Year"), button:has-text("Expiry")').first.click()
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(1000)
 
-    # Try selecting year via native <select> (if present)
-    year_select = page.locator('[aria-label*="Year"], select').first
-    if year_select.count() > 0 and year_select.is_visible():
-        try:
-            year_select.select_option("2027")
-        except Exception:
-            pass
-        page.wait_for_timeout(500)
-
-    # Navigate calendar — look for forward arrow to move to future months
-    for _ in range(6):
-        fwd = page.locator('[aria-label*="next"], [aria-label*="Next"], button:has-text(">"), button:has-text("›")').first
-        if fwd.count() > 0 and fwd.is_visible():
-            fwd.click()
-            page.wait_for_timeout(300)
-
-    # Click any available date cell
-    date_cells = page.locator('td button:not([disabled]), [role="gridcell"] button:not([disabled])')
-    if date_cells.count() > 0:
-        date_cells.last.click()
-        page.wait_for_timeout(500)
-
-    # Click outside the picker to close it
-    page.locator('[role="dialog"]').first.click(position={"x": 10, "y": 10})
+    # Step 2: Select future month via dropdown (values: 0=Jan..11=Dec)
+    month_select = page.locator('select[aria-label="Choose the Month"]').first
+    month_select.select_option("8")  # September (0-indexed)
     page.wait_for_timeout(500)
+
+    # Step 3: Select future year via dropdown
+    year_select = page.locator('select[aria-label="Choose the Year"]').first
+    year_select.select_option("2027")
+    page.wait_for_timeout(500)
+
+    # Step 4: Click a date cell in the grid (any non-disabled day)
+    date_cell = page.locator('td button:not([disabled])').first
+    date_cell.click()
+    page.wait_for_timeout(1000)
 
     # Ensure In Stock is on
     switch = page.locator('[role="switch"]').first
