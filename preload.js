@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('ats', {
   getHistory: () => ipcRenderer.invoke('get-run-history'),
   openReport: (path) => ipcRenderer.invoke('open-report', path),
   openFolder: (path) => ipcRenderer.invoke('open-folder', path),
+  openFile: (path) => ipcRenderer.invoke('open-file', path),
+  getRunArtifacts: (runId) => ipcRenderer.invoke('get-run-artifacts', runId),
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   recordTest: (options) => ipcRenderer.invoke('record-test', options),
