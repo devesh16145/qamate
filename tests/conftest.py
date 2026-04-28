@@ -68,15 +68,13 @@ def results_dir():
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args, results_dir):
-    """Extend playwright browser context with video recording and zoom-scaled viewport."""
-    video_dir = os.path.join(results_dir, "videos")
-    os.makedirs(video_dir, exist_ok=True)
-
-    # Zoom: scale viewport so more content fits at lower zoom levels.
-    # e.g. 75% zoom → viewport = 1280/0.75 × 720/0.75 = 1707×960
-    #      60% zoom → viewport = 1280/0.60 × 720/0.60 = 2133×1200
+    """Extend playwright browser context with zoom-scaled viewport.
+    In sequential mode, skip video here — sequential_page handles its own recording."""
     base_w, base_h = 1280, 720
+
+    # Zoom calculation
     zoom_str = os.environ.get("ATS_ZOOM", "")
+    vp_w, vp_h = base_w, base_h
     if zoom_str:
         try:
             zoom_pct = int(zoom_str)
@@ -84,19 +82,22 @@ def browser_context_args(browser_context_args, results_dir):
                 factor = zoom_pct / 100.0
                 vp_w = round(base_w / factor)
                 vp_h = round(base_h / factor)
-            else:
-                vp_w, vp_h = base_w, base_h
         except ValueError:
-            vp_w, vp_h = base_w, base_h
-    else:
-        vp_w, vp_h = base_w, base_h
+            pass
 
-    return {
+    args = {
         **browser_context_args,
         "viewport": {"width": vp_w, "height": vp_h},
-        "record_video_dir": video_dir,
-        "record_video_size": {"width": base_w, "height": base_h},
     }
+
+    # In sequential mode, don't add video — sequential_page handles it
+    if os.environ.get("ATS_EXEC_MODE") != "sequential":
+        video_dir = os.path.join(results_dir, "videos")
+        os.makedirs(video_dir, exist_ok=True)
+        args["record_video_dir"] = video_dir
+        args["record_video_size"] = {"width": base_w, "height": base_h}
+
+    return args
 
 
 @pytest.fixture(scope="session")
@@ -109,7 +110,7 @@ def browser_type_launch_args(browser_type_launch_args):
 
 
 @pytest.fixture(scope="session")
-def sequential_page(browser_type, browser_type_launch_args, browser_context_args, test_user, base_url):
+def sequential_page(browser_type, browser_type_launch_args, browser_context_args, test_user, base_url, results_dir):
     """Session-scoped page for sequential mode — login once, reuse for all tests.
     Returns None when not in sequential mode (tests fall back to per-test login)."""
     if os.environ.get("ATS_EXEC_MODE") != "sequential":
@@ -117,8 +118,15 @@ def sequential_page(browser_type, browser_type_launch_args, browser_context_args
         return
 
     browser = browser_type.launch(**browser_type_launch_args)
-    ctx_args = {k: v for k, v in browser_context_args.items() if k != "record_video_dir"}
-    ctx_args["record_video_dir"] = browser_context_args.get("record_video_dir", "")
+
+    # Set up video recording for the sequential session
+    video_dir = os.path.join(results_dir, "videos")
+    os.makedirs(video_dir, exist_ok=True)
+
+    ctx_args = {k: v for k, v in browser_context_args.items() if k not in ("record_video_dir", "record_video_size")}
+    ctx_args["record_video_dir"] = video_dir
+    ctx_args["record_video_size"] = {"width": 1280, "height": 720}
+
     context = browser.new_context(**ctx_args)
     page = context.new_page()
     page.set_default_timeout(30000)
