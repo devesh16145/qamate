@@ -11,29 +11,49 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Header -->
+        <!-- Top Action Bar: consolidated header + execution controls -->
         <header class="app-header">
-            <div class="logo-section">
-                <div class="logo-icon">🧪</div>
-                <h1>AGRIM ATS</h1>
+            <div class="header-left">
+                <div class="logo-section">
+                    <div class="logo-icon">🧪</div>
+                    <h1>AGRIM ATS</h1>
+                </div>
+                <div class="header-divider"></div>
+                <button id="run-btn" class="primary-btn">▶ RUN</button>
+                <button id="stop-btn" class="danger-btn" disabled>⏹ STOP</button>
+                <div class="header-divider"></div>
+                <label class="header-label">User</label>
+                <select id="user-select" class="control-select compact" title="Select user account"></select>
+                <label class="header-label">Mode</label>
+                <select id="exec-mode-select" class="control-select compact" title="Execution mode">
+                    <option value="sequential">Sequential</option>
+                    <option value="parallel">Parallel</option>
+                </select>
             </div>
-            <div class="header-controls">
-                <select id="env-select" class="control-select">
-                    <option value="dev">Development</option>
+            <div class="header-right">
+                <div class="progress-inline">
+                    <div class="progress-bar-container">
+                        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <span id="progress-text" class="progress-label">0/0</span>
+                </div>
+                <div class="header-divider"></div>
+                <select id="env-select" class="control-select compact">
+                    <option value="dev">Dev</option>
                     <option value="staging">Staging</option>
                 </select>
-                <select id="browser-select" class="control-select">
+                <select id="browser-select" class="control-select compact">
                     <option value="chromium">Chromium</option>
                     <option value="firefox">Firefox</option>
                     <option value="webkit">WebKit</option>
                 </select>
-                <select id="viewport-select" class="control-select" title="Browser zoom level">
-                    <option value="100">100% Zoom</option>
-                    <option value="80">80% Zoom</option>
-                    <option value="75">75% Zoom</option>
-                    <option value="60">60% Zoom</option>
+                <select id="viewport-select" class="control-select compact" title="Browser zoom level">
+                    <option value="100">100%</option>
+                    <option value="80">80%</option>
+                    <option value="75">75%</option>
+                    <option value="60">60%</option>
                 </select>
-                <button id="settings-btn" class="icon-btn">⚙️ Settings</button>
+                <button id="settings-btn" class="icon-btn compact">⚙️</button>
             </div>
         </header>
 
@@ -41,12 +61,12 @@
             <!-- Left Panel: Flow Selector -->
             <aside class="side-panel flow-panel">
                 <div class="panel-header">
-                    <h2>TEST FLOWS</h2>
-                    <div style="display:flex; gap:10px;">
-                        <button id="record-test-btn" class="secondary-btn">⏺ Record Test</button>
-                    </div>
-                    <div class="search-box" style="margin-top: 10px;">
-                        <input type="text" id="flow-search" placeholder="🔍 Search test cases...">
+                    <h2>TEST CASES</h2>
+                    <div class="panel-header-actions">
+                        <button id="record-test-btn" class="secondary-btn small">⏺ Record</button>
+                        <div class="search-box">
+                            <input type="text" id="flow-search" placeholder="🔍 Search...">
+                        </div>
                     </div>
                 </div>
                 <div id="flow-tree" class="flow-tree">
@@ -55,44 +75,16 @@
                 </div>
             </aside>
 
-            <!-- Center Panel: Execution -->
-            <section class="main-panel execution-panel">
-                <div class="execution-controls">
-                    <div class="btn-group">
-                        <button id="run-btn" class="primary-btn">▶ RUN SELECTED</button>
-                        <button id="stop-btn" class="danger-btn" disabled>⏹ STOP</button>
-                    </div>
-                    <div class="run-options-row">
-                        <label class="run-opt-label">User:</label>
-                        <select id="user-select" class="control-select" title="Select user account for test execution"></select>
-                    </div>
-                    <div class="run-options-row">
-                        <label class="run-opt-label">Mode:</label>
-                        <select id="exec-mode-select" class="control-select" title="Execution mode">
-                            <option value="sequential">Sequential (1 session)</option>
-                            <option value="parallel">Parallel (multiple workers)</option>
-                        </select>
-                    </div>
-                    <div class="progress-section">
-                        <div class="progress-bar-container">
-                            <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
-                        </div>
-                        <span id="progress-text">0% Completed (0/0)</span>
-                    </div>
-                </div>
-
+            <!-- Center Panel: Live Log (full height) -->
+            <section class="main-panel">
                 <div class="log-section">
                     <div class="panel-header">
                         <h2>LIVE LOG</h2>
+                        <span id="parallel-status" class="log-status-badge">Sequential</span>
                     </div>
                     <div id="log-console" class="log-console">
                         <div class="log-entry system">ATS System Ready. Select test cases and click Run.</div>
                     </div>
-                </div>
-
-                <div class="status-bar">
-                    <span id="parallel-status">Parallel: 4 workers</span>
-                    <span id="mode-status">Mode: Headless</span>
                 </div>
             </section>
 
@@ -100,56 +92,59 @@
             <aside class="side-panel results-panel">
                 <div class="panel-header">
                     <h2>RESULTS</h2>
-                </div>
-                
-                <div id="last-run-card" class="result-card hidden">
-                    <div class="run-time" id="last-run-time">Last Run: Just now</div>
-                    <div class="stats-grid">
-                        <div class="stat-item passed">
-                            <span class="stat-val" id="stat-passed">0</span>
-                            <span class="stat-label">Passed</span>
-                        </div>
-                        <div class="stat-item failed">
-                            <span class="stat-val" id="stat-failed">0</span>
-                            <span class="stat-label">Failed</span>
-                        </div>
-                        <div class="stat-item skipped">
-                            <span class="stat-val" id="stat-skipped">0</span>
-                            <span class="stat-label">Skipped</span>
-                        </div>
-                    </div>
-                    <div class="duration-info">⏱ Duration: <span id="run-duration">0s</span></div>
-                    <div class="card-actions">
-                        <button id="view-report-btn" class="secondary-btn">📊 View Report</button>
-                        <button id="open-folder-btn" class="secondary-btn">📁 Open Folder</button>
-                    </div>
+                    <span id="mode-status" class="log-status-badge">Headless</span>
                 </div>
 
-                <div id="test-data-section" class="test-data-section hidden">
-                    <div class="test-data-header">
-                        <h3>TEST DATA</h3>
-                        <div class="test-data-actions">
-                            <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
-                            <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Save Template</button>
-                            <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load Template</button>
+                <div class="results-scroll">
+                    <div id="last-run-card" class="result-card hidden">
+                        <div class="run-time" id="last-run-time">Last Run: Just now</div>
+                        <div class="stats-grid">
+                            <div class="stat-item passed">
+                                <span class="stat-val" id="stat-passed">0</span>
+                                <span class="stat-label">Passed</span>
+                            </div>
+                            <div class="stat-item failed">
+                                <span class="stat-val" id="stat-failed">0</span>
+                                <span class="stat-label">Failed</span>
+                            </div>
+                            <div class="stat-item skipped">
+                                <span class="stat-val" id="stat-skipped">0</span>
+                                <span class="stat-label">Skipped</span>
+                            </div>
+                        </div>
+                        <div class="duration-info">⏱ Duration: <span id="run-duration">0s</span></div>
+                        <div class="card-actions">
+                            <button id="view-report-btn" class="secondary-btn small">📊 View Report</button>
+                            <button id="open-folder-btn" class="secondary-btn small">📁 Open Folder</button>
                         </div>
                     </div>
-                    <div id="td-selected-info" class="td-selected-info"></div>
-                    <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
-                    <div id="td-status" class="td-status"></div>
-                </div>
 
-                <div id="artifacts-section" class="artifacts-section hidden">
-                    <h3 id="artifacts-title">── ARTIFACTS ──</h3>
-                    <div id="artifacts-list" class="artifacts-list">
-                        <!-- Artifacts injected here -->
+                    <div id="test-data-section" class="test-data-section hidden">
+                        <div class="test-data-header">
+                            <h3>TEST DATA</h3>
+                            <div class="test-data-actions">
+                                <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
+                                <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Template</button>
+                                <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load</button>
+                            </div>
+                        </div>
+                        <div id="td-selected-info" class="td-selected-info"></div>
+                        <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
+                        <div id="td-status" class="td-status"></div>
                     </div>
-                </div>
 
-                <div class="history-section">
-                    <h3>── HISTORY ──</h3>
-                    <div id="history-list" class="history-list">
-                        <!-- History items injected here -->
+                    <div id="artifacts-section" class="artifacts-section hidden">
+                        <h3 id="artifacts-title">ARTIFACTS</h3>
+                        <div id="artifacts-list" class="artifacts-list">
+                            <!-- Artifacts injected here -->
+                        </div>
+                    </div>
+
+                    <div class="history-section">
+                        <h3>HISTORY</h3>
+                        <div id="history-list" class="history-list">
+                            <!-- History items injected here -->
+                        </div>
                     </div>
                 </div>
             </aside>
