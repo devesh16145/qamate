@@ -75,7 +75,7 @@
                 </div>
             </aside>
 
-            <!-- Center Panel: Live Log (full height) -->
+            <!-- Center Panel: Live Log + Test Data -->
             <section class="main-panel">
                 <div class="log-section">
                     <div class="panel-header">
@@ -85,6 +85,20 @@
                     <div id="log-console" class="log-console">
                         <div class="log-entry system">ATS System Ready. Select test cases and click Run.</div>
                     </div>
+                </div>
+
+                <div id="test-data-section" class="test-data-section hidden">
+                    <div class="test-data-header">
+                        <h3>TEST DATA</h3>
+                        <div class="test-data-actions">
+                            <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
+                            <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Template</button>
+                            <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load</button>
+                        </div>
+                    </div>
+                    <div id="td-selected-info" class="td-selected-info"></div>
+                    <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
+                    <div id="td-status" class="td-status"></div>
                 </div>
             </section>
 
@@ -117,20 +131,6 @@
                             <button id="view-report-btn" class="secondary-btn small">📊 View Report</button>
                             <button id="open-folder-btn" class="secondary-btn small">📁 Open Folder</button>
                         </div>
-                    </div>
-
-                    <div id="test-data-section" class="test-data-section hidden">
-                        <div class="test-data-header">
-                            <h3>TEST DATA</h3>
-                            <div class="test-data-actions">
-                                <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
-                                <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Template</button>
-                                <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load</button>
-                            </div>
-                        </div>
-                        <div id="td-selected-info" class="td-selected-info"></div>
-                        <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
-                        <div id="td-status" class="td-status"></div>
                     </div>
 
                     <div id="artifacts-section" class="artifacts-section hidden">
