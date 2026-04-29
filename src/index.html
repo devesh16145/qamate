@@ -227,6 +227,147 @@
         </div>
     </div>
 
+    <!-- Recording Review Modal (post-capture: steps + assertions + criteria) -->
+    <div id="review-modal" class="modal hidden">
+        <div class="modal-content review-modal-content">
+            <div class="modal-header">
+                <h2 id="review-modal-title">Review Recording</h2>
+                <button class="close-modal" data-close="review-modal">&times;</button>
+            </div>
+            <div class="modal-body review-body">
+                <!-- Top: Preconditions / Expected Result -->
+                <div class="review-meta-row">
+                    <div class="review-meta-field">
+                        <label>Preconditions</label>
+                        <input type="text" id="review-preconditions" placeholder="e.g. User is logged in, Catalog page loaded">
+                    </div>
+                    <div class="review-meta-field">
+                        <label>Expected Result</label>
+                        <input type="text" id="review-expected" placeholder="e.g. Product saved successfully, toast appears">
+                    </div>
+                </div>
+
+                <!-- Steps list -->
+                <div class="review-section-label">Captured Steps</div>
+                <div id="review-steps-list" class="review-steps-list">
+                    <!-- Steps populated dynamically -->
+                </div>
+
+                <!-- Per-step assertion builder (hidden, shown on click) -->
+                <div id="review-assertion-builder" class="review-assertion-builder hidden">
+                    <div class="review-ab-header">Add Assertion after Step <span id="review-ab-step-num">1</span></div>
+                    <div class="review-ab-form">
+                        <div class="review-ab-row">
+                            <label>Type</label>
+                            <select id="review-ab-type">
+                                <option value="element_visible">Element Visible</option>
+                                <option value="element_not_visible">Element Not Visible</option>
+                                <option value="element_contains_text">Element Contains Text</option>
+                                <option value="element_has_text">Element Has Text</option>
+                                <option value="element_has_value">Element Has Value</option>
+                                <option value="element_enabled">Element Enabled</option>
+                                <option value="element_disabled">Element Disabled</option>
+                                <option value="element_count">Element Count</option>
+                                <option value="page_contains_text">Page Contains Text</option>
+                                <option value="page_not_contains_text">Page Not Contains Text</option>
+                                <option value="url_contains">URL Contains</option>
+                                <option value="url_equals">URL Equals</option>
+                                <option value="title_contains">Title Contains</option>
+                                <option value="no_error_toast">No Error Toast</option>
+                                <option value="success_toast">Success Toast</option>
+                                <option value="toast_contains">Toast Contains Text</option>
+                                <option value="wait_ms">Wait (ms)</option>
+                            </select>
+                        </div>
+                        <div class="review-ab-row" id="review-ab-selector-row">
+                            <label>CSS Selector / Locator</label>
+                            <input type="text" id="review-ab-selector" placeholder="e.g. [class*=success], .toast, #submit-btn">
+                        </div>
+                        <div class="review-ab-row" id="review-ab-value-row">
+                            <label>Expected Value / Text</label>
+                            <input type="text" id="review-ab-value" placeholder="e.g. Saved successfully">
+                        </div>
+                        <div class="review-ab-row" id="review-ab-count-row" style="display:none">
+                            <label>Count</label>
+                            <select id="review-ab-count-op">
+                                <option value=">=">>=</option>
+                                <option value=">">></option>
+                                <option value="==">=</option>
+                                <option value="<"><</option>
+                                <option value="<="><=</option>
+                            </select>
+                            <input type="number" id="review-ab-count" value="1" style="width:60px">
+                        </div>
+                        <div class="review-ab-row" id="review-ab-ms-row" style="display:none">
+                            <label>Milliseconds</label>
+                            <input type="number" id="review-ab-ms" value="2000" style="width:100px">
+                        </div>
+                        <div class="review-ab-row">
+                            <label>Description (for code comment)</label>
+                            <input type="text" id="review-ab-desc" placeholder="e.g. Success toast should appear">
+                        </div>
+                        <div class="review-ab-actions">
+                            <button id="review-ab-add" class="primary-btn small">Add Assertion</button>
+                            <button id="review-ab-cancel" class="secondary-btn small">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Assertions list -->
+                <div class="review-section-label" id="review-assertions-label" style="display:none">Assertions</div>
+                <div id="review-assertions-list" class="review-assertions-list"></div>
+
+                <!-- Success / Failure Criteria -->
+                <div class="review-section-label">Success / Failure Criteria (runs at end of test)</div>
+                <div id="review-criteria-list" class="review-assertions-list"></div>
+                <button id="review-add-criteria-btn" class="secondary-btn small">+ Add Criteria</button>
+
+                <!-- Criteria builder (reuses assertion builder form, hidden) -->
+                <div id="review-criteria-builder" class="review-assertion-builder hidden">
+                    <div class="review-ab-header">Add Success/Failure Criteria</div>
+                    <div class="review-ab-form">
+                        <div class="review-ab-row">
+                            <label>Type</label>
+                            <select id="review-cb-type">
+                                <option value="element_visible">Element Visible</option>
+                                <option value="element_not_visible">Element Not Visible</option>
+                                <option value="element_contains_text">Element Contains Text</option>
+                                <option value="page_contains_text">Page Contains Text</option>
+                                <option value="page_not_contains_text">Page Not Contains Text</option>
+                                <option value="url_contains">URL Contains</option>
+                                <option value="url_equals">URL Equals</option>
+                                <option value="title_contains">Title Contains</option>
+                                <option value="no_error_toast">No Error Toast</option>
+                                <option value="success_toast">Success Toast</option>
+                                <option value="toast_contains">Toast Contains Text</option>
+                            </select>
+                        </div>
+                        <div class="review-ab-row" id="review-cb-selector-row">
+                            <label>CSS Selector / Locator</label>
+                            <input type="text" id="review-cb-selector" placeholder="e.g. [class*=success]">
+                        </div>
+                        <div class="review-ab-row" id="review-cb-value-row">
+                            <label>Expected Value / Text</label>
+                            <input type="text" id="review-cb-value" placeholder="e.g. Order confirmed">
+                        </div>
+                        <div class="review-ab-row">
+                            <label>Description</label>
+                            <input type="text" id="review-cb-desc" placeholder="e.g. Success message should appear">
+                        </div>
+                        <div class="review-ab-actions">
+                            <button id="review-cb-add" class="primary-btn small">Add Criteria</button>
+                            <button id="review-cb-cancel" class="secondary-btn small">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="review-save-btn" class="primary-btn">Save Test</button>
+                <button id="review-cancel-btn" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Configure Data Modal -->
     <div id="data-modal" class="modal hidden">
         <div class="modal-content">

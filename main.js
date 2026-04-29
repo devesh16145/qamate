@@ -279,6 +279,8 @@ ipcMain.handle('get-run-artifacts', async (event, runId) => {
 // ──────────────────────────────────────
 // IPC: Record Test & Data Management
 // ──────────────────────────────────────
+// IPC: Record Test (Enhanced — returns structured steps for review)
+// ──────────────────────────────────────
 ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) => {
   return new Promise((resolve, reject) => {
     try {
@@ -287,7 +289,10 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) 
       const baseUrl = config.environments[env]?.base_url || 'https://supplier-dev.agrim.app/';
 
       const tempFile = path.join(__dirname, 'temp_recording.py');
-      
+
+      // Clean up any previous temp file
+      try { fs.unlinkSync(tempFile); } catch (e) { /* ok */ }
+
       const codegenProcess = spawn(VENV_PYTHON, [
         '-m', 'playwright', 'codegen',
         '--target', 'python-pytest',
@@ -298,40 +303,96 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) 
         env: { ...process.env }
       });
 
+      // Live polling: send step count updates to renderer every 2s
+      let pollTimer = setInterval(() => {
+        try {
+          if (fs.existsSync(tempFile)) {
+            const content = fs.readFileSync(tempFile, 'utf8');
+            const actionCount = (content.match(/\.(click|fill|type|press|select_option|check|goto|dblclick|hover)\(/g) || []).length;
+            event.sender.send('recording-progress', { steps: actionCount });
+          }
+        } catch (e) { /* ignore polling errors */ }
+      }, 2000);
+
       codegenProcess.on('close', (code) => {
+        clearInterval(pollTimer);
+
         if (code !== 0) {
-          reject(new Error(`Codegen exited with code ${code}`));
+          resolve({ status: 'error', message: `Codegen exited with code ${code}` });
           return;
         }
 
+        // Parse the recorded steps into structured JSON
         const PARSER_SCRIPT = path.join(__dirname, 'engine', 'recorder_parser.py');
         const parserProcess = spawn(VENV_PYTHON, [
-          PARSER_SCRIPT,
-          tcId,
-          description,
-          flowId,
-          __dirname
+          PARSER_SCRIPT, 'parse', __dirname
         ], { cwd: __dirname });
 
         let out = '';
         parserProcess.stdout.on('data', d => out += d.toString());
-        
+
         parserProcess.on('close', (pcode) => {
           if (pcode === 0) {
             try {
               const lines = out.trim().split('\n');
-              const res = JSON.parse(lines[lines.length - 1]);
-              resolve(res);
+              const result = JSON.parse(lines[lines.length - 1]);
+              if (result.status === 'success') {
+                // Return parsed steps to renderer for review UI
+                resolve({
+                  status: 'needs_review',
+                  steps: result.steps,
+                  tc_id: tcId,
+                  description: description,
+                  flowId: flowId
+                });
+              } else {
+                resolve(result);
+              }
             } catch (e) {
-              resolve({ status: 'error', message: 'Failed to parse recorder output' });
+              resolve({ status: 'error', message: 'Failed to parse recording output: ' + e.message });
             }
           } else {
-            reject(new Error('Parser failed'));
+            resolve({ status: 'error', message: 'Parser script failed' });
           }
         });
       });
     } catch (err) {
-      reject(err);
+      resolve({ status: 'error', message: err.message });
+    }
+  });
+});
+
+// ──────────────────────────────────────
+// IPC: Save Recording Review (generate test from reviewed steps + assertions)
+// ──────────────────────────────────────
+ipcMain.handle('save-recording-review', async (event, payload) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const PARSER_SCRIPT = path.join(__dirname, 'engine', 'recorder_parser.py');
+      const parserProcess = spawn(VENV_PYTHON, [
+        PARSER_SCRIPT, 'generate', __dirname
+      ], { cwd: __dirname });
+
+      let out = '';
+      parserProcess.stdin.write(JSON.stringify(payload));
+      parserProcess.stdin.end();
+      parserProcess.stdout.on('data', d => out += d.toString());
+
+      parserProcess.on('close', (pcode) => {
+        if (pcode === 0) {
+          try {
+            const lines = out.trim().split('\n');
+            const res = JSON.parse(lines[lines.length - 1]);
+            resolve(res);
+          } catch (e) {
+            resolve({ status: 'error', message: 'Failed to parse generator output' });
+          }
+        } else {
+          resolve({ status: 'error', message: 'Generator script failed' });
+        }
+      });
+    } catch (err) {
+      resolve({ status: 'error', message: err.message });
     }
   });
 });
