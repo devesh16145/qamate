@@ -336,6 +336,17 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) 
   });
 });
 
+ipcMain.handle('get-user-stories', async (event, { flowId }) => {
+  try {
+    const usFile = path.join(__dirname, 'tests', 'flows', flowId, `${flowId}_user_stories.json`);
+    if (fs.existsSync(usFile)) {
+      return JSON.parse(fs.readFileSync(usFile, 'utf8'));
+    }
+    return {};
+  } catch (e) {
+    return {};
+  }
+});
 ipcMain.handle('get-tc-data', async (event, { flowId, tcId }) => {
   try {
     const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');

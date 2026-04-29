@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld('ats', {
   saveTemplate: (options) => ipcRenderer.invoke('save-template', options),
   loadTemplate: (name) => ipcRenderer.invoke('load-template', name),
   listTemplates: () => ipcRenderer.invoke('list-templates'),
+  getUserStories: (options) => ipcRenderer.invoke('get-user-stories', options),
 });

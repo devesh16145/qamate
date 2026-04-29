@@ -87,18 +87,37 @@
                     </div>
                 </div>
 
-                <div id="test-data-section" class="test-data-section hidden">
-                    <div class="test-data-header">
-                        <h3>TEST DATA</h3>
-                        <div class="test-data-actions">
-                            <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
-                            <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Template</button>
-                            <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load</button>
+                <div id="bottom-panel" class="bottom-panel hidden">
+                    <div class="tab-bar">
+                        <button class="tab-btn active" data-tab="test-data">Test Data</button>
+                        <button class="tab-btn" data-tab="user-stories">User Stories</button>
+                        <button class="tab-btn" data-tab="test-steps">Test Steps</button>
+                    </div>
+
+                    <div id="tab-test-data" class="tab-content active">
+                        <div class="test-data-header">
+                            <div class="test-data-actions">
+                                <button id="td-save-btn" class="td-action-btn" title="Save changes">💾 Save</button>
+                                <button id="td-template-save-btn" class="td-action-btn" title="Save as template">📋 Template</button>
+                                <button id="td-template-load-btn" class="td-action-btn" title="Load template">📂 Load</button>
+                            </div>
+                        </div>
+                        <div id="td-selected-info" class="td-selected-info"></div>
+                        <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
+                        <div id="td-status" class="td-status"></div>
+                    </div>
+
+                    <div id="tab-user-stories" class="tab-content">
+                        <div id="us-content" class="us-content">
+                            <div class="us-placeholder">Select test cases to view their user stories.</div>
                         </div>
                     </div>
-                    <div id="td-selected-info" class="td-selected-info"></div>
-                    <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
-                    <div id="td-status" class="td-status"></div>
+
+                    <div id="tab-test-steps" class="tab-content">
+                        <div id="ts-content" class="ts-content">
+                            <div class="us-placeholder">Select test cases to view their test steps.</div>
+                        </div>
+                    </div>
                 </div>
             </section>
 

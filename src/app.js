@@ -18,13 +18,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const saveSettingsBtn = document.getElementById('save-settings-btn');
     const historyList = document.getElementById('history-list');
     const lastRunCard = document.getElementById('last-run-card');
-    const tdSection = document.getElementById('test-data-section');
+    const bottomPanel = document.getElementById('bottom-panel');
     const tdEditor = document.getElementById('td-editor');
     const tdSelectedInfo = document.getElementById('td-selected-info');
     const tdStatus = document.getElementById('td-status');
     const tdSaveBtn = document.getElementById('td-save-btn');
     const tdTemplateSaveBtn = document.getElementById('td-template-save-btn');
     const tdTemplateLoadBtn = document.getElementById('td-template-load-btn');
+    const usContent = document.getElementById('us-content');
+    const tsContent = document.getElementById('ts-content');
+    const tabBtns = document.querySelectorAll('.tab-btn');
 
     // ── State ──
     let allFlows = [];
@@ -580,7 +583,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    // ── Test Data Panel ──
+    // ── Tab Switching ──
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        });
+    });
+
+    // ── Test Data / User Stories / Test Steps Panel ──
     async function refreshTestDataPanel() {
         const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"][data-tc-id]:checked'));
         selectedTcItems = checkboxes.map(cb => ({
@@ -589,14 +602,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         }));
 
         if (selectedTcItems.length === 0) {
-            tdSection.classList.add('hidden');
+            bottomPanel.classList.add('hidden');
             currentTdData = {};
             return;
         }
 
-        tdSection.classList.remove('hidden');
+        bottomPanel.classList.remove('hidden');
         tdSelectedInfo.textContent = selectedTcItems.map(t => t.tcId).join(', ');
 
+        // Load test data
         try {
             currentTdData = await window.ats.getBulkTcData(selectedTcItems);
             tdEditor.value = JSON.stringify(currentTdData, null, 2);
@@ -604,6 +618,71 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (e) {
             setTdStatus('Error loading data: ' + e.message, 'error');
         }
+
+        // Load user stories and test steps
+        loadUserStoriesAndSteps();
+    }
+
+    async function loadUserStoriesAndSteps() {
+        // Group selected items by flowId
+        const flowIds = [...new Set(selectedTcItems.map(t => t.flowId))];
+        let allStories = {};
+        for (const fid of flowIds) {
+            try {
+                const data = await window.ats.getUserStories({ flowId: fid });
+                Object.assign(allStories, data);
+            } catch (e) { /* ignore */ }
+        }
+        renderUserStories(allStories);
+        renderTestSteps(allStories);
+    }
+
+    function renderUserStories(stories) {
+        if (!selectedTcItems.length) {
+            usContent.innerHTML = '<div class="us-placeholder">Select test cases to view their user stories.</div>';
+            return;
+        }
+        let html = '';
+        for (const { tcId } of selectedTcItems) {
+            const us = stories[tcId];
+            if (!us || !us.user_story) continue;
+            const s = us.user_story;
+            html += `<div class="us-card">
+                <div class="us-tc-header">${tcId}</div>
+                <div class="us-title">${s.summary || ''}</div>
+                <div class="us-story">As a <strong>${s.role || 'user'}</strong>, I want <strong>${s.want || ''}</strong>, so that <em>${s.benefit || ''}</em>.</div>
+                ${s.acceptance_criteria && s.acceptance_criteria.length ? `
+                <div class="us-ac-label">Acceptance Criteria</div>
+                <ul class="us-ac-list">
+                    ${s.acceptance_criteria.map(ac => `<li>${ac}</li>`).join('')}
+                </ul>` : ''}
+            </div>`;
+        }
+        usContent.innerHTML = html || '<div class="us-placeholder">No user stories found for selected test cases.</div>';
+    }
+
+    function renderTestSteps(stories) {
+        if (!selectedTcItems.length) {
+            tsContent.innerHTML = '<div class="us-placeholder">Select test cases to view their test steps.</div>';
+            return;
+        }
+        let html = '';
+        for (const { tcId } of selectedTcItems) {
+            const us = stories[tcId];
+            if (!us || !us.test_steps || !us.test_steps.length) continue;
+            html += `<div class="ts-card">
+                <div class="ts-tc-header">${tcId}</div>
+                ${us.test_steps.map(step => `
+                <div class="ts-step-row">
+                    <div class="ts-step-num">${step.step}</div>
+                    <div class="ts-step-body">
+                        <div class="ts-step-action">${step.action}</div>
+                        <div class="ts-step-expected">${step.expected}</div>
+                    </div>
+                </div>`).join('')}
+            </div>`;
+        }
+        tsContent.innerHTML = html || '<div class="us-placeholder">No test steps found for selected test cases.</div>';
     }
 
     function setTdStatus(msg, type = '') {
@@ -654,7 +733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Show inline name input
         tdStatus.innerHTML = '';
         const wrapper = document.createElement('span');
-        wrapper.innerHTML = `Name: <input id="td-template-name-input" type="text" placeholder="template name" style="background:rgba(0,0,0,0.3);border:1px solid var(--border-color);color:white;padding:2px 6px;border-radius:3px;font-size:11px;width:100px;outline:none;"> <button style="background:var(--accent-green);border:none;color:white;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;">OK</button> <button style="background:transparent;border:1px solid var(--border-color);color:var(--text-muted);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;">Cancel</button>`;
+        wrapper.innerHTML = `Name: <input id="td-template-name-input" type="text" placeholder="template name" style="background:#FAFAFA;border:2px solid #1A1D23;color:#1A1D23;padding:2px 6px;border-radius:8px;font-size:11px;width:100px;outline:none;"> <button style="background:#16a34a;border:2px solid #1A1D23;color:white;padding:2px 8px;border-radius:8px;font-size:10px;cursor:pointer;">OK</button> <button style="background:#FAFAFA;border:2px solid #1A1D23;color:#4A4D55;padding:2px 8px;border-radius:8px;font-size:10px;cursor:pointer;">Cancel</button>`;
         tdStatus.appendChild(wrapper);
         const nameInput = document.getElementById('td-template-name-input');
         nameInput.focus();
