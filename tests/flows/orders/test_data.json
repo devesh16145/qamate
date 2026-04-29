@@ -1,17 +1,11 @@
 {
-  "TC-ORDERS-014": {
-    "accept_note": "Order accepted for fulfilment"
+  "TC-ORDERS-006": {
+    "search_po": "PO"
   },
-  "TC-ORDERS-016": {
-    "reject_reason": "Out of stock — supply exhausted for requested SKUs"
+  "TC-ORDERS-007": {
+    "search_sku": "urea"
   },
-  "TC-ORDERS-017": {
-    "pack_note": "All items packed and ready for invoicing"
-  },
-  "TC-ORDERS-018": {
-    "ready_note": "Material staged for pickup"
-  },
-  "TC-ORDERS-019": {
-    "pickup_note": "Handed over to transporter"
+  "TC-ORDERS-045": {
+    "reject_reason": "Out of stock - supply exhausted for requested SKUs"
   }
 }
