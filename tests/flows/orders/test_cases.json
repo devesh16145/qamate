@@ -1,0 +1,304 @@
+[
+    {
+        "tc_id": "TC-ORDERS-001",
+        "module": "Orders",
+        "description": "Verify Orders page loads successfully with order-related content",
+        "preconditions": "Seller is logged in with valid credentials",
+        "steps": [
+            "Log in with valid credentials",
+            "Navigate to Orders page",
+            "Verify page loads without errors",
+            "Verify order-related content is visible"
+        ],
+        "expected_result": "Orders page loads without errors and displays order-related content (Order, PO, Status, etc.)"
+    },
+    {
+        "tc_id": "TC-ORDERS-002",
+        "module": "Orders",
+        "description": "Verify orders list/table is displayed with rows or cards",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Scroll down to see the order list",
+            "Verify table or card list is visible",
+            "Verify no page errors"
+        ],
+        "expected_result": "Orders are displayed in a table or card list format"
+    },
+    {
+        "tc_id": "TC-ORDERS-003",
+        "module": "Orders",
+        "description": "Verify order list shows key columns: Order/PO ID, Status, Date, Amount",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Inspect the order list headers",
+            "Verify at least 2 of: Order, Status, Date, Amount, PO, Quantity, Total headers are present"
+        ],
+        "expected_result": "Order list displays at least 2 key column headers (Order, Status, Date, Amount, etc.)"
+    },
+    {
+        "tc_id": "TC-ORDERS-004",
+        "module": "Orders",
+        "description": "Verify search functionality filters orders by keyword",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Find search input field",
+            "Type a search keyword (e.g. ORD)",
+            "Wait for filtering",
+            "Verify no page errors"
+        ],
+        "expected_result": "Search input filters the order list in real-time"
+    },
+    {
+        "tc_id": "TC-ORDERS-005",
+        "module": "Orders",
+        "description": "Verify order status filter (tabs or dropdown) changes displayed orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Find status filter tabs or dropdown",
+            "Click a status filter (All, Pending, Accepted, etc.)",
+            "Verify no page errors"
+        ],
+        "expected_result": "Status filter changes the displayed orders accordingly"
+    },
+    {
+        "tc_id": "TC-ORDERS-006",
+        "module": "Orders",
+        "description": "Verify filtering to show only Pending/Sent orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Pending or Sent filter tab",
+            "Wait for orders to filter",
+            "Verify no page errors"
+        ],
+        "expected_result": "Only pending/sent orders are displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-007",
+        "module": "Orders",
+        "description": "Verify filtering to show only Accepted orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Accepted or Confirmed filter tab",
+            "Wait for orders to filter",
+            "Verify no page errors"
+        ],
+        "expected_result": "Only accepted orders are displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-008",
+        "module": "Orders",
+        "description": "Verify clicking an order opens the detail view",
+        "preconditions": "Seller is on Orders page with at least one order",
+        "steps": [
+            "Click the first order row/card",
+            "Wait for detail view to load",
+            "Verify order detail content is visible (items, amounts, status)"
+        ],
+        "expected_result": "Clicking an order opens the detail view showing order info, items, and amounts"
+    },
+    {
+        "tc_id": "TC-ORDERS-009",
+        "module": "Orders",
+        "description": "Verify order detail view displays the PO/Order number",
+        "preconditions": "Seller has opened an order detail view",
+        "steps": [
+            "Open an order detail",
+            "Look for PO or Order number (PO-, ORD-, Order #, etc.)",
+            "Verify it is displayed"
+        ],
+        "expected_result": "Order detail displays a PO/Order number identifier"
+    },
+    {
+        "tc_id": "TC-ORDERS-010",
+        "module": "Orders",
+        "description": "Verify order detail view shows SKU/item list with quantities",
+        "preconditions": "Seller has opened an order detail view",
+        "steps": [
+            "Open an order detail",
+            "Scroll down to see item details",
+            "Verify item/SKU details with quantities and prices are shown"
+        ],
+        "expected_result": "Order detail shows SKU/item list with quantity, price, and amount details"
+    },
+    {
+        "tc_id": "TC-ORDERS-011",
+        "module": "Orders",
+        "description": "Verify order detail view shows the current order status",
+        "preconditions": "Seller has opened an order detail view",
+        "steps": [
+            "Open an order detail",
+            "Look for status indicator (badge, tag, or text)",
+            "Verify status is one of: Pending, Sent, Accepted, Packed, Ready, Dispatched"
+        ],
+        "expected_result": "Order detail displays the current order status"
+    },
+    {
+        "tc_id": "TC-ORDERS-012",
+        "module": "Orders",
+        "description": "Verify navigating back from order detail to the orders list",
+        "preconditions": "Seller has opened an order detail view",
+        "steps": [
+            "Open an order detail",
+            "Click Back button or navigate back",
+            "Verify orders list is displayed again"
+        ],
+        "expected_result": "Back navigation returns to the orders list successfully"
+    },
+    {
+        "tc_id": "TC-ORDERS-013",
+        "module": "Orders",
+        "description": "Verify Accept button is visible for pending/sent orders",
+        "preconditions": "Seller is viewing a pending/sent order detail",
+        "steps": [
+            "Filter for Pending/Sent orders",
+            "Open the first order",
+            "Verify Accept button is visible"
+        ],
+        "expected_result": "Accept button is visible for orders in Pending/Sent status"
+    },
+    {
+        "tc_id": "TC-ORDERS-014",
+        "module": "Orders",
+        "description": "Verify accepting a pending order transitions its status",
+        "preconditions": "Seller has a pending order to accept",
+        "steps": [
+            "Filter for Pending/Sent orders",
+            "Open the first order",
+            "Click Accept button",
+            "Handle confirmation dialog if present",
+            "Verify success toast/message"
+        ],
+        "expected_result": "Order is accepted successfully. Status transitions from Pending/Sent to Accepted."
+    },
+    {
+        "tc_id": "TC-ORDERS-015",
+        "module": "Orders",
+        "description": "Verify Reject button is visible for pending/sent orders",
+        "preconditions": "Seller is viewing a pending/sent order detail",
+        "steps": [
+            "Filter for Pending/Sent orders",
+            "Open the first order",
+            "Verify Reject button is visible"
+        ],
+        "expected_result": "Reject button is visible for orders in Pending/Sent status"
+    },
+    {
+        "tc_id": "TC-ORDERS-016",
+        "module": "Orders",
+        "description": "Verify rejecting an order requires a reason and transitions status",
+        "preconditions": "Seller has a pending order to reject",
+        "steps": [
+            "Filter for Pending/Sent orders",
+            "Open the first order",
+            "Click Reject button",
+            "Enter/select a rejection reason",
+            "Confirm rejection",
+            "Verify success toast/message"
+        ],
+        "expected_result": "Order is rejected with a reason. Status transitions to Rejected."
+    },
+    {
+        "tc_id": "TC-ORDERS-017",
+        "module": "Orders",
+        "description": "Verify Pack action is available for accepted orders",
+        "preconditions": "Seller has an accepted order",
+        "steps": [
+            "Filter for Accepted orders",
+            "Open the first order",
+            "Click Pack button",
+            "Handle confirmation if present",
+            "Verify success toast/message"
+        ],
+        "expected_result": "Pack action succeeds for accepted orders. Status transitions to Packed."
+    },
+    {
+        "tc_id": "TC-ORDERS-018",
+        "module": "Orders",
+        "description": "Verify Mark as Ready action is available for packed orders",
+        "preconditions": "Seller has a packed order",
+        "steps": [
+            "Filter for Packed orders",
+            "Open the first order",
+            "Click Mark as Ready button",
+            "Handle confirmation if present",
+            "Verify success toast/message"
+        ],
+        "expected_result": "Mark as Ready succeeds for packed orders. Status transitions to Ready."
+    },
+    {
+        "tc_id": "TC-ORDERS-019",
+        "module": "Orders",
+        "description": "Verify Picked Up action is available for ready orders",
+        "preconditions": "Seller has a ready order",
+        "steps": [
+            "Filter for Ready orders",
+            "Open the first order",
+            "Click Picked Up button",
+            "Handle confirmation if present",
+            "Verify success toast/message"
+        ],
+        "expected_result": "Picked Up action succeeds for ready orders. Status transitions to Picked Up."
+    },
+    {
+        "tc_id": "TC-ORDERS-020",
+        "module": "Orders",
+        "description": "Verify order summary/stats cards are displayed at the top of orders page",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Scroll to top of Orders page",
+            "Look for stat/summary cards (Total Orders, Pending, Accepted, etc.)",
+            "Verify at least one stat is visible"
+        ],
+        "expected_result": "Order summary stats (Total Orders, Pending, Accepted, etc.) are displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-021",
+        "module": "Orders",
+        "description": "Verify pagination controls are present when there are many orders",
+        "preconditions": "Seller is on Orders page with multiple orders",
+        "steps": [
+            "Scroll to bottom of orders list",
+            "Look for pagination controls (Next, Previous, page numbers)",
+            "Verify pagination is present"
+        ],
+        "expected_result": "Pagination controls are visible when the order list exceeds one page"
+    },
+    {
+        "tc_id": "TC-ORDERS-022",
+        "module": "Orders",
+        "description": "Verify date range filter is available on the orders page",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Look for date filter (date picker, date range, Date button)",
+            "Click the date filter",
+            "Verify no page errors"
+        ],
+        "expected_result": "Date range filter is available and clickable without errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-023",
+        "module": "Orders",
+        "description": "Verify the order detail page is scrollable and shows full content",
+        "preconditions": "Seller has opened an order detail view",
+        "steps": [
+            "Open an order detail",
+            "Scroll down twice (400px each)",
+            "Scroll up once",
+            "Scroll back to top",
+            "Verify no page errors throughout"
+        ],
+        "expected_result": "Order detail page scrolls smoothly with no errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-024",
+        "module": "Orders",
+        "description": "Verify order detail shows a status timeline or history log",
+        "preconditions": "Seller has opened an order detail view",
+        "steps": [
+            "Open an order detail",
+            "Scroll down to look for timeline/history",
+            "Verify timeline or status history entries are present"
+        ],
+        "expected_result": "Order detail shows a timeline or history with status changes (Sent, Accepted, Packed, etc.)"
+    }
+]
