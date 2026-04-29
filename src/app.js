@@ -537,17 +537,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function openDataModal(flowId, tcId) {
         currentDataFlow = flowId;
         currentDataTc = tcId;
-        document.getElementById('data-tc-label').textContent = `Data for ${tcId}`;
-        
+        document.getElementById('data-tc-label').textContent = tcId;
         const container = document.getElementById('data-fields-container');
         container.innerHTML = '<div class="loading">Loading...</div>';
         dataModal.classList.remove('hidden');
 
+        // Load TC meta (heading + description)
+        try {
+            const meta = await window.ats.getTcMeta({ flowId, tcId });
+            document.getElementById('tc-meta-heading').value = meta.heading || meta.description || '';
+            document.getElementById('tc-meta-desc').value = meta.description || '';
+        } catch (e) {
+            document.getElementById('tc-meta-heading').value = '';
+            document.getElementById('tc-meta-desc').value = '';
+        }
+
+        // Load test data variables
         const data = await window.ats.getTcData({ flowId, tcId });
-        
         container.innerHTML = '';
         if (Object.keys(data).length === 0) {
-            container.innerHTML = '<p>No data variables found for this test. Record a test with text inputs to auto-generate variables.</p>';
+            container.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">No data variables found. Record a test with text inputs to auto-generate.</p>';
         } else {
             for (const [key, val] of Object.entries(data)) {
                 container.innerHTML += `
@@ -559,20 +568,33 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     }
+    }
 
     saveDataBtn.addEventListener('click', async () => {
+        // Save TC meta (heading + description)
+        const heading = document.getElementById('tc-meta-heading').value.trim();
+        const desc = document.getElementById('tc-meta-desc').value.trim();
+        const metaRes = await window.ats.saveTcMeta({
+            flowId: currentDataFlow, tcId: currentDataTc, heading, description: desc
+        });
+
+        // Save test data variables
         const inputs = document.querySelectorAll('.data-input-field');
         const data = {};
         inputs.forEach(input => {
             data[input.dataset.key] = input.value;
         });
+        const dataRes = await window.ats.saveTcData({ flowId: currentDataFlow, tcId: currentDataTc, data });
 
-        const res = await window.ats.saveTcData({ flowId: currentDataFlow, tcId: currentDataTc, data });
-        if (res.success) {
+        if (metaRes.success && dataRes.success) {
             dataModal.classList.add('hidden');
-            addLog(`🗄️ Test data updated for ${currentDataTc}`, 'system');
+            addLog(`Updated ${currentDataTc} — heading, description & data saved`, 'system');
+            init(); // Refresh flow tree to show updated heading
+        } else if (dataRes.success) {
+            dataModal.classList.add('hidden');
+            addLog(`Data saved for ${currentDataTc}, but heading update failed`, 'warn');
         } else {
-            alert("Failed to save data: " + res.error);
+            alert("Failed to save: " + (dataRes.error || metaRes.error));
         }
     });
 
@@ -637,18 +659,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderTestSteps(allStories);
     }
 
+    // ── User Stories Rendering & Editing ──
+    let currentStoriesData = {};
+
     function renderUserStories(stories) {
+        currentStoriesData = stories;
         if (!selectedTcItems.length) {
             usContent.innerHTML = '<div class="us-placeholder">Select test cases to view their user stories.</div>';
             return;
         }
         let html = '';
-        for (const { tcId } of selectedTcItems) {
+        for (const { tcId, flowId } of selectedTcItems) {
             const us = stories[tcId];
             if (!us || !us.user_story) continue;
             const s = us.user_story;
-            html += `<div class="us-card">
-                <div class="us-tc-header">${tcId}</div>
+            html += `<div class="us-card" data-tc-id="${tcId}" data-flow-id="${flowId}">
+                <div class="us-card-header">
+                    <div class="us-tc-header">${tcId}</div>
+                    <button class="us-edit-btn" data-tc-id="${tcId}" data-flow-id="${flowId}" title="Edit user story">Edit</button>
+                </div>
                 <div class="us-title">${s.summary || ''}</div>
                 <div class="us-story">As a <strong>${s.role || 'user'}</strong>, I want <strong>${s.want || ''}</strong>, so that <em>${s.benefit || ''}</em>.</div>
                 ${s.acceptance_criteria && s.acceptance_criteria.length ? `
@@ -659,6 +688,74 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>`;
         }
         usContent.innerHTML = html || '<div class="us-placeholder">No user stories found for selected test cases.</div>';
+        // Attach edit handlers
+        usContent.querySelectorAll('.us-edit-btn').forEach(btn => {
+            btn.onclick = () => enterUserStoryEditMode(btn.dataset.tcId, btn.dataset.flowId);
+        });
+    }
+
+    function enterUserStoryEditMode(tcId, flowId) {
+        const us = currentStoriesData[tcId];
+        if (!us || !us.user_story) return;
+        const s = us.user_story;
+        const card = usContent.querySelector(`.us-card[data-tc-id="${tcId}"]`);
+        if (!card) return;
+
+        card.classList.add('editing');
+        card.innerHTML = `
+            <div class="us-card-header">
+                <div class="us-tc-header">${tcId}</div>
+                <div class="us-edit-actions">
+                    <button class="us-save-btn" data-tc-id="${tcId}" data-flow-id="${flowId}">Save</button>
+                    <button class="us-cancel-btn" data-tc-id="${tcId}" data-flow-id="${flowId}">Cancel</button>
+                </div>
+            </div>
+            <div class="us-field">
+                <label>Summary</label>
+                <input type="text" class="us-input" data-field="summary" value="${(s.summary || '').replace(/"/g, '&quot;')}">
+            </div>
+            <div class="us-field">
+                <label>Role</label>
+                <input type="text" class="us-input" data-field="role" value="${(s.role || '').replace(/"/g, '&quot;')}">
+            </div>
+            <div class="us-field">
+                <label>I Want</label>
+                <textarea class="us-textarea" data-field="want" rows="2">${s.want || ''}</textarea>
+            </div>
+            <div class="us-field">
+                <label>So That</label>
+                <textarea class="us-textarea" data-field="benefit" rows="2">${s.benefit || ''}</textarea>
+            </div>
+            <div class="us-field">
+                <label>Acceptance Criteria (one per line)</label>
+                <textarea class="us-textarea" data-field="acceptance_criteria" rows="4">${(s.acceptance_criteria || []).join('\n')}</textarea>
+            </div>
+        `;
+
+        card.querySelector('.us-save-btn').onclick = () => saveUserStoryEdit(tcId, flowId);
+        card.querySelector('.us-cancel-btn').onclick = () => renderUserStories(currentStoriesData);
+    }
+
+    async function saveUserStoryEdit(tcId, flowId) {
+        const card = usContent.querySelector(`.us-card[data-tc-id="${tcId}"]`);
+        if (!card) return;
+
+        const summary = card.querySelector('[data-field="summary"]').value.trim();
+        const role = card.querySelector('[data-field="role"]').value.trim();
+        const want = card.querySelector('[data-field="want"]').value.trim();
+        const benefit = card.querySelector('[data-field="benefit"]').value.trim();
+        const acText = card.querySelector('[data-field="acceptance_criteria"]').value.trim();
+        const acceptance_criteria = acText ? acText.split('\n').map(s => s.trim()).filter(Boolean) : [];
+
+        currentStoriesData[tcId].user_story = { summary, role, want, benefit, acceptance_criteria };
+
+        const res = await window.ats.saveUserStories({ flowId, data: currentStoriesData });
+        if (res.success) {
+            addLog(`User story updated for ${tcId}`, 'system');
+            renderUserStories(currentStoriesData);
+        } else {
+            alert("Failed to save: " + (res.error || 'Unknown error'));
+        }
     }
 
     function renderTestSteps(stories) {
