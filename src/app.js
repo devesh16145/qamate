@@ -502,30 +502,329 @@ document.addEventListener('DOMContentLoaded', async () => {
         const flowId = document.getElementById('record-flow').value;
         const tcId = document.getElementById('record-tc-id').value.trim();
         const desc = document.getElementById('record-desc').value.trim();
-        
+
         if (!tcId || !desc) {
             alert("Please enter TC ID and Description");
             return;
         }
 
         recordModal.classList.add('hidden');
-        addLog(`⏺ Launching recorder for ${tcId}...`, 'system');
-        
+        addLog(`Launching recorder for ${tcId}... Close the browser when done.`, 'system');
+
+        // Listen for live step count during recording
+        const progressCleanup = window.ats.onRecordingProgress((data) => {
+            addLog(`Recording... ${data.steps} actions captured so far`, 'system');
+        });
+
         startRecordBtn.disabled = true;
         try {
             const res = await window.ats.recordTest({
                 flowId, tcId, description: desc, env: envSelect.value
             });
-            if (res.status === 'success') {
-                addLog(`✅ Recording saved for ${tcId}! Auto-extracted ${Object.keys(res.data || {}).length} variables.`, 'pass');
-                init(); // Refresh UI to show new test
+            progressCleanup(); // remove listener
+
+            if (res.status === 'needs_review') {
+                // Open review modal with parsed steps
+                openReviewModal(res.steps, res.tc_id, res.description, res.flowId);
+                addLog(`Recording captured ${res.steps.length} steps. Review and add assertions.`, 'system');
+            } else if (res.status === 'success') {
+                addLog(`Recording saved for ${tcId}! Auto-extracted ${Object.keys(res.data || {}).length} variables.`, 'pass');
+                init();
             } else {
-                addLog(`❌ Recording failed: ${res.message}`, 'fail');
+                addLog(`Recording failed: ${res.message}`, 'fail');
             }
         } catch (e) {
-            addLog(`❌ Recording error: ${e.message}`, 'fail');
+            addLog(`Recording error: ${e.message}`, 'fail');
         }
         startRecordBtn.disabled = false;
+    });
+
+    // ── Recording Review Modal ──
+    const reviewModal = document.getElementById('review-modal');
+    const reviewStepsList = document.getElementById('review-steps-list');
+    const reviewAssertionsList = document.getElementById('review-assertions-list');
+    const reviewCriteriaList = document.getElementById('review-criteria-list');
+    const reviewAbBuilder = document.getElementById('review-assertion-builder');
+    const reviewCbBuilder = document.getElementById('review-criteria-builder');
+
+    const STEP_ICONS = {
+        navigate: '&#x1F310;', click: '&#x1F446;', fill: '&#x270F;',
+        type: '&#x2328;', select: '&#x1F4C7;', check: '&#x2611;',
+        dblclick: '&#x1F446;&#x1F446;', hover: '&#x1F447;', press: '&#x2328;',
+        wait: '&#x23F3;', viewport: '&#x1F4FA;', other: '&#x25B6;'
+    };
+
+    let reviewState = { steps: [], assertions: [], criteria: [], tcId: '', desc: '', flowId: '' };
+
+    function openReviewModal(steps, tcId, description, flowId) {
+        reviewState = { steps, assertions: [], criteria: [], tcId, description, flowId };
+        document.getElementById('review-modal-title').textContent = `Review Recording - ${tcId}`;
+        document.getElementById('review-preconditions').value = '';
+        document.getElementById('review-expected').value = '';
+        reviewAbBuilder.classList.add('hidden');
+        reviewCbBuilder.classList.add('hidden');
+        renderReviewSteps();
+        renderReviewAssertions();
+        renderReviewCriteria();
+        reviewModal.classList.remove('hidden');
+    }
+
+    function renderReviewSteps() {
+        reviewStepsList.innerHTML = '';
+        for (const step of reviewState.steps) {
+            const icon = STEP_ICONS[step.type] || STEP_ICONS.other;
+            const isInput = step.type === 'fill' || step.type === 'type';
+            const el = document.createElement('div');
+            el.className = 'review-step';
+            el.innerHTML = `
+                <div class="review-step-num">${step.id}</div>
+                <div class="review-step-icon">${icon}</div>
+                <div class="review-step-body">
+                    <div class="review-step-desc">${step.targetDescription || step.type}</div>
+                    ${isInput ? `
+                    <div class="review-step-detail">
+                        <label>Variable name:</label>
+                        <input type="text" class="review-step-var-input" data-step-id="${step.id}" value="${step.varName || ''}">
+                        <span class="review-step-val" title="${step.value || ''}">${step.value || ''}</span>
+                    </div>` : ''}
+                </div>
+                <button class="review-step-assert-btn" data-step-id="${step.id}" title="Add assertion after this step">+ Assert</button>
+            `;
+            reviewStepsList.appendChild(el);
+        }
+
+        // Var name change handlers
+        reviewStepsList.querySelectorAll('.review-step-var-input').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const sid = parseInt(inp.dataset.stepId);
+                const step = reviewState.steps.find(s => s.id === sid);
+                if (step) step.varName = inp.value.trim();
+            });
+        });
+
+        // Assert button handlers
+        reviewStepsList.querySelectorAll('.review-step-assert-btn').forEach(btn => {
+            btn.addEventListener('click', () => openAssertionBuilder(parseInt(btn.dataset.stepId)));
+        });
+    }
+
+    function openAssertionBuilder(afterStep) {
+        reviewCbBuilder.classList.add('hidden');
+        document.getElementById('review-ab-step-num').textContent = afterStep;
+        reviewAbBuilder.dataset.afterStep = afterStep;
+        document.getElementById('review-ab-type').value = 'element_visible';
+        document.getElementById('review-ab-selector').value = '';
+        document.getElementById('review-ab-value').value = '';
+        document.getElementById('review-ab-desc').value = '';
+        document.getElementById('review-ab-count').value = '1';
+        document.getElementById('review-ab-ms').value = '2000';
+        updateAbFieldVisibility('element_visible');
+        reviewAbBuilder.classList.remove('hidden');
+        reviewAbBuilder.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function updateAbFieldVisibility(type) {
+        const selectorRow = document.getElementById('review-ab-selector-row');
+        const valueRow = document.getElementById('review-ab-value-row');
+        const countRow = document.getElementById('review-ab-count-row');
+        const msRow = document.getElementById('review-ab-ms-row');
+
+        const needsSelector = [
+            'element_visible', 'element_not_visible', 'element_contains_text',
+            'element_has_text', 'element_has_value', 'element_enabled',
+            'element_disabled', 'element_count'
+        ];
+        const needsValue = [
+            'element_contains_text', 'element_has_text', 'element_has_value',
+            'page_contains_text', 'page_not_contains_text',
+            'url_contains', 'url_equals', 'title_contains', 'toast_contains'
+        ];
+
+        selectorRow.style.display = needsSelector.includes(type) ? 'flex' : 'none';
+        valueRow.style.display = needsValue.includes(type) ? 'flex' : 'none';
+        countRow.style.display = type === 'element_count' ? 'flex' : 'none';
+        msRow.style.display = type === 'wait_ms' ? 'flex' : 'none';
+    }
+
+    document.getElementById('review-ab-type').addEventListener('change', (e) => {
+        updateAbFieldVisibility(e.target.value);
+    });
+
+    // Add assertion
+    document.getElementById('review-ab-add').addEventListener('click', () => {
+        const afterStep = parseInt(reviewAbBuilder.dataset.afterStep);
+        const type = document.getElementById('review-ab-type').value;
+        const selector = document.getElementById('review-ab-selector').value.trim();
+        const value = document.getElementById('review-ab-value').value.trim();
+        const desc = document.getElementById('review-ab-desc').value.trim();
+        const count = parseInt(document.getElementById('review-ab-count').value) || 1;
+        const countOp = document.getElementById('review-ab-count-op').value;
+        const ms = parseInt(document.getElementById('review-ab-ms').value) || 2000;
+
+        const assertion = { afterStep, type, description: desc || type };
+        if (selector) assertion.selector = selector;
+        if (value) assertion.value = value;
+        if (type === 'element_count') { assertion.count = count; assertion.operator = countOp; }
+        if (type === 'wait_ms') { assertion.value = ms; }
+
+        reviewState.assertions.push(assertion);
+        reviewAbBuilder.classList.add('hidden');
+        renderReviewAssertions();
+        addLog(`Assertion added after step ${afterStep}: ${desc || type}`, 'system');
+    });
+
+    document.getElementById('review-ab-cancel').addEventListener('click', () => {
+        reviewAbBuilder.classList.add('hidden');
+    });
+
+    function renderReviewAssertions() {
+        const label = document.getElementById('review-assertions-label');
+        if (reviewState.assertions.length === 0) {
+            label.style.display = 'none';
+            reviewAssertionsList.innerHTML = '';
+            return;
+        }
+        label.style.display = '';
+        reviewAssertionsList.innerHTML = '';
+        reviewState.assertions.forEach((a, idx) => {
+            const detail = [a.selector, a.value].filter(Boolean).join(' | ');
+            const el = document.createElement('div');
+            el.className = 'review-assertion-item';
+            el.innerHTML = `
+                <div class="review-assertion-step-badge">${a.afterStep}</div>
+                <span class="review-assertion-type">${a.type.replace(/_/g, ' ')}</span>
+                <span class="review-assertion-detail">${detail || a.description}</span>
+                <button class="review-assertion-delete" data-idx="${idx}" title="Remove">&times;</button>
+            `;
+            reviewAssertionsList.appendChild(el);
+        });
+        reviewAssertionsList.querySelectorAll('.review-assertion-delete').forEach(btn => {
+            btn.addEventListener('click', () => {
+                reviewState.assertions.splice(parseInt(btn.dataset.idx), 1);
+                renderReviewAssertions();
+            });
+        });
+    }
+
+    // Criteria builder (reuse similar pattern)
+    document.getElementById('review-add-criteria-btn').addEventListener('click', () => {
+        reviewAbBuilder.classList.add('hidden');
+        document.getElementById('review-cb-type').value = 'success_toast';
+        document.getElementById('review-cb-selector').value = '';
+        document.getElementById('review-cb-value').value = '';
+        document.getElementById('review-cb-desc').value = '';
+        updateCbFieldVisibility('success_toast');
+        reviewCbBuilder.classList.remove('hidden');
+        reviewCbBuilder.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    function updateCbFieldVisibility(type) {
+        const selectorRow = document.getElementById('review-cb-selector-row');
+        const valueRow = document.getElementById('review-cb-value-row');
+        const needsSelector = [
+            'element_visible', 'element_not_visible', 'element_contains_text',
+            'element_count', 'success_toast', 'no_error_toast'
+        ];
+        const needsValue = [
+            'element_contains_text', 'page_contains_text', 'page_not_contains_text',
+            'url_contains', 'url_equals', 'title_contains', 'toast_contains'
+        ];
+        selectorRow.style.display = needsSelector.includes(type) ? 'flex' : 'none';
+        valueRow.style.display = needsValue.includes(type) ? 'flex' : 'none';
+    }
+
+    document.getElementById('review-cb-type').addEventListener('change', (e) => {
+        updateCbFieldVisibility(e.target.value);
+    });
+
+    document.getElementById('review-cb-add').addEventListener('click', () => {
+        const type = document.getElementById('review-cb-type').value;
+        const selector = document.getElementById('review-cb-selector').value.trim();
+        const value = document.getElementById('review-cb-value').value.trim();
+        const desc = document.getElementById('review-cb-desc').value.trim();
+
+        const criterion = { type, description: desc || type };
+        if (selector) criterion.selector = selector;
+        if (value) criterion.value = value;
+
+        reviewState.criteria.push(criterion);
+        reviewCbBuilder.classList.add('hidden');
+        renderReviewCriteria();
+        addLog(`Criteria added: ${desc || type}`, 'system');
+    });
+
+    document.getElementById('review-cb-cancel').addEventListener('click', () => {
+        reviewCbBuilder.classList.add('hidden');
+    });
+
+    function renderReviewCriteria() {
+        reviewCriteriaList.innerHTML = '';
+        reviewState.criteria.forEach((c, idx) => {
+            const detail = [c.selector, c.value].filter(Boolean).join(' | ');
+            const el = document.createElement('div');
+            el.className = 'review-assertion-item';
+            el.innerHTML = `
+                <div class="review-assertion-step-badge criteria-badge">&#x2714;</div>
+                <span class="review-assertion-type">${c.type.replace(/_/g, ' ')}</span>
+                <span class="review-assertion-detail">${detail || c.description}</span>
+                <button class="review-assertion-delete" data-idx="${idx}" title="Remove">&times;</button>
+            `;
+            reviewCriteriaList.appendChild(el);
+        });
+        reviewCriteriaList.querySelectorAll('.review-assertion-delete').forEach(btn => {
+            btn.addEventListener('click', () => {
+                reviewState.criteria.splice(parseInt(btn.dataset.idx), 1);
+                renderReviewCriteria();
+            });
+        });
+    }
+
+    // Save reviewed recording
+    document.getElementById('review-save-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('review-save-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        const payload = {
+            tc_id: reviewState.tcId,
+            description: reviewState.description,
+            flowId: reviewState.flowId,
+            preconditions: document.getElementById('review-preconditions').value.trim(),
+            expectedResult: document.getElementById('review-expected').value.trim(),
+            steps: reviewState.steps,
+            assertions: reviewState.assertions,
+            criteria: reviewState.criteria,
+        };
+
+        try {
+            const res = await window.ats.saveRecordingReview(payload);
+            if (res.status === 'success') {
+                const varCount = Object.keys(res.data || {}).length;
+                const assertCount = res.assertions_count || 0;
+                const criteriaCount = res.criteria_count || 0;
+                addLog(`Test saved: ${res.tc_id} - ${varCount} variables, ${assertCount} assertions, ${criteriaCount} criteria`, 'pass');
+                reviewModal.classList.add('hidden');
+                init();
+            } else {
+                addLog(`Save failed: ${res.message}`, 'fail');
+                alert('Failed to save: ' + (res.message || 'Unknown error'));
+            }
+        } catch (e) {
+            addLog(`Save error: ${e.message}`, 'fail');
+        }
+        btn.disabled = false;
+        btn.textContent = 'Save Test';
+    });
+
+    // Cancel review
+    document.getElementById('review-cancel-btn').addEventListener('click', () => {
+        reviewModal.classList.add('hidden');
+        addLog('Recording review cancelled. Recording discarded.', 'system');
+    });
+
+    // Close button for review modal
+    document.querySelector('[data-close="review-modal"]')?.addEventListener('click', () => {
+        reviewModal.classList.add('hidden');
     });
 
     // ── Configure Data Modal ──

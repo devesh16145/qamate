@@ -14,6 +14,12 @@ contextBridge.exposeInMainWorld('ats', {
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   recordTest: (options) => ipcRenderer.invoke('record-test', options),
+  saveRecordingReview: (payload) => ipcRenderer.invoke('save-recording-review', payload),
+  onRecordingProgress: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on('recording-progress', handler);
+    return () => ipcRenderer.removeListener('recording-progress', handler);
+  },
   getTcData: (options) => ipcRenderer.invoke('get-tc-data', options),
   saveTcData: (options) => ipcRenderer.invoke('save-tc-data', options),
   getBulkTcData: (items) => ipcRenderer.invoke('get-bulk-tc-data', items),
