@@ -22,4 +22,7 @@ contextBridge.exposeInMainWorld('ats', {
   loadTemplate: (name) => ipcRenderer.invoke('load-template', name),
   listTemplates: () => ipcRenderer.invoke('list-templates'),
   getUserStories: (options) => ipcRenderer.invoke('get-user-stories', options),
+  saveUserStories: (options) => ipcRenderer.invoke('save-user-stories', options),
+  getTcMeta: (options) => ipcRenderer.invoke('get-tc-meta', options),
+  saveTcMeta: (options) => ipcRenderer.invoke('save-tc-meta', options),
 });

@@ -231,17 +231,29 @@
     <div id="data-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Configure Test Data</h2>
+                <h2>Configure Test Case</h2>
                 <button class="close-modal">&times;</button>
             </div>
             <div class="modal-body">
-                <p id="data-tc-label" style="margin-bottom: 15px; font-weight: 500; color: var(--primary);"></p>
+                <p id="data-tc-label" style="margin-bottom: 12px; font-weight: 700; color: var(--accent-green); font-family: 'Consolas', monospace;"></p>
+                <div class="tc-meta-fields">
+                    <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
+                        <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Test Case Heading</label>
+                        <input type="text" id="tc-meta-heading" placeholder="Short title for this test case" style="width:100%;">
+                    </div>
+                    <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
+                        <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Description</label>
+                        <textarea id="tc-meta-desc" rows="3" placeholder="Detailed description of what this test verifies" style="width:100%; resize:vertical; font-family:var(--font-family); font-size:12px; padding:8px; border:2px solid #1A1D23; border-radius:10px; background:#FAFAFA; color:var(--text-primary); outline:none;"></textarea>
+                    </div>
+                </div>
+                <hr style="border:none; border-top:1px solid rgba(26,29,35,0.1); margin:12px 0;">
+                <div class="td-section-label" style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px;">Test Data Variables</div>
                 <div id="data-fields-container">
                     <!-- Data fields injected here -->
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="save-data-btn" class="primary-btn">Save Data</button>
+                <button id="save-data-btn" class="primary-btn">Save All Changes</button>
             </div>
         </div>
     </div>

@@ -347,6 +347,46 @@ ipcMain.handle('get-user-stories', async (event, { flowId }) => {
     return {};
   }
 });
+ipcMain.handle('save-user-stories', async (event, { flowId, data }) => {
+  try {
+    const usFile = path.join(__dirname, 'tests', 'flows', flowId, `${flowId}_user_stories.json`);
+    fs.writeFileSync(usFile, JSON.stringify(data, null, 2), 'utf8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+ipcMain.handle('get-tc-meta', async (event, { flowId, tcId }) => {
+  try {
+    const tcFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_cases.json');
+    if (fs.existsSync(tcFile)) {
+      const tcs = JSON.parse(fs.readFileSync(tcFile, 'utf8'));
+      const tc = tcs.find(t => t.tc_id === tcId);
+      if (tc) return { heading: tc.description || '', description: tc.description || '', steps: tc.steps || [], expected_result: tc.expected_result || '', preconditions: tc.preconditions || '' };
+    }
+    return {};
+  } catch (e) {
+    return {};
+  }
+});
+ipcMain.handle('save-tc-meta', async (event, { flowId, tcId, heading, description }) => {
+  try {
+    const tcFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_cases.json');
+    if (fs.existsSync(tcFile)) {
+      const tcs = JSON.parse(fs.readFileSync(tcFile, 'utf8'));
+      const tc = tcs.find(t => t.tc_id === tcId);
+      if (tc) {
+        if (heading !== undefined) tc.description = heading;
+        if (description !== undefined) tc.description = description;
+        fs.writeFileSync(tcFile, JSON.stringify(tcs, null, 4), 'utf8');
+        return { success: true };
+      }
+    }
+    return { success: false, error: 'Test case not found' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 ipcMain.handle('get-tc-data', async (event, { flowId, tcId }) => {
   try {
     const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
