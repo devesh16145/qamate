@@ -1,0 +1,533 @@
+{
+  "TC-CATALOG-001": {
+    "user_story": {
+      "summary": "Catalog Page Load - Display all navigation elements and product cards",
+      "role": "Seller",
+      "want": "the Catalog page to load with a search bar, all filter dropdowns (Super Category, Brand, SKU Status, Sort), and product cards",
+      "benefit": "I can immediately browse and find products to list in my store without any missing UI elements blocking my workflow",
+      "acceptance_criteria": [
+        "Search bar is visible and accepts text input",
+        "Super Category dropdown is visible and clickable",
+        "Brand dropdown is visible and clickable",
+        "SKU Status filter is visible with options",
+        "Sort dropdown is visible with options",
+        "At least one product card is displayed on the page",
+        "No error toasts or blank screens appear during page load"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Log in to the Seller App with valid credentials", "expected": "Login succeeds, dashboard or home page is shown"},
+      {"step": 2, "action": "Navigate to /listing/catalog", "expected": "Catalog page loads without errors"},
+      {"step": 3, "action": "Verify search bar is visible at the top of the catalog", "expected": "Search input field is present with placeholder text like 'Search'"},
+      {"step": 4, "action": "Verify Super Category dropdown is visible", "expected": "Super Category dropdown button is present and clickable"},
+      {"step": 5, "action": "Verify Brand dropdown is visible", "expected": "Brand dropdown button is present and clickable"},
+      {"step": 6, "action": "Verify SKU Status filter is visible", "expected": "SKU Status filter button is present"},
+      {"step": 7, "action": "Verify Sort dropdown is visible", "expected": "Sort button/dropdown is present"},
+      {"step": 8, "action": "Verify at least one product card is displayed", "expected": "Product cards with 'Request Product' or similar buttons are visible"},
+      {"step": 9, "action": "Check for any error toasts or blank areas", "expected": "No error messages, no blank white screens, all sections rendered"}
+    ]
+  },
+  "TC-CATALOG-002": {
+    "user_story": {
+      "summary": "Catalog Search - Real-time filtering by product name, brand, or category",
+      "role": "Seller",
+      "want": "the search bar to filter products in real-time as I type keywords like brand name, product name, or category",
+      "benefit": "I can quickly find specific products without scrolling through the entire catalog",
+      "acceptance_criteria": [
+        "Search input accepts keyboard input",
+        "Product list updates in real-time as the seller types",
+        "Search matches against Brand, Product Name, and Category fields",
+        "Filtered results are relevant to the search keyword",
+        "Scrolling through filtered results works correctly",
+        "Clearing search restores full product list"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "On the Catalog page, note the current number of visible product cards", "expected": "Initial product count is recorded (before_count)"},
+      {"step": 2, "action": "Click the search bar input field", "expected": "Search input receives focus, cursor appears"},
+      {"step": 3, "action": "Type a keyword (e.g. 'Seed') slowly with 80ms delay", "expected": "Text appears in the search input field"},
+      {"step": 4, "action": "Wait 3 seconds for filtering to complete", "expected": "Product list updates to show only matching products"},
+      {"step": 5, "action": "Verify the search input has the typed value", "expected": "Input field contains 'Seed'"},
+      {"step": 6, "action": "Count the visible product cards after filtering", "expected": "After count differs from before count, OR after count > 0"},
+      {"step": 7, "action": "Scroll down and up through the filtered results", "expected": "Filtered product cards remain visible and interactive during scroll"},
+      {"step": 8, "action": "Check for any page errors during the search", "expected": "No error toasts or alerts appear"}
+    ]
+  },
+  "TC-CATALOG-003": {
+    "user_story": {
+      "summary": "Super Category Filter - Dropdown with search and category options",
+      "role": "Seller",
+      "want": "the Super Category dropdown to open with a search input so I can quickly find and select a category to filter products",
+      "benefit": "I can narrow down products by crop protection, seeds, fertilizers, etc. without manually scrolling through all categories",
+      "acceptance_criteria": [
+        "Super Category dropdown opens on click",
+        "Dropdown contains a search input field",
+        "Typing in the search filters the category options",
+        "Selecting a category filters the product list accordingly",
+        "Product list updates to show only products in the selected category"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the Super Category dropdown button", "expected": "Dropdown opens revealing category options and a search input"},
+      {"step": 2, "action": "Verify a search input appears inside the dropdown", "expected": "Search input field is visible within the dropdown panel"},
+      {"step": 3, "action": "Type a category name (e.g. 'Crop Protection') in the search", "expected": "Category options filter to show matching results"},
+      {"step": 4, "action": "Verify matching category options appear after search", "expected": "At least one matching category option is shown"},
+      {"step": 5, "action": "Scroll through the available options", "expected": "Options are scrollable if list is long"},
+      {"step": 6, "action": "Select one category option", "expected": "Dropdown closes, product list filters to show only that category's products"},
+      {"step": 7, "action": "Verify the product list has changed", "expected": "Product count or content has changed to reflect the filter"}
+    ]
+  },
+  "TC-CATALOG-004": {
+    "user_story": {
+      "summary": "Brand Filter - Dropdown with search to filter products by brand",
+      "role": "Seller",
+      "want": "the Brand dropdown to open with a search input so I can find and select a specific brand to filter products",
+      "benefit": "I can quickly view products from a specific manufacturer or brand I'm interested in listing",
+      "acceptance_criteria": [
+        "Brand dropdown opens on click",
+        "Dropdown contains a search input for brand names",
+        "Typing filters brand options in real-time",
+        "Selecting a brand filters the product list",
+        "Filtered products belong to the selected brand"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the Brand dropdown button", "expected": "Brand dropdown opens with a search input and brand options"},
+      {"step": 2, "action": "Verify search input appears inside the dropdown", "expected": "Search input field is visible"},
+      {"step": 3, "action": "Type a brand name to search (e.g. 'Syngenta')", "expected": "Brand options filter to show matching brands"},
+      {"step": 4, "action": "Verify brand options appear after typing", "expected": "At least one matching brand option is shown"},
+      {"step": 5, "action": "Select a brand from the filtered list", "expected": "Brand is selected, dropdown closes or updates"},
+      {"step": 6, "action": "Scroll through the product list to verify filtering", "expected": "Product list shows only products from the selected brand"},
+      {"step": 7, "action": "Check for page errors", "expected": "No error toasts or blank areas"}
+    ]
+  },
+  "TC-CATALOG-005": {
+    "user_story": {
+      "summary": "SKU Status Filter - Filter products by listing status",
+      "role": "Seller",
+      "want": "the SKU Status filter to show all status options (Available, Already Listed, Requested, Incomplete) so I can filter products by their listing status",
+      "benefit": "I can focus on products that need action (Available to list, Incomplete to complete) rather than seeing everything at once",
+      "acceptance_criteria": [
+        "SKU Status filter shows 'Available' option",
+        "SKU Status filter shows 'Already Listed' option",
+        "SKU Status filter shows 'Requested' option",
+        "SKU Status filter shows 'Incomplete' option",
+        "Selecting a status filters the product list to show only that status"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the SKU Status filter button", "expected": "Filter dropdown/panel opens showing status options"},
+      {"step": 2, "action": "Verify 'Available' option exists in the filter", "expected": "'Available' option is visible and clickable"},
+      {"step": 3, "action": "Verify 'Already Listed' option exists", "expected": "'Already Listed' option is visible"},
+      {"step": 4, "action": "Verify 'Requested' option exists", "expected": "'Requested' option is visible"},
+      {"step": 5, "action": "Verify 'Incomplete' option exists", "expected": "'Incomplete' option is visible"},
+      {"step": 6, "action": "Click 'Available' to filter by that status", "expected": "Product list updates to show only Available products"},
+      {"step": 7, "action": "Check for page errors after filtering", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-006": {
+    "user_story": {
+      "summary": "Sort Dropdown - Sort products by different criteria",
+      "role": "Seller",
+      "want": "the Sort dropdown to show sorting options (Popular, Recently Added, Product Name, etc.) so I can reorder the product list",
+      "benefit": "I can view products in the order most relevant to my business needs (popularity for trending items, recently added for new products)",
+      "acceptance_criteria": [
+        "Sort dropdown opens on click",
+        "'Popular' sorting option is available",
+        "'Recently Added' sorting option is available",
+        "'Product Name' sorting option is available",
+        "Selecting a sort option reorders the product list"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the Sort dropdown button", "expected": "Sort dropdown opens showing sorting options"},
+      {"step": 2, "action": "Verify 'Popular' option exists", "expected": "'Popular' sorting option is visible"},
+      {"step": 3, "action": "Verify 'Recently Added' option exists", "expected": "'Recently Added' sorting option is visible"},
+      {"step": 4, "action": "Verify 'Product Name' option exists", "expected": "'Product Name' sorting option is visible"},
+      {"step": 5, "action": "Click 'Popular' to apply sorting", "expected": "Product list reorders by popularity"},
+      {"step": 6, "action": "Check for page errors after sorting", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-007": {
+    "user_story": {
+      "summary": "More Filters - Category dropdown with search in expanded filter section",
+      "role": "Seller",
+      "want": "the 'More' section to reveal a Category dropdown with search functionality so I can filter by product category",
+      "benefit": "I can apply additional filters beyond the primary ones to find very specific products",
+      "acceptance_criteria": [
+        "Clicking 'More' reveals additional filter options",
+        "Category dropdown appears in the expanded section",
+        "Category dropdown has a search input",
+        "Searching in the Category dropdown filters options"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the 'More' button to expand additional filters", "expected": "Additional filter section expands, revealing Category dropdown"},
+      {"step": 2, "action": "Verify Category dropdown appears", "expected": "Category dropdown is visible in the expanded section"},
+      {"step": 3, "action": "Click the Category dropdown", "expected": "Category dropdown opens with options and a search input"},
+      {"step": 4, "action": "Verify search input appears inside the Category dropdown", "expected": "Search input field is visible within the dropdown"},
+      {"step": 5, "action": "Type a category name to search", "expected": "Category options filter to show matching categories"},
+      {"step": 6, "action": "Check for page errors", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-008": {
+    "user_story": {
+      "summary": "More Filters - Packing Size dropdown with search",
+      "role": "Seller",
+      "want": "the 'More' section to reveal a Packing Size dropdown with search so I can filter products by their packaging size",
+      "benefit": "I can find products with specific packing sizes relevant to my customers' demand patterns",
+      "acceptance_criteria": [
+        "Packing Size dropdown appears in the 'More' expanded section",
+        "Packing Size dropdown has a search input",
+        "Searching filters the packing size options"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the 'More' button to expand filters", "expected": "Additional filter section expands"},
+      {"step": 2, "action": "Verify Packing Size dropdown appears", "expected": "Packing Size dropdown is visible"},
+      {"step": 3, "action": "Click the Packing Size dropdown", "expected": "Dropdown opens with packing size options and search input"},
+      {"step": 4, "action": "Verify search input appears inside the dropdown", "expected": "Search input is visible"},
+      {"step": 5, "action": "Type a packing size to search", "expected": "Options filter to show matching packing sizes"},
+      {"step": 6, "action": "Check for page errors", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-009": {
+    "user_story": {
+      "summary": "Tab Navigation - Toggle between All Products and Requested views",
+      "role": "Seller",
+      "want": "to toggle between 'All Products' and 'Requested' tabs so I can see all available products or only those I've already requested",
+      "benefit": "I can track which products I've already submitted requests for and focus on new products to list",
+      "acceptance_criteria": [
+        "'All Products' tab is visible",
+        "'Requested' tab is visible",
+        "Clicking 'Requested' shows only requested products",
+        "Clicking 'All Products' restores the full list",
+        "Tab toggle does not cause errors or blank screens"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Verify 'All Products' tab is visible on the Catalog page", "expected": "'All Products' tab/button is present"},
+      {"step": 2, "action": "Verify 'Requested' tab is visible", "expected": "'Requested' tab/button is present"},
+      {"step": 3, "action": "Click the 'Requested' tab", "expected": "Product list changes to show only requested products"},
+      {"step": 4, "action": "Scroll down to verify content has changed", "expected": "Only requested products are visible, or a 'no requested products' message appears"},
+      {"step": 5, "action": "Click back to 'All Products' tab", "expected": "Full product list is restored"},
+      {"step": 6, "action": "Check for page errors during tab switching", "expected": "No error toasts or blank screens"}
+    ]
+  },
+  "TC-CATALOG-010": {
+    "user_story": {
+      "summary": "Catalog Scrolling - Smooth scroll with persistent product cards",
+      "role": "Seller",
+      "want": "the Catalog page to scroll smoothly without losing or duplicating product cards",
+      "benefit": "I can browse through hundreds of products without UI glitches, blank cards, or performance issues",
+      "acceptance_criteria": [
+        "Page scrolls down smoothly without lag",
+        "Product cards remain visible and interactive after scrolling",
+        "Scrolling back up restores previously visible cards",
+        "No duplicate or missing cards after scroll",
+        "No errors during scroll"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Scroll down 500px on the Catalog page", "expected": "Page scrolls smoothly, new product cards come into view"},
+      {"step": 2, "action": "Scroll down 500px again", "expected": "More products load or become visible"},
+      {"step": 3, "action": "Scroll down 500px a third time", "expected": "Continued smooth scrolling"},
+      {"step": 4, "action": "Scroll back up 500px three times", "expected": "Previously viewed cards are still present and interactive"},
+      {"step": 5, "action": "Verify product cards are still visible and clickable", "expected": "Cards render correctly, no blank or duplicate cards"},
+      {"step": 6, "action": "Check for errors during scrolling", "expected": "No error toasts, no layout shifts, no blank areas"}
+    ]
+  },
+  "TC-CATALOG-011": {
+    "user_story": {
+      "summary": "Addable Product Card - '+' button opens Add Product modal",
+      "role": "Seller",
+      "want": "to click the '+' button on addable product cards to open the Add Product modal",
+      "benefit": "I can quickly add new products to my store listing with a single click",
+      "acceptance_criteria": [
+        "Addable product cards display a '+' button",
+        "Clicking '+' opens the Add Product modal",
+        "Modal contains required fields for adding the product",
+        "Skips gracefully if no addable cards exist"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Scan the Catalog page for product cards with a '+' button", "expected": "At least one addable card with '+' is visible (test skips if none)"},
+      {"step": 2, "action": "Click the '+' button on an addable card", "expected": "Add Product modal opens"},
+      {"step": 3, "action": "Verify the modal contains product addition fields", "expected": "Modal displays fields like price, HSN, quantity, etc."},
+      {"step": 4, "action": "Check for page errors", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-012": {
+    "user_story": {
+      "summary": "Listed Product Card - Manage Listing opens Edit Product modal",
+      "role": "Seller",
+      "want": "to click 'Manage Listing' on already-listed product cards to edit my product listing details",
+      "benefit": "I can update pricing, stock status, and other listing details for products already in my store",
+      "acceptance_criteria": [
+        "Listed product cards display a 'Manage Listing' button",
+        "Clicking 'Manage Listing' opens the Edit Product modal",
+        "Modal shows current listing details for editing",
+        "Skips gracefully if no listed products exist"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Scan the Catalog for cards with 'Manage Listing' button", "expected": "At least one listed card is visible (test skips if none)"},
+      {"step": 2, "action": "Click 'Manage Listing' on a listed product card", "expected": "Edit Product modal opens"},
+      {"step": 3, "action": "Verify the modal shows existing listing details", "expected": "Modal displays current HSN, MRP, Your Price, and other fields"},
+      {"step": 4, "action": "Check for page errors", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-013": {
+    "user_story": {
+      "summary": "Incomplete Product Card - Request Product modal with required fields",
+      "role": "Seller",
+      "want": "to click 'Request Product' on incomplete product cards and fill in the required details (HSN Code, Price, etc.)",
+      "benefit": "I can submit product requests for items that need additional information before they can be listed",
+      "acceptance_criteria": [
+        "Incomplete cards display 'Request Product' button",
+        "Clicking opens the Request Product modal",
+        "Modal contains HSN Code field",
+        "Modal contains Your Price field",
+        "Modal contains other required fields (Master Pack, Weight, Dimensions, Image, Expiry, In Stock)"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Find a product card with 'Request Product' button", "expected": "At least one incomplete card is visible"},
+      {"step": 2, "action": "Click 'Request Product'", "expected": "Request Product modal opens"},
+      {"step": 3, "action": "Verify HSN Code field is visible in the modal", "expected": "HSN Code input field is present"},
+      {"step": 4, "action": "Verify Your Price field is visible", "expected": "Your Price input field is present"},
+      {"step": 5, "action": "Verify other required fields are present", "expected": "Master Pack, Dead Weight, Dimensions, Image upload, MRP, Expiry, In Stock fields exist"},
+      {"step": 6, "action": "Close the modal", "expected": "Modal closes without errors"}
+    ]
+  },
+  "TC-CATALOG-014": {
+    "user_story": {
+      "summary": "Requested Product Card - Shows 'Requested' status badge",
+      "role": "Seller",
+      "want": "to see a 'Requested' status badge on products I've already submitted requests for",
+      "benefit": "I can immediately identify which products are pending review and avoid duplicate requests",
+      "acceptance_criteria": [
+        "Previously requested products display a 'Requested' badge/status",
+        "Badge is clearly visible on the product card"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Scroll through the Catalog page", "expected": "Various product cards with different statuses are visible"},
+      {"step": 2, "action": "Look for a product card with a 'Requested' status badge", "expected": "At least one card shows a 'Requested' badge (test skips if none)"},
+      {"step": 3, "action": "Verify the badge is clearly visible and readable", "expected": "'Requested' text/badge is prominent on the card"}
+    ]
+  },
+  "TC-CATALOG-015": {
+    "user_story": {
+      "summary": "Blocked/OOS Product Card - Shows blocked or out-of-stock status",
+      "role": "Seller",
+      "want": "to see blocked or out-of-stock indicators on products that are not available for listing",
+      "benefit": "I can avoid trying to list products that are blocked by compliance or currently out of stock",
+      "acceptance_criteria": [
+        "Blocked products show 'Blocked' or similar status text",
+        "Out-of-stock products show 'OOS' or 'Out of Stock' text",
+        "Status text is clearly visible on the card"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Check the Catalog page for 'Blocked', 'OOS', or 'Out of Stock' text", "expected": "At least one card shows blocked/OOS status (test skips if none)"},
+      {"step": 2, "action": "Verify the status text is clearly visible on the card", "expected": "Status indicator is prominent and readable"}
+    ]
+  },
+  "TC-CATALOG-016": {
+    "user_story": {
+      "summary": "Incorrect Product Modal - Report product data issues",
+      "role": "Seller",
+      "want": "to click 'Incorrect?' on a product card to report issues with product data (wrong image, wrong description, etc.)",
+      "benefit": "I can flag incorrect product information so the catalog team can fix it, ensuring accurate product listings",
+      "acceptance_criteria": [
+        "'Incorrect?' link is visible on product cards",
+        "Clicking opens the Incorrect Product modal",
+        "Modal contains a 'Select Issue' dropdown",
+        "Modal contains a comment textarea for details",
+        "Modal contains a 'Request Change' button"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click the 'Incorrect?' link on a product card", "expected": "Incorrect Product modal opens"},
+      {"step": 2, "action": "Verify the modal opens with form fields", "expected": "Modal is visible with input fields"},
+      {"step": 3, "action": "Verify 'Select Issue' dropdown is visible", "expected": "Issue type dropdown is present (e.g. Image, Description, Price)"},
+      {"step": 4, "action": "Verify comment textarea is visible", "expected": "Textarea for adding details about the issue is present"},
+      {"step": 5, "action": "Verify 'Request Change' button is visible", "expected": "Submit button is present"},
+      {"step": 6, "action": "Close the modal", "expected": "Modal closes without errors"}
+    ]
+  },
+  "TC-CATALOG-017": {
+    "user_story": {
+      "summary": "Request Variant Modal - Request a variant of an existing product",
+      "role": "Seller",
+      "want": "to click 'Request Variant' on a product card to request a new variant (different packing size, formulation, etc.)",
+      "benefit": "I can request product variants that my customers need without starting from scratch",
+      "acceptance_criteria": [
+        "'Request Variant' link is visible on product cards",
+        "Clicking opens a modal with pre-filled form fields",
+        "Fields are inherited from the parent product",
+        "Modal allows submitting the variant request"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click 'Request Variant' on a product card", "expected": "Request Variant modal opens"},
+      {"step": 2, "action": "Verify the modal opens with input fields", "expected": "Form fields are visible"},
+      {"step": 3, "action": "Verify inputs have pre-filled values from the parent product", "expected": "Brand, category, and other fields are pre-populated"},
+      {"step": 4, "action": "Close the modal", "expected": "Modal closes without errors"}
+    ]
+  },
+  "TC-CATALOG-018": {
+    "user_story": {
+      "summary": "Request Product Modal - All required fields present for product request",
+      "role": "Seller",
+      "want": "the Request Product modal to contain all required fields (Master Pack, Dead Weight, L/B/H, HSN, Image, MRP, Your Price, Expiry, In Stock)",
+      "benefit": "I can provide all necessary product details in one form to submit a complete product request",
+      "acceptance_criteria": [
+        "Master Pack input field is present",
+        "Dead Weight input field is present",
+        "Length, Breadth, Height input fields are present",
+        "HSN Code input field is present",
+        "Image file upload input is present",
+        "MRP (Price) input field is present",
+        "Your Price input field is present",
+        "Expiry date picker is present",
+        "In Stock toggle is present",
+        "Request Product submit button is present"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Open the Request Product modal from an incomplete card", "expected": "Modal opens with form fields"},
+      {"step": 2, "action": "Verify Master Pack input is present", "expected": "Master Pack numeric input field exists"},
+      {"step": 3, "action": "Verify Dead Weight input is present", "expected": "Dead Weight numeric input field exists"},
+      {"step": 4, "action": "Verify Length (L), Breadth (B), Height (H) inputs are present", "expected": "Three dimension input fields exist"},
+      {"step": 5, "action": "Verify HSN Code input is present", "expected": "HSN Code input field exists"},
+      {"step": 6, "action": "Verify file upload input for product image is present", "expected": "File upload input or drag-drop area exists"},
+      {"step": 7, "action": "Verify Price (MRP) input is present", "expected": "MRP input field exists"},
+      {"step": 8, "action": "Verify Your Price input is present", "expected": "Your Price input field exists"},
+      {"step": 9, "action": "Verify Expiry date picker is present", "expected": "Date picker or date input for expiry exists"},
+      {"step": 10, "action": "Verify In Stock toggle is present", "expected": "Toggle or checkbox for stock status exists"},
+      {"step": 11, "action": "Verify Request Product submit button is present", "expected": "Submit/action button exists"},
+      {"step": 12, "action": "Close the modal", "expected": "Modal closes without errors"}
+    ]
+  },
+  "TC-CATALOG-019": {
+    "user_story": {
+      "summary": "Request Product Submission - Fill all fields and submit successfully",
+      "role": "Seller",
+      "want": "to fill all required fields in the Request Product modal and submit the product request successfully",
+      "benefit": "I can submit a complete product request with all necessary details for the catalog team to review and approve",
+      "acceptance_criteria": [
+        "All required fields can be filled (dimensions, HSN, image, MRP, price, expiry)",
+        "Request Product button enables only after all required fields are filled",
+        "Clicking submit processes the request without errors",
+        "Modal closes or shows success message after submission"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Open the Request Product modal", "expected": "Modal opens with empty form fields"},
+      {"step": 2, "action": "Fill Length, Breadth, Height dimensions (e.g. 10, 5, 3)", "expected": "Dimension fields accept numeric input"},
+      {"step": 3, "action": "Fill HSN Code (e.g. '3105')", "expected": "HSN Code field accepts input"},
+      {"step": 4, "action": "Upload a test image via the file upload input", "expected": "Image uploads successfully, preview or filename shown"},
+      {"step": 5, "action": "Fill MRP/Price (e.g. '500')", "expected": "MRP field accepts numeric input"},
+      {"step": 6, "action": "Fill Your Price (e.g. '450')", "expected": "Your Price field accepts numeric input"},
+      {"step": 7, "action": "Set Expiry date to a future date", "expected": "Date picker allows selecting a future date"},
+      {"step": 8, "action": "Ensure In Stock toggle is ON", "expected": "Toggle is in the ON position"},
+      {"step": 9, "action": "Verify the Request Product button is now enabled", "expected": "Button is clickable (not greyed out)"},
+      {"step": 10, "action": "Click the Request Product submit button", "expected": "Form submits, modal closes or redirects with success message"},
+      {"step": 11, "action": "Verify no error toasts or validation errors appear", "expected": "No errors, submission succeeded"}
+    ]
+  },
+  "TC-CATALOG-020": {
+    "user_story": {
+      "summary": "Request Variant Modal - Pre-filled fields from parent product",
+      "role": "Seller",
+      "want": "the Request Variant modal to show pre-filled fields inherited from the parent product",
+      "benefit": "I don't have to re-enter common product details when requesting a variant, saving time and reducing errors",
+      "acceptance_criteria": [
+        "Request Variant modal opens with pre-filled form fields",
+        "Brand, category, and other common fields are pre-populated from the parent product",
+        "Fields can be edited to reflect the variant's differences",
+        "Modal can be submitted after editing"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Open the Request Variant modal from a product card", "expected": "Modal opens with form fields"},
+      {"step": 2, "action": "Verify form fields are present", "expected": "All variant form fields are visible"},
+      {"step": 3, "action": "Verify inputs have pre-filled values from the parent product", "expected": "Brand, category, and other fields show values from the parent product"},
+      {"step": 4, "action": "Close the modal", "expected": "Modal closes without errors"}
+    ]
+  },
+  "TC-CATALOG-021": {
+    "user_story": {
+      "summary": "Incorrect Product Report - Select issue type and submit with comment",
+      "role": "Seller",
+      "want": "to select an issue type, add a comment, and submit an incorrect product report",
+      "benefit": "I can report specific issues with product data so the catalog team can investigate and fix them",
+      "acceptance_criteria": [
+        "Issue type dropdown shows relevant options (Image, Description, Price, etc.)",
+        "Comment textarea accepts detailed text",
+        "Request Change button enables after selecting issue and adding comment",
+        "Submission succeeds without errors"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Open the Incorrect Product modal", "expected": "Modal opens with issue selection fields"},
+      {"step": 2, "action": "Click the 'Select an option' dropdown", "expected": "Dropdown opens with issue type options"},
+      {"step": 3, "action": "Select an issue type (e.g. 'Image')", "expected": "Issue type is selected"},
+      {"step": 4, "action": "Fill in the comment textarea with a description", "expected": "Text is entered in the textarea"},
+      {"step": 5, "action": "Verify 'Request Change' button is enabled", "expected": "Button is clickable"},
+      {"step": 6, "action": "Click 'Request Change' to submit", "expected": "Report submits successfully, modal closes or shows confirmation"}
+    ]
+  },
+  "TC-CATALOG-022": {
+    "user_story": {
+      "summary": "Edit Product Modal - Modify existing listing details",
+      "role": "Seller",
+      "want": "to open the Edit Product modal from 'Manage Listing' and update HSN, MRP, Your Price, and other listing details",
+      "benefit": "I can keep my product listings up-to-date with current pricing and product information",
+      "acceptance_criteria": [
+        "Edit Product modal opens from 'Manage Listing' button",
+        "HSN Code field is present and editable",
+        "MRP field is present and editable",
+        "Your Price field is present and editable",
+        "Changes can be saved successfully"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Click 'Manage Listing' on a listed product card", "expected": "Edit Product modal opens"},
+      {"step": 2, "action": "Verify the modal opens with edit fields", "expected": "Modal is visible with input fields"},
+      {"step": 3, "action": "Verify HSN Code field is present and has a value", "expected": "HSN field exists with current value"},
+      {"step": 4, "action": "Verify MRP field is present and has a value", "expected": "MRP field exists with current value"},
+      {"step": 5, "action": "Verify Your Price field is present and has a value", "expected": "Your Price field exists with current value"},
+      {"step": 6, "action": "Close the modal", "expected": "Modal closes without errors"},
+      {"step": 7, "action": "Check for page errors", "expected": "No error toasts or alerts"}
+    ]
+  },
+  "TC-CATALOG-023": {
+    "user_story": {
+      "summary": "Create New Product - Full product creation from scratch",
+      "role": "Seller",
+      "want": "to create a brand new product listing via the 'Could not find your product?' section with all required fields",
+      "benefit": "I can list products that don't exist in the Agrim catalog yet, expanding my store's product range",
+      "acceptance_criteria": [
+        "'Could not find your product?' section is visible in the catalog",
+        "'Create New Product' button is available",
+        "Create New Product modal opens with all required fields (Brand, Product Name, Packing, HSN, MRP, Your Price)",
+        "Modal can be submitted after filling all fields"
+      ]
+    },
+    "test_steps": [
+      {"step": 1, "action": "Scroll down through the Catalog to find 'Could not find your product?' section", "expected": "Section appears (typically after every 10 product cards). Test skips if not found."},
+      {"step": 2, "action": "Click 'Create New Product' button in the section", "expected": "Create New Product modal opens"},
+      {"step": 3, "action": "Verify the modal opens with form fields", "expected": "Modal is visible with input fields"},
+      {"step": 4, "action": "Verify Brand field is present", "expected": "Brand input/select field exists"},
+      {"step": 5, "action": "Verify Product Name field is present", "expected": "Product Name input field exists"},
+      {"step": 6, "action": "Verify Packing Size field is present", "expected": "Packing input field exists"},
+      {"step": 7, "action": "Verify HSN Code field is present", "expected": "HSN Code input field exists"},
+      {"step": 8, "action": "Verify MRP field is present", "expected": "MRP input field exists"},
+      {"step": 9, "action": "Verify Your Price field is present", "expected": "Your Price input field exists"},
+      {"step": 10, "action": "Close the modal", "expected": "Modal closes without errors"}
+    ]
+  }
+}
