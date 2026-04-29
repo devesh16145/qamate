@@ -172,15 +172,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                     detailEl.classList.remove('hidden');
                     detailEl.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px;">Loading...</div>';
 
-                    // Load artifacts
-                    const runPath = run.folder_path || run.id;
-                    if (runPath) loadArtifacts(runPath);
                     showResultCard(run);
 
                     // Load test data for this run's TCs
                     const tcIds = run.tc_ids || [];
                     const flowId = guessFlowId(tcIds);
                     const items = tcIds.map(tcId => ({ flowId, tcId }));
+                    const runPath = run.folder_path || run.id;
 
                     let html = '';
                     if (items.length > 0) {
@@ -356,12 +354,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 renderHistory();
                 if (data.summary) {
                     showResultCard(data.summary);
-                    // Delay artifact loading slightly to ensure video rename completes
-                    setTimeout(() => {
-                        if (data.summary.folder_path) {
-                            loadArtifacts(data.summary.folder_path);
-                        }
-                    }, 2000);
                 }
                 break;
 
@@ -410,80 +402,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('open-folder-btn').onclick = () => {
             if (summary.folder_path) window.ats.openFolder(summary.folder_path);
         };
-    }
-
-    // ── Artifacts (videos, screenshots, reports) ──
-    async function loadArtifacts(runIdOrPath) {
-        const section = document.getElementById('artifacts-section');
-        const list = document.getElementById('artifacts-list');
-        const titleEl = document.getElementById('artifacts-title');
-        list.innerHTML = '<div class="loading" style="font-size:11px;">Loading...</div>';
-        section.classList.remove('hidden');
-
-        // Extract run timestamp for display
-        const runName = runIdOrPath.split(/[/\\]/).pop();
-        titleEl.textContent = `── ARTIFACTS: ${runName.replace(/_/g, ' ')} ──`;
-
-        try {
-            addLog(`📦 Loading artifacts for: ${runIdOrPath}`, 'system');
-            const artifacts = await window.ats.getRunArtifacts(runIdOrPath);
-            list.innerHTML = '';
-
-            addLog(`📦 Found ${artifacts.videos.length} videos, ${artifacts.screenshots.length} screenshots`, 'system');
-
-            if (artifacts.videos.length === 0 && artifacts.screenshots.length === 0 && !artifacts.report) {
-                list.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">No artifacts found</div>';
-                return;
-            }
-
-            // Videos
-            if (artifacts.videos.length > 0) {
-                const title = document.createElement('div');
-                title.className = 'artifact-group-title';
-                title.textContent = `Videos (${artifacts.videos.length})`;
-                list.appendChild(title);
-
-                artifacts.videos.forEach(v => {
-                    const item = document.createElement('div');
-                    item.className = 'artifact-item';
-                    item.innerHTML = `<span class="artifact-icon">🎬</span><span class="artifact-name">${v.name}</span>`;
-                    item.onclick = () => window.ats.openFile(v.path);
-                    list.appendChild(item);
-                });
-            }
-
-            // Screenshots (failures)
-            if (artifacts.screenshots.length > 0) {
-                const title = document.createElement('div');
-                title.className = 'artifact-group-title';
-                title.textContent = `Failed Screenshots (${artifacts.screenshots.length})`;
-                list.appendChild(title);
-
-                artifacts.screenshots.forEach(s => {
-                    const item = document.createElement('div');
-                    item.className = 'artifact-item fail-artifact';
-                    item.innerHTML = `<span class="artifact-icon">📸</span><span class="artifact-name">${s.name}</span>`;
-                    item.onclick = () => window.ats.openFile(s.path);
-                    list.appendChild(item);
-                });
-            }
-
-            // Report
-            if (artifacts.report) {
-                const title = document.createElement('div');
-                title.className = 'artifact-group-title';
-                title.textContent = 'Report';
-                list.appendChild(title);
-
-                const item = document.createElement('div');
-                item.className = 'artifact-item report-artifact';
-                item.innerHTML = `<span class="artifact-icon">📊</span><span class="artifact-name">Excel Report</span>`;
-                item.onclick = () => window.ats.openFile(artifacts.report);
-                list.appendChild(item);
-            }
-        } catch (err) {
-            list.innerHTML = `<div style="font-size:11px;color:var(--accent-red);">Error: ${err.message}</div>`;
-        }
     }
 
     // ── Settings Modal ──
