@@ -568,7 +568,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     }
-    }
 
     saveDataBtn.addEventListener('click', async () => {
         // Save TC meta (heading + description)
