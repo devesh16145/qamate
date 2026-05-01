@@ -819,6 +819,51 @@ select.compact {
 .td-status.error { color: var(--accent-red); }
 .td-status.saved { color: var(--accent-green); }
 
+/* ── Variant Bar ── */
+.td-variant-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    padding: 5px 8px;
+    background: var(--bg-highlight);
+    border: var(--border-width) solid var(--border-color);
+    border-radius: var(--border-radius-xs);
+}
+
+.td-variant-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.td-variant-select {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    color: var(--accent-purple);
+    background: #fff;
+    border: var(--border-width) solid var(--border-color);
+    border-radius: 6px;
+    outline: none;
+}
+
+.td-variant-select:focus {
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.25);
+}
+
+.td-action-btn.small {
+    padding: 2px 8px;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
 /* ── User Stories & Test Steps content ── */
 .us-content, .ts-content {
     font-size: 12px;

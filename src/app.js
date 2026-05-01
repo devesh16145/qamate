@@ -28,6 +28,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const usContent = document.getElementById('us-content');
     const tsContent = document.getElementById('ts-content');
     const tabBtns = document.querySelectorAll('.tab-btn');
+    // Variant management
+    const tdVariantBar = document.getElementById('td-variant-bar');
+    const tdVariantSelect = document.getElementById('td-variant-select');
+    const tdVariantAdd = document.getElementById('td-variant-add');
+    const tdVariantDup = document.getElementById('td-variant-dup');
+    const tdVariantDel = document.getElementById('td-variant-del');
+    let activeVariantFlow = null;
+    let activeVariantTcId = null;
+    let activeVariants = null; // { name: { data }, ... }
+    let activeVariantName = null;
 
     // ── State ──
     let allFlows = [];
@@ -924,24 +934,144 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (selectedTcItems.length === 0) {
             bottomPanel.classList.add('hidden');
             currentTdData = {};
+            hideVariantBar();
             return;
         }
 
         bottomPanel.classList.remove('hidden');
-        tdSelectedInfo.textContent = selectedTcItems.map(t => t.tcId).join(', ');
 
-        // Load test data
-        try {
-            currentTdData = await window.ats.getBulkTcData(selectedTcItems);
-            tdEditor.value = JSON.stringify(currentTdData, null, 2);
-            setTdStatus('');
-        } catch (e) {
-            setTdStatus('Error loading data: ' + e.message, 'error');
+        // Single TC selected — check for variants
+        if (selectedTcItems.length === 1) {
+            const { flowId, tcId } = selectedTcItems[0];
+            tdSelectedInfo.textContent = tcId;
+            try {
+                const result = await window.ats.getTcData({ flowId, tcId });
+                if (result.isVariant) {
+                    activeVariantFlow = flowId;
+                    activeVariantTcId = tcId;
+                    activeVariants = result.variants;
+                    showVariantBar(Object.keys(activeVariants));
+                    loadUserStoriesAndSteps();
+                    return;
+                } else {
+                    hideVariantBar();
+                    currentTdData = { [tcId]: result.data };
+                    tdEditor.value = JSON.stringify(currentTdData, null, 2);
+                    setTdStatus('');
+                }
+            } catch (e) {
+                hideVariantBar();
+                setTdStatus('Error loading data: ' + e.message, 'error');
+            }
+        } else {
+            // Multiple TCs — bulk mode, no variant bar
+            hideVariantBar();
+            tdSelectedInfo.textContent = selectedTcItems.map(t => t.tcId).join(', ');
+            try {
+                currentTdData = await window.ats.getBulkTcData(selectedTcItems);
+                tdEditor.value = JSON.stringify(currentTdData, null, 2);
+                setTdStatus('');
+            } catch (e) {
+                setTdStatus('Error loading data: ' + e.message, 'error');
+            }
         }
 
         // Load user stories and test steps
         loadUserStoriesAndSteps();
     }
+
+    function showVariantBar(variantNames) {
+        activeVariantName = variantNames[0] || 'default';
+        tdVariantSelect.innerHTML = variantNames.map(n =>
+            `<option value="${n}" ${n === activeVariantName ? 'selected' : ''}>${n}</option>`
+        ).join('');
+        tdVariantBar.classList.remove('hidden');
+        loadVariantData(activeVariantName);
+    }
+
+    function hideVariantBar() {
+        tdVariantBar.classList.add('hidden');
+        activeVariantFlow = null;
+        activeVariantTcId = null;
+        activeVariants = null;
+        activeVariantName = null;
+    }
+
+    function loadVariantData(variantName) {
+        if (!activeVariants || !variantName) return;
+        activeVariantName = variantName;
+        const data = activeVariants[variantName] || {};
+        currentTdData = data;
+        tdEditor.value = JSON.stringify(data, null, 2);
+        tdSelectedInfo.textContent = `${activeVariantTcId} [${variantName}]`;
+        setTdStatus('');
+    }
+
+    // Variant selector change
+    tdVariantSelect.addEventListener('change', (e) => {
+        loadVariantData(e.target.value);
+    });
+
+    // New variant
+    tdVariantAdd.addEventListener('click', async () => {
+        if (!activeVariantFlow || !activeVariantTcId) return;
+        const name = prompt('Variant name (e.g. negative, empty-fields, invalid-mrp):');
+        if (!name || !name.trim()) return;
+        const res = await window.ats.addTcVariant({
+            flowId: activeVariantFlow, tcId: activeVariantTcId,
+            variantName: name.trim(), copyFrom: activeVariantName
+        });
+        if (res.success) {
+            activeVariants = res.variants;
+            showVariantBar(Object.keys(activeVariants));
+            tdVariantSelect.value = name.trim();
+            loadVariantData(name.trim());
+            addLog(`Variant "${name.trim()}" created for ${activeVariantTcId}`, 'system');
+        } else {
+            alert('Failed: ' + (res.error || 'Unknown'));
+        }
+    });
+
+    // Duplicate variant
+    tdVariantDup.addEventListener('click', async () => {
+        if (!activeVariantFlow || !activeVariantTcId || !activeVariantName) return;
+        const name = activeVariantName + '-copy';
+        const res = await window.ats.addTcVariant({
+            flowId: activeVariantFlow, tcId: activeVariantTcId,
+            variantName: name, copyFrom: activeVariantName
+        });
+        if (res.success) {
+            activeVariants = res.variants;
+            showVariantBar(Object.keys(activeVariants));
+            tdVariantSelect.value = name;
+            loadVariantData(name);
+            addLog(`Variant "${name}" duplicated from "${activeVariantName}"`, 'system');
+        }
+    });
+
+    // Delete variant
+    tdVariantDel.addEventListener('click', async () => {
+        if (!activeVariantFlow || !activeVariantTcId || !activeVariantName) return;
+        if (Object.keys(activeVariants).length <= 1) {
+            alert('Cannot delete the last variant.');
+            return;
+        }
+        if (!confirm(`Delete variant "${activeVariantName}"?`)) return;
+        const res = await window.ats.deleteTcVariant({
+            flowId: activeVariantFlow, tcId: activeVariantTcId, variantName: activeVariantName
+        });
+        if (res.success) {
+            activeVariants = res.variants;
+            const remaining = Object.keys(activeVariants);
+            if (remaining.length > 0) {
+                showVariantBar(remaining);
+            } else {
+                hideVariantBar();
+                tdEditor.value = '{}';
+            }
+            addLog(`Variant "${activeVariantName}" deleted`, 'system');
+        }
+    });
 
     async function loadUserStoriesAndSteps() {
         // Group selected items by flowId
@@ -1099,11 +1229,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Save button
+    // Save button (variant-aware)
     tdSaveBtn.addEventListener('click', async () => {
         const parsed = parseEditorData();
         if (!parsed) return;
 
+        // Variant mode — save single variant
+        if (activeVariantFlow && activeVariantTcId && activeVariantName) {
+            const res = await window.ats.saveTcData({
+                flowId: activeVariantFlow, tcId: activeVariantTcId,
+                data: parsed, variant: activeVariantName
+            });
+            if (res.success) {
+                activeVariants[activeVariantName] = parsed;
+                currentTdData = parsed;
+                setTdStatus('Saved', 'saved');
+                addLog(`Data saved for ${activeVariantTcId} [${activeVariantName}]`, 'system');
+            } else {
+                setTdStatus('Save failed: ' + res.error, 'error');
+            }
+            return;
+        }
+
+        // Bulk mode — save all selected TCs
         const items = selectedTcItems.map(({ flowId, tcId }) => ({
             flowId,
             tcId,
@@ -1114,7 +1262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (res.success) {
             currentTdData = parsed;
             setTdStatus('Saved', 'saved');
-            addLog('💾 Test data saved for ' + items.length + ' test case(s)', 'system');
+            addLog('Test data saved for ' + items.length + ' test case(s)', 'system');
         } else {
             setTdStatus('Save failed: ' + res.error, 'error');
         }
