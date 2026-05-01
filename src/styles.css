@@ -825,10 +825,10 @@ select.compact {
     align-items: center;
     gap: 6px;
     margin-bottom: 6px;
-    padding: 5px 8px;
-    background: var(--bg-highlight);
-    border: var(--border-width) solid var(--border-color);
-    border-radius: var(--border-radius-xs);
+    padding: 6px 10px;
+    background: var(--bg-accent);
+    border: 2px solid var(--accent-purple);
+    border-radius: var(--border-radius-sm);
 }
 
 .td-variant-label {
@@ -859,8 +859,9 @@ select.compact {
 }
 
 .td-action-btn.small {
-    padding: 2px 8px;
+    padding: 3px 10px;
     font-size: 10px;
+    font-weight: 700;
     white-space: nowrap;
 }
 
