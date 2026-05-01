@@ -915,24 +915,6 @@ select.compact {
     color: #fff !important;
     border-color: var(--accent-red) !important;
 }
-.jira-bug-tc-btn {
-    font-size: 14px;
-    padding: 4px 6px;
-    min-width: 28px;
-    transition: all 0.2s;
-}
-.jira-bug-tc-btn.jira-success {
-    background: var(--accent-green) !important;
-    color: #fff !important;
-    border-color: var(--accent-green) !important;
-    font-size: 10px;
-    font-weight: 700;
-}
-.jira-bug-tc-btn.jira-error {
-    background: var(--accent-red) !important;
-    color: #fff !important;
-    border-color: var(--accent-red) !important;
-}
 
 .hd-tc-row {
     display: flex;
