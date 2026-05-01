@@ -227,6 +227,36 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const runPath = run.folder_path || run.id;
 
                     let html = '';
+                    // Checkpoint results (from run folder)
+                    try {
+                        const cpData = await window.ats.getRunCheckpoints(runPath);
+                        const cpTcIds = Object.keys(cpData);
+                        if (cpTcIds.length > 0) {
+                            html += `<div class="hd-section-title">Checkpoints</div>`;
+                            for (const cpTcId of cpTcIds) {
+                                const cps = cpData[cpTcId];
+                                const cpPassed = cps.filter(c => c.status === 'PASS').length;
+                                const cpFailed = cps.filter(c => c.status === 'FAIL').length;
+                                const cpSkipped = cps.filter(c => c.status === 'SKIP').length;
+                                const overallStatus = cpFailed > 0 ? '❌' : '✅';
+                                html += `<div class="hd-cp-block">
+                                    <div class="hd-tc-row">
+                                        <span class="hd-tc-id">${overallStatus} ${cpTcId}</span>
+                                        <span style="font-size:10px;color:var(--text-muted);">${cpPassed}/${cps.length} passed</span>
+                                        <button class="jira-bug-btn" data-tc-id="${cpTcId}" data-run-folder="${runPath || ''}" data-description="${(allFlows.flatMap(f => f.test_cases).find(t => t.tc_id === cpTcId) || {}).description || ''}">🐛 Bug</button>
+                                    </div>
+                                    <div class="hd-cp-list">
+                                        ${cps.map(cp => {
+                                            const icon = cp.status === 'PASS' ? '✓' : cp.status === 'FAIL' ? '✗' : '◌';
+                                            const cls = cp.status === 'PASS' ? 'cp-pass' : cp.status === 'FAIL' ? 'cp-fail' : 'cp-skip';
+                                            return `<div class="hd-cp-item ${cls}"><span class="hd-cp-icon">${icon}</span> ${cp.name}${cp.error ? ` <span class="hd-cp-err">— ${cp.error.substring(0, 120)}</span>` : ''}</div>`;
+                                        }).join('')}
+                                    </div>
+                                </div>`;
+                            }
+                        }
+                    } catch (e) { /* ignore checkpoint errors */ }
+
                     if (items.length > 0) {
                         try {
                             const bulkData = await window.ats.getBulkTcData(items);
@@ -404,6 +434,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } else {
                     addLog(`❌ ${data.tc_id} — FAILED`, 'fail');
                 }
+                // Show checkpoint breakdown
+                if (data.checkpoints && data.checkpoints.length > 0) {
+                    const cpPassed = data.checkpoints.filter(c => c.status === 'PASS').length;
+                    const cpFailed = data.checkpoints.filter(c => c.status === 'FAIL').length;
+                    const cpSkipped = data.checkpoints.filter(c => c.status === 'SKIP').length;
+                    addLog(`   └ Checkpoints: ${cpPassed} passed, ${cpFailed} failed, ${cpSkipped} skipped`, 'system');
+                    for (const cp of data.checkpoints) {
+                        const icon = cp.status === 'PASS' ? '  ✓' : cp.status === 'FAIL' ? '  ✗' : '  ◌';
+                        const type = cp.status === 'PASS' ? 'pass' : cp.status === 'FAIL' ? 'fail' : 'warn';
+                        addLog(`     ${icon} ${cp.name}${cp.error ? ' — ' + cp.error.substring(0, 100) : ''}`, type);
+                    }
+                }
+                // Store checkpoints for history
+                if (!window._lastRunCheckpoints) window._lastRunCheckpoints = {};
+                window._lastRunCheckpoints[data.tc_id] = data.checkpoints || [];
                 updateProgress();
                 break;
 

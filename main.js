@@ -278,6 +278,31 @@ ipcMain.handle('get-run-artifacts', async (event, runId) => {
 });
 
 // ──────────────────────────────────────
+// IPC: Get run checkpoints
+// ──────────────────────────────────────
+ipcMain.handle('get-run-checkpoints', async (event, runId) => {
+  let runDir;
+  if (path.isAbsolute(runId)) {
+    runDir = runId;
+  } else {
+    runDir = path.join(RESULTS_DIR, runId);
+  }
+  const cpDir = path.join(runDir, 'checkpoints');
+  if (!fs.existsSync(cpDir)) return {};
+
+  const result = {};
+  for (const f of fs.readdirSync(cpDir).filter(f => f.endsWith('.json'))) {
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(cpDir, f), 'utf8'));
+      if (data.tc_id && data.checkpoints) {
+        result[data.tc_id] = data.checkpoints;
+      }
+    } catch (e) { /* skip corrupt files */ }
+  }
+  return result;
+});
+
+// ──────────────────────────────────────
 // IPC: Record Test & Data Management
 // ──────────────────────────────────────
 // IPC: Record Test (Enhanced — returns structured steps for review)
@@ -746,6 +771,26 @@ function _buildBugDescription(tcId, description, errors, runFolder) {
     text += `--- Errors Found ---\n`;
     errors.forEach(e => { text += `${e}\n`; });
     text += `\n`;
+  }
+  // Include checkpoint breakdown if available
+  if (runFolder) {
+    const cpDir = path.join(runFolder, 'checkpoints');
+    const safeId = tcId.replace(/-/g, '_');
+    const cpFile = path.join(cpDir, `${safeId}.json`);
+    try {
+      if (fs.existsSync(cpFile)) {
+        const cpData = JSON.parse(fs.readFileSync(cpFile, 'utf8'));
+        const cps = cpData.checkpoints || [];
+        if (cps.length > 0) {
+          text += `--- Checkpoints ---\n`;
+          cps.forEach(cp => {
+            const icon = cp.status === 'PASS' ? 'PASS' : cp.status === 'FAIL' ? 'FAIL' : 'SKIP';
+            text += `[${icon}] ${cp.name}${cp.error ? ' — ' + cp.error.substring(0, 200) : ''}\n`;
+          });
+          text += `\n`;
+        }
+      }
+    } catch (e) { /* ignore */ }
   }
   text += `--- Steps to Reproduce ---\n`;
   text += `1. Open Agrim ATS\n`;

@@ -153,14 +153,16 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
             passed += 1
             tc_id = extract_tc_id(line)
             if tc_id:
-                emit({"event": "tc_result", "tc_id": tc_id, "status": "PASS", "duration": 0})
+                cps = _read_checkpoints(results_dir, tc_id)
+                emit({"event": "tc_result", "tc_id": tc_id, "status": "PASS", "duration": 0, "checkpoints": cps})
             emit({"event": "progress", "passed": passed, "failed": failed, "skipped": skipped, "total": total})
 
         elif " FAILED" in line or " ERROR" in line:
             failed += 1
             tc_id = extract_tc_id(line)
             if tc_id:
-                emit({"event": "tc_result", "tc_id": tc_id, "status": "FAIL", "duration": 0})
+                cps = _read_checkpoints(results_dir, tc_id)
+                emit({"event": "tc_result", "tc_id": tc_id, "status": "FAIL", "duration": 0, "checkpoints": cps})
             emit({"event": "progress", "passed": passed, "failed": failed, "skipped": skipped, "total": total})
 
         elif " SKIPPED" in line:
@@ -211,6 +213,21 @@ def extract_tc_id(line):
         # Convert TC_CATALOG_001 back to TC-CATALOG-001
         return match.group(1).replace("_", "-")
     return None
+
+
+def _read_checkpoints(results_dir, tc_id):
+    """Read checkpoint results written by conftest.py during the test run."""
+    cp_dir = os.path.join(results_dir, "checkpoints")
+    safe_id = tc_id.replace("-", "_")
+    cp_file = os.path.join(cp_dir, f"{safe_id}.json")
+    if os.path.exists(cp_file):
+        try:
+            with open(cp_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("checkpoints", [])
+        except Exception:
+            pass
+    return []
 
 
 def main():

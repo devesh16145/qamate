@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('ats', {
   openFolder: (path) => ipcRenderer.invoke('open-folder', path),
   openFile: (path) => ipcRenderer.invoke('open-file', path),
   getRunArtifacts: (runId) => ipcRenderer.invoke('get-run-artifacts', runId),
+  getRunCheckpoints: (runId) => ipcRenderer.invoke('get-run-checkpoints', runId),
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   recordTest: (options) => ipcRenderer.invoke('record-test', options),

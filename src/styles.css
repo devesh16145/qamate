@@ -1364,6 +1364,33 @@ select.compact {
     color: var(--text-primary);
 }
 
+/* ── Checkpoint display in history ── */
+.hd-cp-block {
+    margin-bottom: 12px;
+    padding: 8px;
+    background: rgba(26,29,35,0.02);
+    border-radius: var(--border-radius-xs);
+    border: 1px solid rgba(26,29,35,0.06);
+}
+.hd-cp-list {
+    margin-top: 4px;
+    padding-left: 4px;
+}
+.hd-cp-item {
+    font-size: 11px;
+    padding: 3px 6px;
+    border-radius: 3px;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+.hd-cp-item.cp-pass { color: var(--accent-green); }
+.hd-cp-item.cp-fail { color: var(--accent-red); background: rgba(239,68,68,0.05); }
+.hd-cp-item.cp-skip { color: var(--text-muted); }
+.hd-cp-icon { font-weight: 700; flex-shrink: 0; }
+.hd-cp-err { color: var(--accent-red); font-size: 10px; opacity: 0.8; }
+
 /* ============================================================
    MODALS
    ============================================================ */
