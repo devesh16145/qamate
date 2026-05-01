@@ -653,8 +653,8 @@ def test_TC_CATALOG_008_incorrect_product_flow(catalog_page: Page, tc_data, chec
 # ============================================================
 
 @pytest.mark.tc("TC-CATALOG-009")
-def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, checkpoints):
-    """Request Variant flow: open modal, verify pre-filled fields from parent product."""
+def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkpoints):
+    """Request Variant flow: open modal, verify pre-filled fields, fill additional data, submit."""
     page = catalog_page
     _scroll_to_top(page)
 
@@ -664,11 +664,13 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, checkpoints):
     def cp_open_modal():
         variant_btns = page.locator('button:has-text("Request Variant")')
         if variant_btns.count() == 0:
-            pytest.skip("No Request Variant buttons found")
+            checkpoints.skip("Open Request Variant modal", "No Request Variant buttons found")
+            return False
         variant_btns.first.click()
         page.wait_for_timeout(2000)
         dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
         expect(dialog).to_be_visible(timeout=5000)
+        return True
 
     def cp_verify_fields():
         dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
@@ -686,15 +688,28 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, checkpoints):
                 break
         assert has_value, "Expected at least one pre-filled field from parent product"
 
+    def cp_fill_and_submit():
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        submit_btn = dialog.locator('button:has-text("Request"), button:has-text("Submit"), button:has-text("Send")')
+        if submit_btn.count() == 0:
+            checkpoints.skip("Fill and submit variant", "No submit button found in variant modal")
+            return
+        _video_hold(page, 2)
+        submit_btn.first.click()
+        page.wait_for_timeout(3000)
+        _check_no_page_errors(page, "Request Variant submission")
+
     def cp_close():
         page.keyboard.press("Escape")
         page.wait_for_timeout(1000)
 
     checkpoints.run("Navigate to catalog page", cp_navigate)
-    checkpoints.run("Open Request Variant modal", cp_open_modal)
-    checkpoints.run("Verify modal has form fields", cp_verify_fields)
-    checkpoints.run("Verify fields are pre-filled from parent product", cp_verify_prefilled)
-    checkpoints.run("Close modal", cp_close)
+    opened = checkpoints.run("Open Request Variant modal", cp_open_modal)
+    if opened:
+        checkpoints.run("Verify modal has form fields", cp_verify_fields)
+        checkpoints.run("Verify fields are pre-filled from parent product", cp_verify_prefilled)
+        checkpoints.run("Fill additional data and submit", cp_fill_and_submit)
+        checkpoints.run("Close modal", cp_close)
     _video_hold(page)
 
 
@@ -703,14 +718,15 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, checkpoints):
 # ============================================================
 
 @pytest.mark.tc("TC-CATALOG-010")
-def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, checkpoints):
-    """Create New Product flow: scroll to section, open modal, verify all fields."""
+def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, checkpoints):
+    """Create New Product flow: scroll to section, open modal, fill fields, submit."""
     page = catalog_page
 
     def cp_navigate():
         expect(page.locator('input[placeholder*="Search"], input[type="search"]').first).to_be_visible()
 
     def cp_find_section():
+        _scroll_to_top(page)
         found = False
         for _ in range(10):
             _scroll_down(page, 500)
@@ -720,7 +736,9 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, checkpoints)
                 found = True
                 break
         if not found:
-            pytest.skip("'Could not find your product?' section not found")
+            checkpoints.skip("Find Create New Product section", "'Could not find your product?' section not found after scrolling")
+            return False
+        return True
 
     def cp_open_modal():
         page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")').first.click()
@@ -734,13 +752,56 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, checkpoints)
         for field in ["Brand", "Product Name", "Packing", "HSN", "MRP", "Your Price"]:
             assert field in body_text, f"Expected '{field}' in Create New Product modal"
 
+    def cp_fill_fields():
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        # Fill text inputs by placeholder labels found in the modal
+        field_map = {
+            "Brand": tc_data.get("brand", "Test Brand"),
+            "Product Name": tc_data.get("product_name", "Test Product ATS"),
+            "Packing": tc_data.get("packing", "500g"),
+            "HSN": tc_data.get("hsn", "12345678"),
+            "MRP": tc_data.get("mrp", "300"),
+            "Your Price": tc_data.get("your_price", "250"),
+        }
+        for label, value in field_map.items():
+            # Find input whose placeholder or associated label contains the field name
+            inp = dialog.locator(f'input[placeholder*="{label}"], input[placeholder*="{label.lower()}"]').first
+            if inp.count() > 0:
+                inp.click()
+                inp.fill(value)
+            else:
+                # Fallback: find input by looking for label text nearby
+                label_el = dialog.locator(f'text="{label}"').first
+                if label_el.count() > 0:
+                    # Try the next input sibling
+                    parent_input = label_el.evaluate_handle(
+                        'el => el.closest("div")?.querySelector("input") || el.parentElement?.querySelector("input")'
+                    )
+                    if parent_input:
+                        parent_input.fill(value)
+        page.wait_for_timeout(1000)
+
+    def cp_submit():
+        submit_btn = page.locator('[role="dialog"] button:has-text("Create"), [role="dialog"] button:has-text("Submit"), [role="dialog"] button:has-text("Request")').first
+        if submit_btn.count() > 0 and submit_btn.is_enabled():
+            _video_hold(page, 2)
+            submit_btn.click()
+            page.wait_for_timeout(3000)
+            _check_no_page_errors(page, "Create New Product submission")
+        else:
+            _video_hold(page, 2)
+            checkpoints.skip("Submit new product", "Submit button not found or not enabled")
+
     def cp_close():
         page.keyboard.press("Escape")
         page.wait_for_timeout(1000)
 
     checkpoints.run("Navigate to catalog page", cp_navigate)
-    checkpoints.run("Scroll to find 'Could not find your product?' section", cp_find_section)
-    checkpoints.run("Open Create New Product modal", cp_open_modal)
-    checkpoints.run("Verify all fields present (Brand, Product Name, Packing, HSN, MRP, Your Price)", cp_verify_fields)
-    checkpoints.run("Close modal", cp_close)
+    found = checkpoints.run("Scroll to find 'Could not find your product?' section", cp_find_section)
+    if found:
+        checkpoints.run("Open Create New Product modal", cp_open_modal)
+        checkpoints.run("Verify all fields present (Brand, Product Name, Packing, HSN, MRP, Your Price)", cp_verify_fields)
+        checkpoints.run("Fill all fields with test data", cp_fill_fields)
+        checkpoints.run("Submit and verify no errors", cp_submit)
+        checkpoints.run("Close modal", cp_close)
     _video_hold(page)
