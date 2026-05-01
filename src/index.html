@@ -198,6 +198,29 @@
                         <!-- User inputs injected here -->
                     </div>
                 </div>
+                <div class="settings-group">
+                    <h3>Jira Integration</h3>
+                    <div class="setting-item">
+                        <label>Jira URL</label>
+                        <input type="text" id="setting-jira-url" placeholder="https://yourcompany.atlassian.net">
+                    </div>
+                    <div class="setting-item">
+                        <label>Email</label>
+                        <input type="email" id="setting-jira-email" placeholder="you@company.com">
+                    </div>
+                    <div class="setting-item">
+                        <label>API Token</label>
+                        <input type="password" id="setting-jira-token" placeholder="Jira API token">
+                    </div>
+                    <div class="setting-item">
+                        <label>Project Key</label>
+                        <input type="text" id="setting-jira-project" placeholder="PM" value="PM">
+                    </div>
+                    <div class="setting-item" style="margin-top:4px;">
+                        <button id="test-jira-btn" class="secondary-btn small" type="button">Test Connection</button>
+                        <span id="jira-test-status" style="font-size:11px;margin-left:8px;"></span>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button id="save-settings-btn" class="primary-btn">Save Changes</button>

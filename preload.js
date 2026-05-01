@@ -34,4 +34,9 @@ contextBridge.exposeInMainWorld('ats', {
   saveUserStories: (options) => ipcRenderer.invoke('save-user-stories', options),
   getTcMeta: (options) => ipcRenderer.invoke('get-tc-meta', options),
   saveTcMeta: (options) => ipcRenderer.invoke('save-tc-meta', options),
+  // Jira
+  saveJiraConfig: (cfg) => ipcRenderer.invoke('save-jira-config', cfg),
+  testJiraConnection: () => ipcRenderer.invoke('test-jira-connection'),
+  createJiraBug: (options) => ipcRenderer.invoke('create-jira-bug', options),
+  createJiraStory: (options) => ipcRenderer.invoke('create-jira-story', options),
 });

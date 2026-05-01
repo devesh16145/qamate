@@ -865,6 +865,65 @@ select.compact {
     white-space: nowrap;
 }
 
+/* ── Jira Integration Buttons ── */
+.jira-bug-btn {
+    background: var(--accent-red-bg);
+    border: var(--border-width) solid var(--accent-red);
+    color: var(--accent-red);
+    padding: 2px 10px;
+    border-radius: var(--border-radius-xs);
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.jira-bug-btn:hover {
+    background: var(--accent-red);
+    color: #fff;
+}
+
+.jira-bug-btn.success {
+    background: var(--accent-green);
+    color: #fff;
+    border-color: var(--accent-green);
+}
+
+.jira-bug-btn.error {
+    background: var(--accent-red);
+    color: #fff;
+    border-color: var(--accent-red);
+}
+
+.jira-story-btn {
+    font-size: 14px;
+    padding: 4px 6px;
+    min-width: 28px;
+    transition: all 0.2s;
+}
+
+.jira-story-btn.jira-success {
+    background: var(--accent-green) !important;
+    color: #fff !important;
+    border-color: var(--accent-green) !important;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.jira-story-btn.jira-error {
+    background: var(--accent-red) !important;
+    color: #fff !important;
+    border-color: var(--accent-red) !important;
+}
+
+.hd-tc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
 /* ── User Stories & Test Steps content ── */
 .us-content, .ts-content {
     font-size: 12px;
