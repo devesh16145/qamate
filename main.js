@@ -798,6 +798,34 @@ ipcMain.handle('test-jira-connection', async () => {
   }
 });
 
+// ── Helper: find latest run folder that contains artifacts for a TC ──
+function _findLatestRunForTc(tcId) {
+  if (!fs.existsSync(RESULTS_DIR)) return null;
+  const runs = fs.readdirSync(RESULTS_DIR)
+    .filter(f => {
+      try { return fs.lstatSync(path.join(RESULTS_DIR, f)).isDirectory(); }
+      catch { return false; }
+    })
+    .sort().reverse();
+  for (const run of runs) {
+    const runDir = path.join(RESULTS_DIR, run);
+    const metaPath = path.join(runDir, 'run_metadata.json');
+    try {
+      if (fs.existsSync(metaPath)) {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        if (meta.tc_ids && meta.tc_ids.includes(tcId)) return runDir;
+      }
+    } catch (e) { /* skip */ }
+    // Fallback: check if any artifact filename contains the TC ID
+    const vidDir = path.join(runDir, 'videos');
+    const ssDir = path.join(runDir, 'screenshots');
+    const hasVid = fs.existsSync(vidDir) && fs.readdirSync(vidDir).some(f => f.includes(tcId));
+    const hasSs = fs.existsSync(ssDir) && fs.readdirSync(ssDir).some(f => f.includes(tcId));
+    if (hasVid || hasSs) return runDir;
+  }
+  return null;
+}
+
 // ── Create Jira Bug from failed test ──
 ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, errors }) => {
   const cfg = _getJiraConfig();
@@ -805,6 +833,11 @@ ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, 
     return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
   }
   try {
+    // Auto-find latest run if no folder provided
+    if (!runFolder) {
+      runFolder = _findLatestRunForTc(tcId);
+    }
+
     const summary = `BUG: ${tcId} — ${description || 'Automated test failure'}`;
     const body = {
       fields: {
@@ -820,20 +853,34 @@ ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, 
       return { success: false, error: `Jira returned HTTP ${res.status}: ${JSON.stringify(res.body)}` };
     }
     const issueKey = res.body.key;
+    let attachCount = 0;
 
-    // Attach screenshots + error logs
+    // Attach screenshots + videos
     if (runFolder) {
+      const tcNorm = tcId.replace(/-/g, '_');
+      // Screenshots
       const ssDir = path.join(runFolder, 'screenshots');
       if (fs.existsSync(ssDir)) {
         for (const f of fs.readdirSync(ssDir)) {
-          if (f.startsWith(tcId.replace(/-/g, '_')) || f.includes(tcId)) {
+          if (f.startsWith(tcNorm) || f.includes(tcId)) {
             await _jiraUploadAttachment(cfg, issueKey, path.join(ssDir, f), f);
+            attachCount++;
+          }
+        }
+      }
+      // Videos
+      const vidDir = path.join(runFolder, 'videos');
+      if (fs.existsSync(vidDir)) {
+        for (const f of fs.readdirSync(vidDir)) {
+          if (f.includes(tcId) || f.startsWith(tcNorm)) {
+            await _jiraUploadAttachment(cfg, issueKey, path.join(vidDir, f), f);
+            attachCount++;
           }
         }
       }
     }
 
-    return { success: true, key: issueKey, url: `${cfg.url}/browse/${issueKey}` };
+    return { success: true, key: issueKey, url: `${cfg.url}/browse/${issueKey}`, attachments: attachCount };
   } catch (e) {
     return { success: false, error: e.message };
   }
