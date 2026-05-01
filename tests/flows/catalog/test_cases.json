@@ -113,29 +113,32 @@
     {
         "tc_id": "TC-CATALOG-009",
         "module": "Catalog",
-        "description": "Request Variant flow: open modal, verify pre-filled fields from parent product",
+        "description": "Request Variant flow: open modal, verify pre-filled fields, fill additional data, submit",
         "preconditions": "Seller is on Catalog page",
         "checkpoints": [
             "Navigate to catalog page",
             "Open Request Variant modal",
-            "Verify modal opens with form fields",
+            "Verify modal has form fields",
             "Verify fields are pre-filled from parent product",
+            "Fill additional data and submit",
             "Close modal"
         ],
-        "expected_result": "Request Variant modal opens with pre-filled fields inherited from parent product"
+        "expected_result": "Request Variant modal opens with pre-filled fields inherited from parent product and submits"
     },
     {
         "tc_id": "TC-CATALOG-010",
         "module": "Catalog",
-        "description": "Create New Product flow: scroll to section, open modal, verify all fields",
+        "description": "Create New Product flow: scroll to section, open modal, fill fields, submit",
         "preconditions": "Seller is on Catalog page",
         "checkpoints": [
             "Navigate to catalog page",
             "Scroll to find 'Could not find your product?' section",
             "Open Create New Product modal",
             "Verify all fields present (Brand, Product Name, Packing, HSN, MRP, Your Price)",
+            "Fill all fields with test data",
+            "Submit and verify no errors",
             "Close modal"
         ],
-        "expected_result": "Create New Product modal opens with all required fields"
+        "expected_result": "Create New Product modal opens with all required fields, accepts data, and submits"
     }
 ]
