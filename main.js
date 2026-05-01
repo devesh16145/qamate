@@ -827,7 +827,7 @@ function _findLatestRunForTc(tcId) {
 }
 
 // ── Create Jira Bug from failed test ──
-ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, errors }) => {
+ipcMain.handle('create-jira-bug', async (event, { tcId, runFolder, errors, summary, labels, description }) => {
   const cfg = _getJiraConfig();
   if (!cfg.url || !cfg.email || !cfg.apiKey) {
     return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
@@ -838,14 +838,16 @@ ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, 
       runFolder = _findLatestRunForTc(tcId);
     }
 
-    const summary = `BUG: ${tcId} — ${description || 'Automated test failure'}`;
+    const finalSummary = summary || `BUG: ${tcId} — Automated test failure`;
+    const finalDesc = description || _buildBugDescription(tcId, '', errors, runFolder);
+    const finalLabels = labels && labels.length ? labels : ['automated-test', 'ats'];
     const body = {
       fields: {
         project: { key: cfg.projectKey },
         issuetype: { name: 'Bug' },
-        summary,
-        description: _buildBugDescription(tcId, description, errors, runFolder),
-        labels: ['automated-test', 'ats'],
+        summary: finalSummary,
+        description: finalDesc,
+        labels: finalLabels,
       },
     };
     const res = await _jiraRequest(cfg, 'POST', '/issue', body);
@@ -887,21 +889,23 @@ ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, 
 });
 
 // ── Create Jira Story from test case ──
-ipcMain.handle('create-jira-story', async (event, { tcId, flowId, userStory }) => {
+ipcMain.handle('create-jira-story', async (event, { tcId, flowId, userStory, summary, labels, description }) => {
   const cfg = _getJiraConfig();
   if (!cfg.url || !cfg.email || !cfg.apiKey) {
     return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
   }
   try {
     const s = (userStory && userStory.user_story) ? userStory.user_story : {};
-    const summary = s.summary || `${tcId} — ${flowId} test story`;
+    const finalSummary = summary || s.summary || `${tcId} — ${flowId} test story`;
+    const finalDesc = description || _buildStoryDescription(userStory || {});
+    const finalLabels = labels && labels.length ? labels : ['ats-generated', flowId || 'general'];
     const body = {
       fields: {
         project: { key: cfg.projectKey },
         issuetype: { name: 'Story' },
-        summary,
-        description: _buildStoryDescription(userStory || {}),
-        labels: ['ats-generated', flowId || 'general'],
+        summary: finalSummary,
+        description: finalDesc,
+        labels: finalLabels,
       },
     };
     const res = await _jiraRequest(cfg, 'POST', '/issue', body);

@@ -48,6 +48,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let totalTests = 0;
     let completedTests = 0;
 
+    // ── Jira Modal State ──
+    let jiraModalState = { type: '', tcId: '', flowId: '', runFolder: null, errors: [] };
+
     // ── Initialization ──
     async function init() {
         try {
@@ -97,7 +100,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             </label>
                             <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
                             <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
-                            <button class="icon-btn jira-bug-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Create Jira Bug">🐛</button>
                         </div>
                     `).join('')}
                 </div>
@@ -126,64 +128,32 @@ document.addEventListener('DOMContentLoaded', async () => {
                 btn.addEventListener('click', () => openDataModal(btn.dataset.module, btn.dataset.tcId));
             });
 
-            // Jira Story button listeners
+            // Jira Story button listeners — open modal for editing before submit
             moduleEl.querySelectorAll('.jira-story-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const tcId = btn.dataset.tcId;
                     const flowId = btn.dataset.module;
-                    btn.textContent = '⏳';
-                    btn.disabled = true;
-                    // Try to load user story data
+                    // Load user story data for defaults
                     let userStory = {};
                     try {
                         const allStories = await window.ats.getUserStories({ flowId });
                         userStory = allStories[tcId] || {};
                     } catch (e) { /* ok */ }
-                    const res = await window.ats.createJiraStory({ tcId, flowId, userStory });
-                    if (res.success) {
-                        btn.textContent = res.key;
-                        btn.classList.add('jira-success');
-                        addLog(`Jira story created: ${res.key}`, 'pass');
-                    } else {
-                        btn.textContent = '✕';
-                        btn.classList.add('jira-error');
-                        addLog(`Jira story failed: ${res.error}`, 'fail');
-                    }
-                    setTimeout(() => {
-                        btn.textContent = '🎫';
-                        btn.disabled = false;
-                        btn.classList.remove('jira-success', 'jira-error');
-                    }, 5000);
-                });
-            });
-
-            // Jira Bug button listeners (from TC list — auto-finds latest run artifacts)
-            moduleEl.querySelectorAll('.jira-bug-tc-btn').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const tcId = btn.dataset.tcId;
-                    const description = btn.dataset.description;
-                    btn.textContent = '⏳';
-                    btn.disabled = true;
-                    const res = await window.ats.createJiraBug({
-                        tcId,
-                        description,
-                        runFolder: null, // main.js will auto-find latest run
+                    const s = (userStory.user_story || {});
+                    const defaultSummary = s.summary || `${tcId} — ${flowId} test story`;
+                    const defaultDesc = (userStory.user_story ? `As a ${s.role || 'user'}, I want ${s.want || ''}, so that ${s.benefit || ''}.\n\n` +
+                        (s.acceptance_criteria && s.acceptance_criteria.length
+                            ? 'Acceptance Criteria:\n' + s.acceptance_criteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')
+                            : '') : '');
+                    openJiraModal({
+                        type: 'Story',
+                        tcId, flowId,
+                        summary: defaultSummary,
+                        labels: 'ats-generated, ' + flowId,
+                        description: defaultDesc.trim(),
+                        runFolder: null,
                         errors: [],
                     });
-                    if (res.success) {
-                        btn.textContent = res.key;
-                        btn.classList.add('jira-success');
-                        addLog(`Jira bug created: ${res.key} ${res.attachments ? `(${res.attachments} attachments)` : ''}`, 'pass');
-                    } else {
-                        btn.textContent = '✕';
-                        btn.classList.add('jira-error');
-                        addLog(`Jira bug failed: ${res.error}`, 'fail');
-                    }
-                    setTimeout(() => {
-                        btn.textContent = '🐛';
-                        btn.disabled = false;
-                        btn.classList.remove('jira-success', 'jira-error');
-                    }, 5000);
                 });
             });
         });
@@ -301,39 +271,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                             window.ats.openFile(el.dataset.path);
                         };
                     });
-                    // Attach click handlers for Jira bug buttons
+                    // Attach click handlers for Jira bug buttons — open modal for editing
                     detailEl.querySelectorAll('.jira-bug-btn').forEach(btn => {
                         btn.onclick = async (ev) => {
                             ev.stopPropagation();
-                            btn.textContent = 'Creating...';
-                            btn.disabled = true;
-                            // Read error logs if available
-                            const runFolder = btn.dataset.runFolder;
-                            const errors = [];
-                            if (runFolder) {
-                                try {
-                                    const ssDir = runFolder + '/screenshots';
-                                    const tcId = btn.dataset.tcId;
-                                    const prefix = tcId.replace(/-/g, '_');
-                                    // Errors are captured in the run log; we'll send an empty list
-                                    // and rely on the screenshot + test description
-                                } catch (e) { /* ok */ }
-                            }
-                            const res = await window.ats.createJiraBug({
-                                tcId: btn.dataset.tcId,
-                                description: btn.dataset.description,
-                                runFolder: runFolder,
-                                errors,
+                            const tcId = btn.dataset.tcId;
+                            const description = btn.dataset.description || '';
+                            const runFolder = btn.dataset.runFolder || null;
+                            openJiraModal({
+                                type: 'Bug',
+                                tcId,
+                                summary: `BUG: ${tcId} — ${description || 'Automated test failure'}`,
+                                labels: 'automated-test, ats',
+                                description: `Test Case: ${tcId}\nStatus: FAILED\nEnvironment: Dev\nDetected by: Agrim ATS (automated)\n\n${description ? 'Description: ' + description + '\n\n' : ''}--- Steps to Reproduce ---\n1. Open Agrim ATS\n2. Select test case ${tcId}\n3. Click Run\n4. Observe failure`,
+                                runFolder,
+                                errors: [],
                             });
-                            if (res.success) {
-                                btn.textContent = res.key;
-                                btn.classList.add('success');
-                                addLog(`Jira bug created: ${res.key}`, 'pass');
-                            } else {
-                                btn.textContent = 'Failed';
-                                btn.classList.add('error');
-                                addLog(`Jira bug failed: ${res.error}`, 'fail');
-                            }
                         };
                     });
                 };
@@ -1044,6 +997,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             alert("Failed to save: " + (dataRes.error || metaRes.error));
         }
+    });
+
+    // ── Jira Submit Modal ──
+    const jiraModal = document.getElementById('jira-modal');
+    const jiraSubmitBtn = document.getElementById('jira-submit-btn');
+    const jiraCancelBtn = document.getElementById('jira-cancel-btn');
+
+    function openJiraModal({ type, tcId, flowId, summary, labels, description, runFolder, errors }) {
+        jiraModalState = { type, tcId, flowId: flowId || '', runFolder: runFolder || null, errors: errors || [] };
+        document.getElementById('jira-modal-title').textContent = `Create Jira ${type}`;
+        document.getElementById('jira-issue-type').textContent = type === 'Bug' ? '🐛 Bug' : '🎫 Story';
+        document.getElementById('jira-summary').value = summary || '';
+        document.getElementById('jira-labels').value = labels || '';
+        document.getElementById('jira-description').value = description || '';
+        // Show attachment info if run folder exists
+        const infoEl = document.getElementById('jira-attachments-info');
+        if (runFolder) {
+            infoEl.textContent = `Attachments will be auto-included from the latest run for ${tcId}.`;
+        } else {
+            infoEl.textContent = `No run artifacts found for ${tcId}. Issue will be created without attachments.`;
+        }
+        jiraSubmitBtn.disabled = false;
+        jiraSubmitBtn.textContent = 'Create Issue';
+        jiraModal.classList.remove('hidden');
+    }
+
+    jiraSubmitBtn.addEventListener('click', async () => {
+        const summary = document.getElementById('jira-summary').value.trim();
+        const labelsRaw = document.getElementById('jira-labels').value.trim();
+        const description = document.getElementById('jira-description').value.trim();
+        if (!summary) { alert('Summary is required.'); return; }
+        const labels = labelsRaw ? labelsRaw.split(',').map(l => l.trim()).filter(Boolean) : [];
+
+        jiraSubmitBtn.disabled = true;
+        jiraSubmitBtn.textContent = 'Creating...';
+
+        let res;
+        if (jiraModalState.type === 'Bug') {
+            res = await window.ats.createJiraBug({
+                tcId: jiraModalState.tcId,
+                runFolder: jiraModalState.runFolder,
+                errors: jiraModalState.errors,
+                summary,
+                labels,
+                description,
+            });
+        } else {
+            res = await window.ats.createJiraStory({
+                tcId: jiraModalState.tcId,
+                flowId: jiraModalState.flowId,
+                userStory: {},
+                summary,
+                labels,
+                description,
+            });
+        }
+
+        jiraModal.classList.add('hidden');
+
+        if (res.success) {
+            addLog(`Jira ${jiraModalState.type.toLowerCase()} created: ${res.key} — ${res.url}`, 'pass');
+        } else {
+            addLog(`Jira ${jiraModalState.type.toLowerCase()} failed: ${res.error}`, 'fail');
+        }
+    });
+
+    jiraCancelBtn.addEventListener('click', () => {
+        jiraModal.classList.add('hidden');
     });
 
     // Close all modals generic handler
