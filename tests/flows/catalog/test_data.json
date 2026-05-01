@@ -1,5 +1,5 @@
 {
-    "TC-CATALOG-019": {
+    "TC-CATALOG-007": {
         "l": "10",
         "b": "60",
         "h": "10",
@@ -7,9 +7,7 @@
         "mrp": "500",
         "your_price": "450"
     },
-    "TC-CATALOG-021": {
+    "TC-CATALOG-008": {
         "comment": "The product image is incorrect and needs to be updated."
-    },
-    "TC-CATALOG-009": {},
-    "TC-CATALOG-018": {}
+    }
 }
