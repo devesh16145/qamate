@@ -453,24 +453,104 @@ ipcMain.handle('get-tc-data', async (event, { flowId, tcId }) => {
     const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
     if (fs.existsSync(dataFile)) {
       const data = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
-      return data[tcId] || {};
+      const tcData = data[tcId] || {};
+      // Detect variants format: dict of dicts
+      const isVariant = typeof tcData === 'object' && tcData !== null &&
+                        !Array.isArray(tcData) &&
+                        Object.keys(tcData).length > 0 &&
+                        Object.values(tcData).every(v => typeof v === 'object' && v !== null && !Array.isArray(v));
+      if (isVariant) {
+        return { isVariant: true, variants: tcData };
+      }
+      return { isVariant: false, data: tcData };
     }
-    return {};
+    return { isVariant: false, data: {} };
   } catch (e) {
-    return {};
+    return { isVariant: false, data: {} };
   }
 });
 
-ipcMain.handle('save-tc-data', async (event, { flowId, tcId, data }) => {
+ipcMain.handle('save-tc-data', async (event, { flowId, tcId, data, variant }) => {
   try {
     const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
     let allData = {};
     if (fs.existsSync(dataFile)) {
       allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
     }
-    allData[tcId] = data;
+    if (variant) {
+      // Save specific variant
+      if (!allData[tcId] || typeof allData[tcId] !== 'object' || Array.isArray(allData[tcId])) {
+        allData[tcId] = {};
+      }
+      allData[tcId][variant] = data;
+    } else {
+      allData[tcId] = data;
+    }
     fs.writeFileSync(dataFile, JSON.stringify(allData, null, 4), 'utf-8');
     return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('add-tc-variant', async (event, { flowId, tcId, variantName, copyFrom }) => {
+  try {
+    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    let allData = {};
+    if (fs.existsSync(dataFile)) {
+      allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
+    }
+    let tcData = allData[tcId] || {};
+    // Convert flat to variants if needed
+    if (typeof tcData !== 'object' || Array.isArray(tcData) ||
+        (Object.keys(tcData).length > 0 && !Object.values(tcData).every(v => typeof v === 'object'))) {
+      tcData = Object.keys(tcData).length > 0 ? { default: tcData } : {};
+    }
+    if (copyFrom && tcData[copyFrom]) {
+      tcData[variantName] = JSON.parse(JSON.stringify(tcData[copyFrom]));
+    } else {
+      tcData[variantName] = {};
+    }
+    allData[tcId] = tcData;
+    fs.writeFileSync(dataFile, JSON.stringify(allData, null, 4), 'utf-8');
+    return { success: true, variants: tcData };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('delete-tc-variant', async (event, { flowId, tcId, variantName }) => {
+  try {
+    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    if (!fs.existsSync(dataFile)) return { success: false, error: 'File not found' };
+    const allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
+    const tcData = allData[tcId];
+    if (!tcData || typeof tcData !== 'object') return { success: false, error: 'TC not found' };
+    delete tcData[variantName];
+    const remaining = Object.keys(tcData);
+    if (remaining.length === 1) {
+      allData[tcId] = tcData[remaining[0]]; // flatten back
+    } else if (remaining.length === 0) {
+      delete allData[tcId];
+    }
+    fs.writeFileSync(dataFile, JSON.stringify(allData, null, 4), 'utf-8');
+    return { success: true, variants: allData[tcId] || {} };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('rename-tc-variant', async (event, { flowId, tcId, oldName, newName }) => {
+  try {
+    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    if (!fs.existsSync(dataFile)) return { success: false, error: 'File not found' };
+    const allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
+    const tcData = allData[tcId];
+    if (!tcData || !tcData[oldName]) return { success: false, error: 'Variant not found' };
+    tcData[newName] = tcData[oldName];
+    delete tcData[oldName];
+    fs.writeFileSync(dataFile, JSON.stringify(allData, null, 4), 'utf-8');
+    return { success: true, variants: tcData };
   } catch (e) {
     return { success: false, error: e.message };
   }

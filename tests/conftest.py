@@ -186,6 +186,10 @@ def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
     rep = getattr(request.node, "rep_call", None)
     if rep and rep.failed:
         tc_name = request.node.name.split("[")[0]
+        # Include variant name if present (for unique filenames)
+        bracket = re.search(r'\[(.+?)\]', request.node.name)
+        if bracket:
+            tc_name = f"{tc_name}_{bracket.group(1)}"
         screenshot_dir = os.path.join(results_dir, "screenshots")
         os.makedirs(screenshot_dir, exist_ok=True)
 
@@ -259,7 +263,10 @@ def pytest_runtest_teardown(item, nextitem):
         return
 
     tc_id = _extract_tc_id(item.name)
-    new_path = os.path.join(os.path.dirname(video_path), f"{tc_id}.webm")
+    # Include variant name if present (for unique filenames)
+    bracket = re.search(r'\[(.+?)\]', item.name)
+    variant_suffix = f"_{bracket.group(1)}" if bracket else ""
+    new_path = os.path.join(os.path.dirname(video_path), f"{tc_id}{variant_suffix}.webm")
 
     # Wait briefly for video file to be finalized after page close
     for _ in range(10):
@@ -273,30 +280,74 @@ def pytest_runtest_teardown(item, nextitem):
     except Exception:
         pass  # File may be locked or already renamed
 
-# ── Test Data ──
+# ── Test Data (supports variants) ──
+
+def _is_variants(data):
+    """Check if test data is in variants format (dict of dicts)."""
+    return isinstance(data, dict) and bool(data) and all(
+        isinstance(v, dict) for v in data.values()
+    )
+
+
+def pytest_generate_tests(metafunc):
+    """Parametrize tests that have multiple data variants in test_data.json.
+    If test_data.json has {"TC-001": {"positive": {...}, "negative": {...}}},
+    the test runs twice: once per variant."""
+    tc_name = metafunc.definition.function.__name__
+    match = re.search(r'test_(TC_\w+?)_', tc_name)
+    if not match:
+        return
+    tc_id = match.group(1).replace("_", "-")
+
+    data_file = os.path.join(os.path.dirname(metafunc.module.__file__), "test_data.json")
+    if not os.path.exists(data_file):
+        return
+
+    try:
+        with open(data_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return
+
+    tc_raw = data.get(tc_id, {})
+    if _is_variants(tc_raw) and len(tc_raw) > 1:
+        variant_names = list(tc_raw.keys())
+        metafunc.parametrize("tc_data", variant_names, indirect=True, ids=variant_names)
+
+
 @pytest.fixture(scope="function")
 def tc_data(request):
-    """Load test data for the current TC from the flow's test_data.json."""
+    """Load test data for the current TC. Supports variants and flat data."""
     tc_name = request.node.name.split("[")[0]
-    # Extract TC ID (e.g. test_TC_CATALOG_001_... -> TC-CATALOG-001)
     tc_id = None
-    import re
     match = re.search(r'test_(TC_\w+?)_', tc_name)
     if match:
         tc_id = match.group(1).replace("_", "-")
-    
+
     if not tc_id:
         return {}
+
+    # Get variant name from parametrize (if set)
+    variant = getattr(request, 'param', None)
 
     test_file_path = request.module.__file__
     flow_dir = os.path.dirname(test_file_path)
     data_file = os.path.join(flow_dir, "test_data.json")
 
-    if os.path.exists(data_file):
-        try:
-            with open(data_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get(tc_id, {})
-        except Exception:
-            return {}
-    return {}
+    if not os.path.exists(data_file):
+        return {}
+
+    try:
+        with open(data_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            tc_raw = data.get(tc_id, {})
+
+            if _is_variants(tc_raw):
+                if variant and variant in tc_raw:
+                    return tc_raw[variant]
+                # Fallback to first variant
+                return next(iter(tc_raw.values()), {})
+            else:
+                return tc_raw
+    except Exception:
+        return {}
