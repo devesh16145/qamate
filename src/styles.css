@@ -475,6 +475,17 @@ select.compact {
     background: var(--bg-highlight);
     color: var(--text-primary);
 }
+.re-record-btn {
+    font-size: 14px;
+    padding: 4px 6px;
+    min-width: 28px;
+    transition: all 0.2s;
+}
+.re-record-btn:hover {
+    background: var(--accent-blue-bg);
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+}
 
 /* ============================================================
    CENTER PANEL — Live Log + Test Data
