@@ -97,6 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             </label>
                             <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
                             <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
+                            <button class="icon-btn jira-bug-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Create Jira Bug">🐛</button>
                         </div>
                     `).join('')}
                 </div>
@@ -150,6 +151,36 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                     setTimeout(() => {
                         btn.textContent = '🎫';
+                        btn.disabled = false;
+                        btn.classList.remove('jira-success', 'jira-error');
+                    }, 5000);
+                });
+            });
+
+            // Jira Bug button listeners (from TC list — auto-finds latest run artifacts)
+            moduleEl.querySelectorAll('.jira-bug-tc-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const tcId = btn.dataset.tcId;
+                    const description = btn.dataset.description;
+                    btn.textContent = '⏳';
+                    btn.disabled = true;
+                    const res = await window.ats.createJiraBug({
+                        tcId,
+                        description,
+                        runFolder: null, // main.js will auto-find latest run
+                        errors: [],
+                    });
+                    if (res.success) {
+                        btn.textContent = res.key;
+                        btn.classList.add('jira-success');
+                        addLog(`Jira bug created: ${res.key} ${res.attachments ? `(${res.attachments} attachments)` : ''}`, 'pass');
+                    } else {
+                        btn.textContent = '✕';
+                        btn.classList.add('jira-error');
+                        addLog(`Jira bug failed: ${res.error}`, 'fail');
+                    }
+                    setTimeout(() => {
+                        btn.textContent = '🐛';
                         btn.disabled = false;
                         btn.classList.remove('jira-success', 'jira-error');
                     }, 5000);
