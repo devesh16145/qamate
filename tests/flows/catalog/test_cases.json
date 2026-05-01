@@ -99,14 +99,43 @@
     {
         "tc_id": "TC-CATALOG-008",
         "module": "Catalog",
-        "description": "Incorrect Product, Request Variant, and Create New Product flows",
+        "description": "Incorrect Product flow: open modal, select issue, add comment, submit",
         "preconditions": "Seller is on Catalog page",
         "checkpoints": [
             "Navigate to catalog page",
-            "Open Incorrect Product modal, verify fields, fill and submit",
-            "Open Request Variant modal, verify pre-filled fields",
-            "Scroll to Create New Product section, open modal, verify all fields"
+            "Open Incorrect Product modal",
+            "Verify modal fields (issue dropdown, comment textarea, submit button)",
+            "Select issue type, add comment, submit",
+            "Verify submission success"
         ],
-        "expected_result": "All three modal flows work with correct fields and submission"
+        "expected_result": "Incorrect Product modal submits successfully with issue type and comment"
+    },
+    {
+        "tc_id": "TC-CATALOG-009",
+        "module": "Catalog",
+        "description": "Request Variant flow: open modal, verify pre-filled fields from parent product",
+        "preconditions": "Seller is on Catalog page",
+        "checkpoints": [
+            "Navigate to catalog page",
+            "Open Request Variant modal",
+            "Verify modal opens with form fields",
+            "Verify fields are pre-filled from parent product",
+            "Close modal"
+        ],
+        "expected_result": "Request Variant modal opens with pre-filled fields inherited from parent product"
+    },
+    {
+        "tc_id": "TC-CATALOG-010",
+        "module": "Catalog",
+        "description": "Create New Product flow: scroll to section, open modal, verify all fields",
+        "preconditions": "Seller is on Catalog page",
+        "checkpoints": [
+            "Navigate to catalog page",
+            "Scroll to find 'Could not find your product?' section",
+            "Open Create New Product modal",
+            "Verify all fields present (Brand, Product Name, Packing, HSN, MRP, Your Price)",
+            "Close modal"
+        ],
+        "expected_result": "Create New Product modal opens with all required fields"
     }
 ]
