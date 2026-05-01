@@ -53,5 +53,11 @@
   "screenshots": {
     "on_every_step": true,
     "on_failure": true
+  },
+  "jira": {
+    "url": "https://agrim-product.atlassian.net",
+    "email": "Devesh.yadav@agrim.app",
+    "apiToken": "ATATT3xFfGF0uYfZ-c0zS_NIFQS-cym6DPGx3GKNwLsi3s9eWyXjBry8bd_gd53wknxiOalDI2CIT6bSpktPvgCFSiqyBivYo4c2o-IHvPMQz-uuQGz9lBdbN9nEkNUwAxHDjYtYz_-VVKO08RpfTw5OJAMOggN8d1M-d7tTxHR9lIM17bf-xtQ=FBA1B4B7",
+    "projectKey": "PM"
   }
 }

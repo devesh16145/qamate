@@ -645,8 +645,15 @@ function _getJiraConfig() {
     const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
     const jira = config.jira || {};
     const apiKey = process.env.JIRA_API_KEY || jira.apiToken || '';
+    // Strip any path from URL — Jira REST API only needs the origin
+    // e.g. "https://x.atlassian.net/jira/core/projects" → "https://x.atlassian.net"
+    let rawUrl = (jira.url || '').replace(/\/+$/, '');
+    try {
+      const parsed = new URL(rawUrl);
+      rawUrl = parsed.origin;
+    } catch (e) { /* keep as-is if not parseable */ }
     return {
-      url: (jira.url || '').replace(/\/+$/, ''),
+      url: rawUrl,
       email: jira.email || '',
       apiKey,
       projectKey: jira.projectKey || 'PM',
@@ -728,20 +735,7 @@ function _jiraUploadAttachment(config, issueKey, filePath, fileName) {
   });
 }
 
-function _adfText(text) {
-  /* Convert plain text to Atlassian Document Format (ADF) */
-  const lines = (text || '').split('\n');
-  return {
-    version: 1,
-    type: 'doc',
-    content: lines.map(line => ({
-      type: 'paragraph',
-      content: line ? [{ type: 'text', text: line }] : [],
-    })),
-  };
-}
-
-function _buildBugAdf(tcId, description, errors, runFolder) {
+function _buildBugDescription(tcId, description, errors, runFolder) {
   let text = `Test Case: ${tcId}\n`;
   text += `Status: FAILED\n`;
   text += `Environment: Dev\n`;
@@ -758,10 +752,10 @@ function _buildBugAdf(tcId, description, errors, runFolder) {
   text += `2. Select test case ${tcId}\n`;
   text += `3. Click Run\n`;
   text += `4. Observe failure\n`;
-  return _adfText(text);
+  return text;
 }
 
-function _buildStoryAdf(userStory) {
+function _buildStoryDescription(userStory) {
   const s = userStory.user_story || {};
   let text = '';
   if (s.role && s.want && s.benefit) {
@@ -772,7 +766,7 @@ function _buildStoryAdf(userStory) {
     s.acceptance_criteria.forEach((ac, i) => { text += `${i + 1}. ${ac}\n`; });
     text += `\n`;
   }
-  return _adfText(text);
+  return text;
 }
 
 // ── Save Jira config ──
@@ -817,7 +811,7 @@ ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, 
         project: { key: cfg.projectKey },
         issuetype: { name: 'Bug' },
         summary,
-        description: _buildBugAdf(tcId, description, errors, runFolder),
+        description: _buildBugDescription(tcId, description, errors, runFolder),
         labels: ['automated-test', 'ats'],
       },
     };
@@ -859,7 +853,7 @@ ipcMain.handle('create-jira-story', async (event, { tcId, flowId, userStory }) =
         project: { key: cfg.projectKey },
         issuetype: { name: 'Story' },
         summary,
-        description: _buildStoryAdf(userStory || {}),
+        description: _buildStoryDescription(userStory || {}),
         labels: ['ats-generated', flowId || 'general'],
       },
     };
