@@ -940,25 +940,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         bottomPanel.classList.remove('hidden');
 
-        // Single TC selected — check for variants
+        // Single TC selected — show variant bar always
         if (selectedTcItems.length === 1) {
             const { flowId, tcId } = selectedTcItems[0];
             tdSelectedInfo.textContent = tcId;
+            activeVariantFlow = flowId;
+            activeVariantTcId = tcId;
             try {
                 const result = await window.ats.getTcData({ flowId, tcId });
                 if (result.isVariant) {
-                    activeVariantFlow = flowId;
-                    activeVariantTcId = tcId;
                     activeVariants = result.variants;
                     showVariantBar(Object.keys(activeVariants));
-                    loadUserStoriesAndSteps();
-                    return;
                 } else {
-                    hideVariantBar();
-                    currentTdData = { [tcId]: result.data };
-                    tdEditor.value = JSON.stringify(currentTdData, null, 2);
-                    setTdStatus('');
+                    // Flat data — show as single "default" variant
+                    activeVariants = { default: result.data || {} };
+                    showVariantBar(['default']);
                 }
+                loadUserStoriesAndSteps();
             } catch (e) {
                 hideVariantBar();
                 setTdStatus('Error loading data: ' + e.message, 'error');
