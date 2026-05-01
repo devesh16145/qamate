@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 </div>
                             </label>
                             <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
+                            <button class="icon-btn re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Re-record test case">🎬</button>
                             <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
                         </div>
                     `).join('')}
@@ -126,6 +127,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Configure Data button listeners
             moduleEl.querySelectorAll('.config-data-btn').forEach(btn => {
                 btn.addEventListener('click', () => openDataModal(btn.dataset.module, btn.dataset.tcId));
+            });
+
+            // Re-record button listeners — opens recorder pre-filled with TC info
+            moduleEl.querySelectorAll('.re-record-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const flowId = btn.dataset.module;
+                    const tcId = btn.dataset.tcId;
+                    const desc = btn.dataset.description;
+                    document.getElementById('record-flow').value = flowId;
+                    document.getElementById('record-tc-id').value = tcId;
+                    document.getElementById('record-desc').value = desc;
+                    recordModal.classList.remove('hidden');
+                });
             });
 
             // Jira Story button listeners — open modal for editing before submit
