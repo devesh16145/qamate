@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+const https = require('https');
 
 let mainWindow;
 let pythonProcess = null;
@@ -632,6 +633,243 @@ ipcMain.handle('list-templates', async () => {
       .map(f => f.replace('.json', ''));
   } catch (e) {
     return [];
+  }
+});
+
+// ──────────────────────────────────────
+// Jira Integration
+// ──────────────────────────────────────
+
+function _getJiraConfig() {
+  try {
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    const jira = config.jira || {};
+    const apiKey = process.env.JIRA_API_KEY || jira.apiToken || '';
+    return {
+      url: (jira.url || '').replace(/\/+$/, ''),
+      email: jira.email || '',
+      apiKey,
+      projectKey: jira.projectKey || 'PM',
+    };
+  } catch (e) {
+    return { url: '', email: '', apiKey: '', projectKey: 'PM' };
+  }
+}
+
+function _jiraRequest(config, method, apiPath, body) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${config.url}/rest/api/2${apiPath}`);
+    const auth = Buffer.from(`${config.email}:${config.apiKey}`).toString('base64');
+    const bodyStr = body ? JSON.stringify(body) : null;
+
+    const opts = {
+      hostname: url.hostname,
+      port: 443,
+      path: url.pathname + url.search,
+      method,
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    };
+    if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+
+    const req = https.request(opts, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+        catch { resolve({ status: res.statusCode, body: data }); }
+      });
+    });
+    req.on('error', reject);
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+function _jiraUploadAttachment(config, issueKey, filePath, fileName) {
+  return new Promise((resolve, reject) => {
+    if (!fs.existsSync(filePath)) return resolve({ status: 404, body: 'File not found' });
+    const fileContent = fs.readFileSync(filePath);
+    const boundary = '----ATSFormBoundary' + Date.now();
+
+    let body = `--${boundary}\r\n`;
+    body += `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`;
+    body += `Content-Type: application/octet-stream\r\n\r\n`;
+    body += fileContent.toString('binary');
+    body += `\r\n--${boundary}--\r\n`;
+
+    const url = new URL(`${config.url}/rest/api/2/issue/${issueKey}/attachments`);
+    const auth = Buffer.from(`${config.email}:${config.apiKey}`).toString('base64');
+
+    const opts = {
+      hostname: url.hostname,
+      port: 443,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'X-Atlassian-Token': 'no-check',
+        'Content-Length': Buffer.byteLength(body, 'binary'),
+      },
+    };
+
+    const req = https.request(opts, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('error', reject);
+    req.write(body, 'binary');
+    req.end();
+  });
+}
+
+function _adfText(text) {
+  /* Convert plain text to Atlassian Document Format (ADF) */
+  const lines = (text || '').split('\n');
+  return {
+    version: 1,
+    type: 'doc',
+    content: lines.map(line => ({
+      type: 'paragraph',
+      content: line ? [{ type: 'text', text: line }] : [],
+    })),
+  };
+}
+
+function _buildBugAdf(tcId, description, errors, runFolder) {
+  let text = `Test Case: ${tcId}\n`;
+  text += `Status: FAILED\n`;
+  text += `Environment: Dev\n`;
+  text += `Detected by: Agrim ATS (automated)\n`;
+  if (description) text += `Description: ${description}\n`;
+  text += `\n`;
+  if (errors && errors.length) {
+    text += `--- Errors Found ---\n`;
+    errors.forEach(e => { text += `${e}\n`; });
+    text += `\n`;
+  }
+  text += `--- Steps to Reproduce ---\n`;
+  text += `1. Open Agrim ATS\n`;
+  text += `2. Select test case ${tcId}\n`;
+  text += `3. Click Run\n`;
+  text += `4. Observe failure\n`;
+  return _adfText(text);
+}
+
+function _buildStoryAdf(userStory) {
+  const s = userStory.user_story || {};
+  let text = '';
+  if (s.role && s.want && s.benefit) {
+    text += `As a ${s.role}, I want ${s.want}, so that ${s.benefit}.\n\n`;
+  }
+  if (s.acceptance_criteria && s.acceptance_criteria.length) {
+    text += `Acceptance Criteria:\n`;
+    s.acceptance_criteria.forEach((ac, i) => { text += `${i + 1}. ${ac}\n`; });
+    text += `\n`;
+  }
+  return _adfText(text);
+}
+
+// ── Save Jira config ──
+ipcMain.handle('save-jira-config', async (event, jiraConfig) => {
+  try {
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    config.jira = jiraConfig;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── Test Jira connection ──
+ipcMain.handle('test-jira-connection', async () => {
+  const cfg = _getJiraConfig();
+  if (!cfg.url || !cfg.email || !cfg.apiKey) {
+    return { success: false, error: 'Jira not configured. Set URL, Email, and API Token.' };
+  }
+  try {
+    const res = await _jiraRequest(cfg, 'GET', '/myself');
+    if (res.status === 200 && res.body.displayName) {
+      return { success: true, user: res.body.displayName, email: res.body.emailAddress };
+    }
+    return { success: false, error: `HTTP ${res.status}: ${JSON.stringify(res.body)}` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── Create Jira Bug from failed test ──
+ipcMain.handle('create-jira-bug', async (event, { tcId, description, runFolder, errors }) => {
+  const cfg = _getJiraConfig();
+  if (!cfg.url || !cfg.email || !cfg.apiKey) {
+    return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
+  }
+  try {
+    const summary = `BUG: ${tcId} — ${description || 'Automated test failure'}`;
+    const body = {
+      fields: {
+        project: { key: cfg.projectKey },
+        issuetype: { name: 'Bug' },
+        summary,
+        description: _buildBugAdf(tcId, description, errors, runFolder),
+        labels: ['automated-test', 'ats'],
+      },
+    };
+    const res = await _jiraRequest(cfg, 'POST', '/issue', body);
+    if (res.status !== 201) {
+      return { success: false, error: `Jira returned HTTP ${res.status}: ${JSON.stringify(res.body)}` };
+    }
+    const issueKey = res.body.key;
+
+    // Attach screenshots + error logs
+    if (runFolder) {
+      const ssDir = path.join(runFolder, 'screenshots');
+      if (fs.existsSync(ssDir)) {
+        for (const f of fs.readdirSync(ssDir)) {
+          if (f.startsWith(tcId.replace(/-/g, '_')) || f.includes(tcId)) {
+            await _jiraUploadAttachment(cfg, issueKey, path.join(ssDir, f), f);
+          }
+        }
+      }
+    }
+
+    return { success: true, key: issueKey, url: `${cfg.url}/browse/${issueKey}` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── Create Jira Story from test case ──
+ipcMain.handle('create-jira-story', async (event, { tcId, flowId, userStory }) => {
+  const cfg = _getJiraConfig();
+  if (!cfg.url || !cfg.email || !cfg.apiKey) {
+    return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
+  }
+  try {
+    const s = (userStory && userStory.user_story) ? userStory.user_story : {};
+    const summary = s.summary || `${tcId} — ${flowId} test story`;
+    const body = {
+      fields: {
+        project: { key: cfg.projectKey },
+        issuetype: { name: 'Story' },
+        summary,
+        description: _buildStoryAdf(userStory || {}),
+        labels: ['ats-generated', flowId || 'general'],
+      },
+    };
+    const res = await _jiraRequest(cfg, 'POST', '/issue', body);
+    if (res.status !== 201) {
+      return { success: false, error: `Jira returned HTTP ${res.status}: ${JSON.stringify(res.body)}` };
+    }
+    return { success: true, key: res.body.key, url: `${cfg.url}/browse/${res.body.key}` };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 

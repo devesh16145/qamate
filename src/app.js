@@ -96,6 +96,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 </div>
                             </label>
                             <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
+                            <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
                         </div>
                     `).join('')}
                 </div>
@@ -122,6 +123,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Configure Data button listeners
             moduleEl.querySelectorAll('.config-data-btn').forEach(btn => {
                 btn.addEventListener('click', () => openDataModal(btn.dataset.module, btn.dataset.tcId));
+            });
+
+            // Jira Story button listeners
+            moduleEl.querySelectorAll('.jira-story-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const tcId = btn.dataset.tcId;
+                    const flowId = btn.dataset.module;
+                    btn.textContent = '⏳';
+                    btn.disabled = true;
+                    // Try to load user story data
+                    let userStory = {};
+                    try {
+                        const allStories = await window.ats.getUserStories({ flowId });
+                        userStory = allStories[tcId] || {};
+                    } catch (e) { /* ok */ }
+                    const res = await window.ats.createJiraStory({ tcId, flowId, userStory });
+                    if (res.success) {
+                        btn.textContent = res.key;
+                        btn.classList.add('jira-success');
+                        addLog(`Jira story created: ${res.key}`, 'pass');
+                    } else {
+                        btn.textContent = '✕';
+                        btn.classList.add('jira-error');
+                        addLog(`Jira story failed: ${res.error}`, 'fail');
+                    }
+                    setTimeout(() => {
+                        btn.textContent = '🎫';
+                        btn.disabled = false;
+                        btn.classList.remove('jira-success', 'jira-error');
+                    }, 5000);
+                });
             });
         });
     }
@@ -200,7 +232,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                             html += `<div class="hd-section-title">Test Data</div>`;
                             for (const [tcId, data] of Object.entries(bulkData)) {
                                 html += `<div class="hd-tc-block">
-                                    <div class="hd-tc-id">${tcId}</div>
+                                    <div class="hd-tc-row">
+                                        <span class="hd-tc-id">${tcId}</span>
+                                        <button class="jira-bug-btn" data-tc-id="${tcId}" data-run-folder="${runPath || ''}" data-description="${(allFlows.flatMap(f => f.test_cases).find(t => t.tc_id === tcId) || {}).description || ''}">🐛 Create Bug</button>
+                                    </div>
                                     <pre class="hd-tc-json">${JSON.stringify(data, null, 2)}</pre>
                                 </div>`;
                             }
@@ -233,6 +268,41 @@ document.addEventListener('DOMContentLoaded', async () => {
                         el.onclick = (ev) => {
                             ev.stopPropagation();
                             window.ats.openFile(el.dataset.path);
+                        };
+                    });
+                    // Attach click handlers for Jira bug buttons
+                    detailEl.querySelectorAll('.jira-bug-btn').forEach(btn => {
+                        btn.onclick = async (ev) => {
+                            ev.stopPropagation();
+                            btn.textContent = 'Creating...';
+                            btn.disabled = true;
+                            // Read error logs if available
+                            const runFolder = btn.dataset.runFolder;
+                            const errors = [];
+                            if (runFolder) {
+                                try {
+                                    const ssDir = runFolder + '/screenshots';
+                                    const tcId = btn.dataset.tcId;
+                                    const prefix = tcId.replace(/-/g, '_');
+                                    // Errors are captured in the run log; we'll send an empty list
+                                    // and rely on the screenshot + test description
+                                } catch (e) { /* ok */ }
+                            }
+                            const res = await window.ats.createJiraBug({
+                                tcId: btn.dataset.tcId,
+                                description: btn.dataset.description,
+                                runFolder: runFolder,
+                                errors,
+                            });
+                            if (res.success) {
+                                btn.textContent = res.key;
+                                btn.classList.add('success');
+                                addLog(`Jira bug created: ${res.key}`, 'pass');
+                            } else {
+                                btn.textContent = 'Failed';
+                                btn.classList.add('error');
+                                addLog(`Jira bug failed: ${res.error}`, 'fail');
+                            }
                         };
                     });
                 };
@@ -437,10 +507,41 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
         `).join('');
 
+        // Populate Jira fields
+        const jira = config.jira || {};
+        document.getElementById('setting-jira-url').value = jira.url || '';
+        document.getElementById('setting-jira-email').value = jira.email || '';
+        document.getElementById('setting-jira-token').value = jira.apiToken || '';
+        document.getElementById('setting-jira-project').value = jira.projectKey || 'PM';
+        document.getElementById('jira-test-status').textContent = '';
+
         settingsModal.classList.remove('hidden');
     };
 
     closeModalBtn.onclick = () => settingsModal.classList.add('hidden');
+
+    // Jira test connection
+    document.getElementById('test-jira-btn').addEventListener('click', async () => {
+        const statusEl = document.getElementById('jira-test-status');
+        statusEl.textContent = 'Testing...';
+        statusEl.style.color = 'var(--text-muted)';
+        // Save current fields to config first
+        config.jira = {
+            url: document.getElementById('setting-jira-url').value.trim(),
+            email: document.getElementById('setting-jira-email').value.trim(),
+            apiToken: document.getElementById('setting-jira-token').value.trim(),
+            projectKey: document.getElementById('setting-jira-project').value.trim() || 'PM',
+        };
+        await window.ats.saveConfig(config);
+        const res = await window.ats.testJiraConnection();
+        if (res.success) {
+            statusEl.textContent = `Connected as ${res.user}`;
+            statusEl.style.color = 'var(--accent-green)';
+        } else {
+            statusEl.textContent = `Failed: ${res.error}`;
+            statusEl.style.color = 'var(--accent-red)';
+        }
+    });
 
     saveSettingsBtn.onclick = async () => {
         config.execution.default_mode = document.getElementById('setting-mode').value;
@@ -458,6 +559,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 config.users[idx].password = input.value;
             }
         });
+
+        // Save Jira config
+        config.jira = {
+            url: document.getElementById('setting-jira-url').value.trim(),
+            email: document.getElementById('setting-jira-email').value.trim(),
+            apiToken: document.getElementById('setting-jira-token').value.trim(),
+            projectKey: document.getElementById('setting-jira-project').value.trim() || 'PM',
+        };
 
         await window.ats.saveConfig(config);
         updateUIFromConfig();
