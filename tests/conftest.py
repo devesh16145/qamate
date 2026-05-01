@@ -7,6 +7,7 @@ Provides fixtures for:
 - Setting up video recording directories
 - Setting browser timeouts to prevent infinite hangs
 - Capturing screenshots on test failure
+- Checkpoint-based test reporting (milestones within a single TC)
 """
 
 import pytest
@@ -14,6 +15,7 @@ import os
 import json
 import re
 import time
+import sys
 
 
 # ── Config loading ──
@@ -30,6 +32,84 @@ def _load_config():
 # ── Register custom marks to suppress warnings ──
 def pytest_configure(config):
     config.addinivalue_line("markers", "tc(id): Associate a test with a Test Case ID")
+
+
+# ── Checkpoint Reporting ──
+
+def _write_checkpoints(tc_id, checkpoints):
+    """Write checkpoint results to a JSON file for the runner to pick up."""
+    results_dir = os.environ.get("ATS_RESULTS_DIR", "")
+    if not results_dir:
+        return
+    cp_dir = os.path.join(results_dir, "checkpoints")
+    os.makedirs(cp_dir, exist_ok=True)
+    safe_id = tc_id.replace("-", "_")
+    cp_file = os.path.join(cp_dir, f"{safe_id}.json")
+    with open(cp_file, "w", encoding="utf-8") as f:
+        json.dump({"tc_id": tc_id, "checkpoints": checkpoints}, f, indent=2)
+
+
+class CheckpointRunner:
+    """Runs checkpoints sequentially. Continues after failure so all checkpoints execute.
+    After all checkpoints, raises the first failure."""
+
+    def __init__(self, tc_id):
+        self.tc_id = tc_id
+        self.checkpoints = []
+        self._first_error = None
+
+    def run(self, name, fn, *args, **kwargs):
+        """Execute a checkpoint. Returns True if passed, False if failed."""
+        cp_entry = {"name": name, "status": "PASS", "error": None}
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            cp_entry["status"] = "FAIL"
+            cp_entry["error"] = str(e)[:500]
+            if self._first_error is None:
+                self._first_error = e
+        self.checkpoints.append(cp_entry)
+        # Flush checkpoints to file after each one (so partial results survive early exits)
+        _write_checkpoints(self.tc_id, self.checkpoints)
+        return cp_entry["status"] == "PASS"
+
+    def skip(self, name, reason="Skipped"):
+        """Record a skipped checkpoint (e.g. optional feature not present)."""
+        self.checkpoints.append({"name": name, "status": "SKIP", "error": reason})
+        _write_checkpoints(self.tc_id, self.checkpoints)
+
+    def finalize(self):
+        """Call after all checkpoints. Raises the first failure if any checkpoint failed."""
+        _write_checkpoints(self.tc_id, self.checkpoints)
+        if self._first_error is not None:
+            raise self._first_error
+
+    @property
+    def passed(self):
+        return sum(1 for c in self.checkpoints if c["status"] == "PASS")
+
+    @property
+    def failed(self):
+        return sum(1 for c in self.checkpoints if c["status"] == "FAIL")
+
+    @property
+    def summary(self):
+        p = self.passed
+        f = self.failed
+        s = len(self.checkpoints) - p - f
+        return f"{p} passed, {f} failed, {s} skipped"
+
+
+@pytest.fixture(autouse=True)
+def checkpoints(request):
+    """Provide a CheckpointRunner for every test. Automatically extracts tc_id from test name."""
+    tc_name = request.node.name.split("[")[0]
+    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
+    tc_id = match.group(1).replace("_", "-") if match else tc_name
+    runner = CheckpointRunner(tc_id)
+    yield runner
+    # After the test function returns, finalize (raise if any checkpoint failed)
+    runner.finalize()
 
 
 # ── Fixtures ──
@@ -155,8 +235,8 @@ def sequential_page(browser_type, browser_type_launch_args, browser_context_args
 @pytest.fixture(autouse=True)
 def set_page_timeouts(page):
     """Set generous but finite timeouts on every page to prevent infinite hangs."""
-    page.set_default_timeout(30000)           # 30s for actions (click, fill, etc.)
-    page.set_default_navigation_timeout(30000) # 30s for goto/navigation
+    page.set_default_timeout(30000)
+    page.set_default_navigation_timeout(30000)
     yield page
 
 
@@ -173,8 +253,6 @@ def pytest_runtest_makereport(item, call):
 def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
     """After each test, capture a screenshot AND page error text if the test failed.
     Also stashes the video path for later renaming."""
-    # Stash video path for rename after page close
-    # In sequential mode, the video belongs to sequential_page, not the default page
     active_page = sequential_page if sequential_page is not None else page
     try:
         if active_page.video:
@@ -186,20 +264,18 @@ def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
     rep = getattr(request.node, "rep_call", None)
     if rep and rep.failed:
         tc_name = request.node.name.split("[")[0]
-        # Include variant name if present (for unique filenames)
         bracket = re.search(r'\[(.+?)\]', request.node.name)
         if bracket:
             tc_name = f"{tc_name}_{bracket.group(1)}"
         screenshot_dir = os.path.join(results_dir, "screenshots")
         os.makedirs(screenshot_dir, exist_ok=True)
 
-        # Capture screenshot from the active page
         try:
             active_page.screenshot(path=os.path.join(screenshot_dir, f"{tc_name}_FAILED.png"))
         except Exception:
             pass
 
-        # Capture visible page errors (toasts, alerts, validation errors)
+        # Capture visible page errors
         try:
             error_selectors = [
                 '[role="alert"]',
@@ -220,10 +296,8 @@ def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
                 except Exception:
                     pass
 
-            # Also capture the full page text for debugging
             try:
                 body_text = active_page.locator("body").text_content() or ""
-                # Extract lines with error-related keywords
                 for line in body_text.split("\n"):
                     line = line.strip()
                     if line and any(kw in line.lower() for kw in ["error", "fail", "invalid", "required", "cannot", "unable", "denied"]):
@@ -246,7 +320,7 @@ def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
 
 
 def _extract_tc_id(node_name):
-    """Extract TC ID from pytest node name. e.g. test_TC_CATALOG_001_... -> TC-CATALOG-001"""
+    """Extract TC ID from pytest node name."""
     tc_name = node_name.split("[")[0]
     match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
     if match:
@@ -263,12 +337,10 @@ def pytest_runtest_teardown(item, nextitem):
         return
 
     tc_id = _extract_tc_id(item.name)
-    # Include variant name if present (for unique filenames)
     bracket = re.search(r'\[(.+?)\]', item.name)
     variant_suffix = f"_{bracket.group(1)}" if bracket else ""
     new_path = os.path.join(os.path.dirname(video_path), f"{tc_id}{variant_suffix}.webm")
 
-    # Wait briefly for video file to be finalized after page close
     for _ in range(10):
         if os.path.exists(video_path):
             break
@@ -278,7 +350,8 @@ def pytest_runtest_teardown(item, nextitem):
         if os.path.exists(video_path):
             os.rename(video_path, new_path)
     except Exception:
-        pass  # File may be locked or already renamed
+        pass
+
 
 # ── Test Data (supports variants) ──
 
@@ -290,9 +363,7 @@ def _is_variants(data):
 
 
 def pytest_generate_tests(metafunc):
-    """Parametrize tests that have multiple data variants in test_data.json.
-    If test_data.json has {"TC-001": {"positive": {...}, "negative": {...}}},
-    the test runs twice: once per variant."""
+    """Parametrize tests that have multiple data variants in test_data.json."""
     tc_name = metafunc.definition.function.__name__
     match = re.search(r'test_(TC_\w+?)_', tc_name)
     if not match:
@@ -327,7 +398,6 @@ def tc_data(request):
     if not tc_id:
         return {}
 
-    # Get variant name from parametrize (if set)
     variant = getattr(request, 'param', None)
 
     test_file_path = request.module.__file__
@@ -345,7 +415,6 @@ def tc_data(request):
             if _is_variants(tc_raw):
                 if variant and variant in tc_raw:
                     return tc_raw[variant]
-                # Fallback to first variant
                 return next(iter(tc_raw.values()), {})
             else:
                 return tc_raw

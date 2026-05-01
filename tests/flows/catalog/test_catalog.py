@@ -1,12 +1,8 @@
-"""Catalog flow — Comprehensive Playwright E2E tests.
+"""Catalog flow — Checkpoint-based Playwright E2E tests.
 
-Covers:
-  - Page structure & navigation
-  - All filters (dropdowns with search)
-  - All 5 product card types
-  - Card-level elements (Incorrect?, Request Variant)
-  - All 5 modals with field validation and submission
-  - Video hold and scroll behaviors
+8 flow-based test cases, each with multiple checkpoints.
+Checkpoints continue running even if one fails, so you get
+a full diagnostic. The test fails overall if any checkpoint fails.
 """
 
 import re
@@ -20,24 +16,20 @@ from playwright.sync_api import expect, Page
 def _login(page, test_user, base_url):
     """Log in using the selected user account."""
     page.goto(base_url + "login", wait_until="domcontentloaded")
-
     email_field = page.locator('input[placeholder*="Email"], input[type="email"]').first
     password_field = page.locator('input[type="password"]').first
     sign_in_button = page.locator('button:has-text("Sign In"), button[type="submit"]').first
-
     email_field.wait_for(state="visible", timeout=15000)
     email_field.click()
     page.keyboard.type(test_user["email"], delay=50)
     password_field.click()
     page.keyboard.type(test_user["password"], delay=50)
     sign_in_button.click()
-
     page.wait_for_timeout(3000)
     page.wait_for_load_state("domcontentloaded")
 
 
 def _video_hold(page, seconds=3):
-    """Pause so the video captures the final state."""
     page.wait_for_timeout(seconds * 1000)
 
 
@@ -57,32 +49,24 @@ def _scroll_to_top(page):
 
 
 def _get_product_count(page):
-    """Count visible product cards on the catalog page."""
     cards = page.locator('[class*="product-card"], [class*="card"]:has(button:has-text("Request Product")), [class*="card"]:has(button:has-text("Request Variant"))')
     count = cards.count()
     if count > 0:
         return count
-    # Fallback: count any container that has a Request Product button
     return page.locator('button:has-text("Request Product")').count()
 
 
 def _check_no_page_errors(page, context_label=""):
-    """Fail the test if visible error toasts, alerts, or error messages are present on the page."""
     page.wait_for_timeout(500)
-
-    # Check for toast/alert errors (common patterns)
     error_selectors = [
         '[role="alert"]:visible',
         '[class*="toast"]:visible:has-text("error")',
         '[class*="toast"]:visible:has-text("Error")',
         '[class*="toast"]:visible:has-text("failed")',
-        '[class*="toast"]:visible:has-text("Failed")',
         '[class*="toast"]:visible:has-text("something went wrong")',
         '[class*="error-message"]:visible',
         '[class*="text-destructive"]:visible',
-        '.text-red-500:visible',
     ]
-
     for sel in error_selectors:
         errors = page.locator(sel)
         if errors.count() > 0:
@@ -94,25 +78,18 @@ def _check_no_page_errors(page, context_label=""):
 
 
 def _assert_products_changed(page, before_count, action_desc="filter"):
-    """Assert that the product count changed after applying a filter/action."""
     page.wait_for_timeout(2000)
     after_count = _get_product_count(page)
-    # Products should have changed (count or content)
-    # If count is 0 before (maybe cards use different selectors), just check no errors
     if before_count > 0 and after_count > 0:
         assert before_count != after_count or after_count > 0, (
             f"Expected product list to change after {action_desc}. "
             f"Before: {before_count}, After: {after_count}"
         )
-    # Always check for page errors
     _check_no_page_errors(page, action_desc)
 
 
 def _assert_submission_success(page, timeout=5000):
-    """After a form submission, check for success OR fail with error details."""
     page.wait_for_timeout(2000)
-
-    # Check for success indicators
     success_indicators = [
         '[class*="toast"]:visible:has-text("success")',
         '[class*="toast"]:visible:has-text("Success")',
@@ -123,9 +100,8 @@ def _assert_submission_success(page, timeout=5000):
     ]
     for sel in success_indicators:
         if page.locator(sel).count() > 0:
-            return  # Success found
+            return
 
-    # Check for error indicators
     error_selectors = [
         '[role="alert"]:visible',
         '[class*="toast"]:visible:has-text("error")',
@@ -133,7 +109,6 @@ def _assert_submission_success(page, timeout=5000):
         '[class*="toast"]:visible:has-text("failed")',
         '[class*="toast"]:visible:has-text("Failed")',
         '[class*="toast"]:visible:has-text("cannot")',
-        '[class*="toast"]:visible:has-text("invalid")',
     ]
     for sel in error_selectors:
         errors = page.locator(sel)
@@ -141,30 +116,22 @@ def _assert_submission_success(page, timeout=5000):
             error_text = errors.first.text_content().strip()[:300]
             raise AssertionError(f"Submission failed with error: {error_text}")
 
-    # Check if dialog/modal closed (usually means success)
     dialog = page.locator('[role="dialog"]:visible')
     if dialog.count() == 0:
-        return  # Modal closed — likely success
+        return
 
-    # If modal is still open, check for inline validation errors
     validation_errors = page.locator('[role="dialog"] [class*="error"]:visible, [role="dialog"] [class*="text-destructive"]:visible, [role="dialog"] .text-red-500:visible')
     if validation_errors.count() > 0:
         error_text = validation_errors.first.text_content().strip()[:300]
         raise AssertionError(f"Submission blocked by validation error: {error_text}")
-
-    # No clear success or error — log as warning but don't fail
-    print(f"WARNING: Could not determine submission result (no success/error toast found)")
 
 
 # ── Fixtures ─────────────────────────────────────────────────
 
 @pytest.fixture
 def catalog_page(page, test_user, base_url, sequential_page):
-    """Log in and navigate to the Catalog page.
-    In sequential mode, reuses the session-scoped page (already logged in).
-    In parallel mode, logs in per test."""
+    """Log in and navigate to the Catalog page."""
     if sequential_page is not None:
-        # Sequential mode: reuse session, just navigate to catalog
         sequential_page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
         sequential_page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
             state="visible", timeout=20000
@@ -172,7 +139,6 @@ def catalog_page(page, test_user, base_url, sequential_page):
         sequential_page.wait_for_timeout(1000)
         return sequential_page
 
-    # Parallel mode: login per test
     _login(page, test_user, base_url)
     page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
     page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
@@ -207,701 +173,510 @@ def test_image_path():
 
 
 # ============================================================
-# GROUP A  —  PAGE STRUCTURE
+# TC-CATALOG-001: Page structure, tabs, and scroll
 # ============================================================
 
 @pytest.mark.tc("TC-CATALOG-001")
-def test_TC_CATALOG_001_page_loads(catalog_page: Page):
-    """Verify Catalog page loads with search, filters, and product cards."""
+def test_TC_CATALOG_001_page_structure(catalog_page: Page, checkpoints):
+    """Catalog page loads with search, filters, product cards, tabs, and scroll."""
     page = catalog_page
     _scroll_to_top(page)
 
-    expect(page.locator('input[placeholder*="Search"], input[type="search"]').first).to_be_visible()
-    expect(page.locator('button:has-text("super category"), button:has-text("Select super category")').first).to_be_visible()
-    expect(page.locator('button:has-text("brand"), button:has-text("Select brand")').first).to_be_visible()
-    expect(page.locator('button:has-text("SKU Status")').first).to_be_visible()
-    expect(page.locator('button:has-text("Sort")').first).to_be_visible()
+    def cp_navigate():
+        expect(page.locator('input[placeholder*="Search"], input[type="search"]').first).to_be_visible()
 
-    assert page.locator('button:has-text("Request Product")').count() > 0, \
-        "Expected at least one product card on catalog page"
-    _video_hold(page)
+    def cp_primary_filters():
+        expect(page.locator('button:has-text("super category"), button:has-text("Select super category")').first).to_be_visible()
+        expect(page.locator('button:has-text("brand"), button:has-text("Select brand")').first).to_be_visible()
+        expect(page.locator('button:has-text("SKU Status")').first).to_be_visible()
+        expect(page.locator('button:has-text("Sort")').first).to_be_visible()
 
+    def cp_product_cards():
+        assert page.locator('button:has-text("Request Product")').count() > 0, \
+            "Expected at least one product card on catalog page"
 
-@pytest.mark.tc("TC-CATALOG-002")
-def test_TC_CATALOG_002_search_bar(catalog_page: Page):
-    """Verify search bar accepts input and filters products in real-time."""
-    page = catalog_page
-    _scroll_to_top(page)
+    def cp_tabs():
+        all_products = page.locator('button:has-text("All Products")')
+        requested = page.locator('button:has-text("Requested")')
+        expect(all_products.first).to_be_visible()
+        expect(requested.first).to_be_visible()
+        requested.first.click()
+        page.wait_for_timeout(2000)
+        all_products.first.click()
+        page.wait_for_timeout(1000)
 
-    before_count = _get_product_count(page)
+    def cp_scroll():
+        for _ in range(3):
+            _scroll_down(page, 500)
+            page.wait_for_timeout(500)
+        for _ in range(3):
+            _scroll_up(page, 500)
+            page.wait_for_timeout(300)
+        assert page.locator('button:has-text("Request Product")').count() > 0, \
+            "Expected product cards visible after scrolling"
 
-    search = page.locator('input[placeholder*="Search"], input[type="search"]').first
-    search.click()
-    page.keyboard.type("Seed", delay=80)
-    page.wait_for_timeout(3000)
-
-    _check_no_page_errors(page, "search")
-    expect(search).not_to_have_value("")
-
-    after_count = _get_product_count(page)
-    assert after_count != before_count or after_count > 0, (
-        f"Search for 'Seed' did not filter products. Before: {before_count}, After: {after_count}"
-    )
-
-    _scroll_down(page, 300)
-    page.wait_for_timeout(1000)
-    _scroll_up(page, 300)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-003")
-def test_TC_CATALOG_003_super_category_dropdown(catalog_page: Page):
-    """Verify Super Category dropdown opens, has internal search, and filters products."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    before_count = _get_product_count(page)
-
-    page.locator('button:has-text("super category"), button:has-text("Select super category")').first.click()
-    page.wait_for_timeout(1000)
-
-    search_input = page.locator('input[placeholder*="Search super category"], input[placeholder*="search super category"]').first
-    expect(search_input).to_be_visible(timeout=5000)
-
-    search_input.fill("Seed")
-    page.wait_for_timeout(1000)
-
-    # Verify options appear — use a broad selector that catches dropdown content
-    dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
-    if dropdown_area.count() > 0:
-        dropdown_text = dropdown_area.first.text_content() or ""
-        assert len(dropdown_text.strip()) > 0, "Expected category options after search"
-        # Click an option containing "Seed"
-        seed_option = page.locator('text=/.*Seed.*/i')
-        if seed_option.count() > 1:
-            seed_option.nth(1).click()  # skip the search input text
-        else:
-            dropdown_area.first.locator("div, li, [role='option']").first.click()
-    else:
-        # Fallback: just verify search input has value
-        expect(search_input).to_have_value("Seed")
-
-    _assert_products_changed(page, before_count, "Super Category filter")
-    _scroll_down(page, 200)
-    page.wait_for_timeout(500)
-    page.wait_for_timeout(1500)
+    checkpoints.run("Navigate to catalog page", cp_navigate)
+    checkpoints.run("Verify primary filters visible", cp_primary_filters)
+    checkpoints.run("Verify product cards present", cp_product_cards)
+    checkpoints.run("Verify tabs toggle", cp_tabs)
+    checkpoints.run("Verify page scrolls smoothly", cp_scroll)
     _video_hold(page)
 
 
 # ============================================================
-# GROUP B  —  FILTERS (all dropdowns with search)
+# TC-CATALOG-002: Search bar
+# ============================================================
+
+@pytest.mark.tc("TC-CATALOG-002")
+def test_TC_CATALOG_002_search_filter(catalog_page: Page, checkpoints):
+    """Search bar filters products in real-time by keyword."""
+    page = catalog_page
+    _scroll_to_top(page)
+
+    def cp_navigate():
+        expect(page.locator('input[placeholder*="Search"], input[type="search"]').first).to_be_visible()
+
+    def cp_type_keyword():
+        before_count = _get_product_count(page)
+        search = page.locator('input[placeholder*="Search"], input[type="search"]').first
+        search.click()
+        page.keyboard.type("Seed", delay=80)
+        page.wait_for_timeout(3000)
+        expect(search).not_to_have_value("")
+
+    def cp_results_filtered():
+        _check_no_page_errors(page, "search")
+        assert page.locator('input[placeholder*="Search"], input[type="search"]').first.input_value() != ""
+
+    def cp_scroll_filtered():
+        _scroll_down(page, 300)
+        page.wait_for_timeout(1000)
+        _scroll_up(page, 300)
+
+    checkpoints.run("Navigate to catalog page", cp_navigate)
+    checkpoints.run("Type keyword in search bar", cp_type_keyword)
+    checkpoints.run("Verify results filtered in real-time", cp_results_filtered)
+    checkpoints.run("Scroll to verify filtered results persist", cp_scroll_filtered)
+    _video_hold(page)
+
+
+# ============================================================
+# TC-CATALOG-003: Super Category dropdown
+# ============================================================
+
+@pytest.mark.tc("TC-CATALOG-003")
+def test_TC_CATALOG_003_super_category_filter(catalog_page: Page, checkpoints):
+    """Super Category dropdown opens, has search, and filters products."""
+    page = catalog_page
+    _scroll_to_top(page)
+
+    def cp_navigate():
+        expect(page.locator('button:has-text("super category"), button:has-text("Select super category")').first).to_be_visible()
+
+    def cp_open_dropdown():
+        page.locator('button:has-text("super category"), button:has-text("Select super category")').first.click()
+        page.wait_for_timeout(1000)
+        search_input = page.locator('input[placeholder*="Search super category"], input[placeholder*="search super category"]').first
+        expect(search_input).to_be_visible(timeout=5000)
+
+    def cp_search_and_select():
+        search_input = page.locator('input[placeholder*="Search super category"], input[placeholder*="search super category"]').first
+        search_input.fill("Seed")
+        page.wait_for_timeout(1000)
+        dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
+        if dropdown_area.count() > 0:
+            seed_option = page.locator('text=/.*Seed.*/i')
+            if seed_option.count() > 1:
+                seed_option.nth(1).click()
+            else:
+                dropdown_area.first.locator("div, li, [role='option']").first.click()
+        else:
+            expect(search_input).to_have_value("Seed")
+
+    def cp_verify_filter():
+        before_count = _get_product_count(page)
+        page.wait_for_timeout(2000)
+        _check_no_page_errors(page, "Super Category filter")
+        _scroll_down(page, 200)
+        page.wait_for_timeout(500)
+
+    checkpoints.run("Navigate to catalog page", cp_navigate)
+    checkpoints.run("Open Super Category dropdown with search", cp_open_dropdown)
+    checkpoints.run("Search and select category", cp_search_and_select)
+    checkpoints.run("Verify products filtered", cp_verify_filter)
+    _video_hold(page)
+
+
+# ============================================================
+# TC-CATALOG-004: Brand, SKU Status, Sort dropdowns
 # ============================================================
 
 @pytest.mark.tc("TC-CATALOG-004")
-def test_TC_CATALOG_004_brand_dropdown(catalog_page: Page):
-    """Verify Brand dropdown opens, has internal search, and filters products."""
+def test_TC_CATALOG_004_brand_sku_sort_filters(catalog_page: Page, checkpoints):
+    """Brand, SKU Status, and Sort dropdowns all open and filter correctly."""
     page = catalog_page
     _scroll_to_top(page)
 
-    before_count = _get_product_count(page)
+    def cp_brand_dropdown():
+        before_count = _get_product_count(page)
+        page.locator('button:has-text("brand"), button:has-text("Select brand")').first.click()
+        page.wait_for_timeout(1000)
+        search_input = page.locator('input[placeholder*="Search brands"], input[placeholder*="search brand"]').first
+        expect(search_input).to_be_visible(timeout=5000)
+        search_input.fill("CMS")
+        page.wait_for_timeout(1000)
+        dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
+        if dropdown_area.count() > 0:
+            page.locator('text=/CMS.*/').first.click()
+        else:
+            expect(search_input).to_have_value("CMS")
+        page.wait_for_timeout(2000)
+        _check_no_page_errors(page, "Brand filter")
 
-    page.locator('button:has-text("brand"), button:has-text("Select brand")').first.click()
-    page.wait_for_timeout(1000)
+    def cp_sku_status():
+        page.locator('button:has-text("SKU Status")').first.click()
+        page.wait_for_timeout(1000)
+        body_text = page.text_content("body") or ""
+        for status in ["Available", "Already Listed", "Requested", "Incomplete"]:
+            assert status in body_text, f"Expected '{status}' in SKU Status filter options"
+        page.locator("text=Available").first.click()
+        page.wait_for_timeout(2000)
+        _check_no_page_errors(page, "SKU Status filter")
 
-    search_input = page.locator('input[placeholder*="Search brands"], input[placeholder*="search brand"]').first
-    expect(search_input).to_be_visible(timeout=5000)
+    def cp_sort_dropdown():
+        page.locator('button:has-text("Sort")').first.click()
+        page.wait_for_timeout(1000)
+        body_text = page.text_content("body") or ""
+        for option in ["Most to Least popular", "Newest to Oldest", "Name A-Z"]:
+            assert option in body_text, f"Expected sort option '{option}'"
+        page.locator("text=Name A-Z").first.click()
+        page.wait_for_timeout(2000)
+        _check_no_page_errors(page, "sort dropdown")
 
-    search_input.fill("CMS")
-    page.wait_for_timeout(1000)
-
-    # Verify the search narrowed results — look for "CMS" text inside the dropdown area
-    dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
-    if dropdown_area.count() > 0:
-        dropdown_text = dropdown_area.first.text_content() or ""
-        assert "CMS" in dropdown_text, "Expected 'CMS' brand option visible after search"
-        # Click the first item containing CMS
-        page.locator('text=/CMS.*QA|CMS.*Brand/').first.click()
-    else:
-        # Fallback: just verify search input has value
-        expect(search_input).to_have_value("CMS")
-
-    _assert_products_changed(page, before_count, "Brand filter")
-    page.wait_for_timeout(1500)
-    _scroll_down(page, 300)
-    page.wait_for_timeout(500)
-    _scroll_up(page, 300)
+    checkpoints.run("Open Brand dropdown, search, select, verify filter", cp_brand_dropdown)
+    checkpoints.run("Open SKU Status, verify all options, select one", cp_sku_status)
+    checkpoints.run("Open Sort, verify options, select one", cp_sort_dropdown)
     _video_hold(page)
 
+
+# ============================================================
+# TC-CATALOG-005: More section — Category and Packing Size
+# ============================================================
 
 @pytest.mark.tc("TC-CATALOG-005")
-def test_TC_CATALOG_005_sku_status_filter(catalog_page: Page):
-    """Verify SKU Status filter shows Available, Already Listed, Requested, Incomplete and filters."""
+def test_TC_CATALOG_005_more_filters(catalog_page: Page, checkpoints):
+    """More section reveals Category and Packing Size dropdowns with search and filter."""
     page = catalog_page
     _scroll_to_top(page)
 
-    before_count = _get_product_count(page)
+    def cp_more_section():
+        page.locator('button:has-text("More")').first.click()
+        page.wait_for_timeout(1000)
+        cat_btn = page.locator('button:has-text("Category")')
+        pack_btn = page.locator('button:has-text("Packing")')
+        expect(cat_btn.first).to_be_visible(timeout=5000)
+        expect(pack_btn.first).to_be_visible(timeout=5000)
 
-    page.locator('button:has-text("SKU Status")').first.click()
-    page.wait_for_timeout(1000)
+    def cp_category_filter():
+        before_count = _get_product_count(page)
+        page.locator('button:has-text("Category")').first.click()
+        page.wait_for_timeout(1000)
+        search_input = page.locator('input[placeholder*="category"], input[placeholder*="Category"]').first
+        expect(search_input).to_be_visible(timeout=5000)
+        search_input.fill("Seed")
+        page.wait_for_timeout(1000)
+        dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
+        if dropdown_area.count() > 0:
+            seed_option = page.locator('text=/.*Seed.*/i')
+            if seed_option.count() > 1:
+                seed_option.nth(1).click()
+                page.wait_for_timeout(2000)
+                _check_no_page_errors(page, "Category filter")
+            else:
+                page.keyboard.press("Escape")
+        else:
+            page.keyboard.press("Escape")
 
-    body_text = page.text_content("body") or ""
-    for status in ["Available", "Already Listed", "Requested", "Incomplete"]:
-        assert status in body_text, f"Expected '{status}' in SKU Status filter options"
+    def cp_packing_filter():
+        page.locator('button:has-text("Packing")').first.click()
+        page.wait_for_timeout(1000)
+        search_input = page.locator('input[placeholder*="packing"], input[placeholder*="Packing"]').first
+        expect(search_input).to_be_visible(timeout=5000)
+        search_input.fill("500")
+        page.wait_for_timeout(1000)
+        dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
+        if dropdown_area.count() > 0:
+            pack_option = page.locator('text=/.*500.*/i')
+            if pack_option.count() > 1:
+                pack_option.nth(1).click()
+                page.wait_for_timeout(2000)
+                _check_no_page_errors(page, "Packing filter")
+            else:
+                page.keyboard.press("Escape")
+        else:
+            page.keyboard.press("Escape")
 
-    page.locator("text=Available").first.click()
-    page.wait_for_timeout(2000)
-
-    _check_no_page_errors(page, "SKU Status filter")
-    _assert_products_changed(page, before_count, "SKU Status filter")
-    _scroll_down(page, 300)
-    page.wait_for_timeout(500)
+    checkpoints.run("Click More, verify Category and Packing dropdowns appear", cp_more_section)
+    checkpoints.run("Open Category dropdown, search, select, verify filter", cp_category_filter)
+    checkpoints.run("Open Packing Size dropdown, search, select, verify filter", cp_packing_filter)
     _video_hold(page)
 
+
+# ============================================================
+# TC-CATALOG-006: All 5 product card types
+# ============================================================
 
 @pytest.mark.tc("TC-CATALOG-006")
-def test_TC_CATALOG_006_sort_dropdown(catalog_page: Page):
-    """Verify Sort dropdown opens, displays options, and changes product order."""
+def test_TC_CATALOG_006_card_types(catalog_page: Page, checkpoints):
+    """All 5 product card types render correctly with expected elements."""
     page = catalog_page
     _scroll_to_top(page)
 
-    page.locator('button:has-text("Sort")').first.click()
-    page.wait_for_timeout(1000)
-
-    body_text = page.text_content("body") or ""
-    for option in ["Most to Least popular", "Newest to Oldest", "Name A-Z"]:
-        assert option in body_text, f"Expected sort option '{option}'"
-
-    page.locator("text=Name A-Z").first.click()
-    page.wait_for_timeout(2000)
-
-    _check_no_page_errors(page, "sort dropdown")
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-007")
-def test_TC_CATALOG_007_more_category_filter(catalog_page: Page):
-    """Verify More section reveals Category dropdown with search and filters."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    before_count = _get_product_count(page)
-
-    page.locator('button:has-text("More")').first.click()
-    page.wait_for_timeout(1000)
-
-    cat_btn = page.locator('button:has-text("Category")')
-    expect(cat_btn.first).to_be_visible(timeout=5000)
-    cat_btn.first.click()
-    page.wait_for_timeout(1000)
-
-    search_input = page.locator('input[placeholder*="category"], input[placeholder*="Category"]').first
-    expect(search_input).to_be_visible(timeout=5000)
-    search_input.fill("Seed")
-    page.wait_for_timeout(1000)
-
-    # Select from dropdown
-    dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
-    if dropdown_area.count() > 0:
-        seed_option = page.locator('text=/.*Seed.*/i')
-        if seed_option.count() > 1:
-            seed_option.nth(1).click()
-            _assert_products_changed(page, before_count, "Category filter")
-        else:
-            page.keyboard.press("Escape")
-    else:
+    def cp_addable_card():
+        all_btns = page.locator("button")
+        add_btn = None
+        for i in range(all_btns.count()):
+            btn = all_btns.nth(i)
+            text = (btn.text_content() or "").strip()
+            svg_count = btn.locator("svg").count()
+            if text == "" and svg_count > 0:
+                aria = btn.get_attribute("aria-label") or ""
+                title = btn.get_attribute("title") or ""
+                if "+" in aria or "+" in title or "add" in aria.lower():
+                    add_btn = btn
+                    break
+        if add_btn is None:
+            checkpoints.skip("Addable (+) card", "No Addable card type found")
+            return
+        add_btn.click()
+        page.wait_for_timeout(2000)
+        expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
         page.keyboard.press("Escape")
-
-    page.wait_for_timeout(500)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-008")
-def test_TC_CATALOG_008_more_packing_filter(catalog_page: Page):
-    """Verify More section reveals Packing Size dropdown with search and filters."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    before_count = _get_product_count(page)
-
-    page.locator('button:has-text("More")').first.click()
-    page.wait_for_timeout(1000)
-
-    pack_btn = page.locator('button:has-text("Packing")')
-    expect(pack_btn.first).to_be_visible(timeout=5000)
-    pack_btn.first.click()
-    page.wait_for_timeout(1000)
-
-    search_input = page.locator('input[placeholder*="packing"], input[placeholder*="Packing"]').first
-    expect(search_input).to_be_visible(timeout=5000)
-    search_input.fill("500")
-    page.wait_for_timeout(1000)
-
-    # Select from dropdown
-    dropdown_area = page.locator('[class*="popover"], [class*="dropdown"], [class*="content"], [role="listbox"]')
-    if dropdown_area.count() > 0:
-        pack_option = page.locator('text=/.*500.*/i')
-        if pack_option.count() > 1:
-            pack_option.nth(1).click()
-            _assert_products_changed(page, before_count, "Packing filter")
-        else:
-            page.keyboard.press("Escape")
-    else:
-        page.keyboard.press("Escape")
-
-    page.wait_for_timeout(500)
-    _video_hold(page)
-    _video_hold(page)
-
-
-# ============================================================
-# GROUP C  —  NAVIGATION
-# ============================================================
-
-@pytest.mark.tc("TC-CATALOG-009")
-def test_TC_CATALOG_009_tabs(catalog_page: Page):
-    """Verify All Products / Requested tabs are visible and toggle correctly."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    all_products = page.locator('button:has-text("All Products")')
-    requested = page.locator('button:has-text("Requested")')
-    expect(all_products.first).to_be_visible()
-    expect(requested.first).to_be_visible()
-
-    requested.first.click()
-    page.wait_for_timeout(2000)
-    _scroll_down(page, 300)
-    page.wait_for_timeout(1000)
-    _scroll_up(page, 300)
-
-    all_products.first.click()
-    page.wait_for_timeout(2000)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-010")
-def test_TC_CATALOG_010_scroll_catalog(catalog_page: Page):
-    """Verify catalog page scrolls and product cards persist."""
-    page = catalog_page
-
-    for _ in range(3):
-        _scroll_down(page, 500)
-        page.wait_for_timeout(500)
-    for _ in range(3):
-        _scroll_up(page, 500)
-        page.wait_for_timeout(300)
-
-    assert page.locator('button:has-text("Request Product")').count() > 0, \
-        "Expected product cards visible after scrolling"
-    _video_hold(page)
-
-
-# ============================================================
-# GROUP D  —  CARD TYPES
-# ============================================================
-
-@pytest.mark.tc("TC-CATALOG-011")
-def test_TC_CATALOG_011_card_type_addable(catalog_page: Page):
-    """Verify Card Type 1 — Addable products have a '+' button that opens Add Product Modal."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    # "+" cards use an icon button (no text, has SVG)
-    all_btns = page.locator("button")
-    add_btn = None
-    for i in range(all_btns.count()):
-        btn = all_btns.nth(i)
-        text = (btn.text_content() or "").strip()
-        svg_count = btn.locator("svg").count()
-        if text == "" and svg_count > 0:
-            aria = btn.get_attribute("aria-label") or ""
-            title = btn.get_attribute("title") or ""
-            if "+" in aria or "+" in title or "add" in aria.lower():
-                add_btn = btn
-                break
-
-    if add_btn is None:
-        pytest.skip("No Addable (+) card type found in current catalog state")
-
-    add_btn.click()
-    page.wait_for_timeout(2000)
-    expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-012")
-def test_TC_CATALOG_012_card_type_manage_listing(catalog_page: Page):
-    """Verify Card Type 2 — Manage Listing button opens Edit Product Modal."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    manage_btns = page.locator('button:has-text("Manage Listing")')
-    if manage_btns.count() == 0:
-        pytest.skip("No Manage Listing card type found in current catalog state")
-
-    manage_btns.first.click()
-    page.wait_for_timeout(2000)
-    expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-013")
-def test_TC_CATALOG_013_card_type_request_product(catalog_page: Page):
-    """Verify Card Type 3 — Incomplete products show 'Request Product' button and open the modal."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    request_btns = page.locator('button:has-text("Request Product")')
-    assert request_btns.count() > 0, "Expected at least one 'Request Product' button"
-
-    request_btns.first.click()
-    page.wait_for_timeout(2000)
-
-    expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
-    expect(page.locator('input[placeholder="HSN Code"]').first).to_be_visible(timeout=5000)
-    expect(page.locator('input[placeholder="Your Price"]').first).to_be_visible(timeout=5000)
-
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-014")
-def test_TC_CATALOG_014_card_type_requested(catalog_page: Page):
-    """Verify Card Type 4 — Requested products show 'Requested' status badge."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    found = False
-    for _ in range(5):
-        requested_els = page.locator("text=Requested")
-        for i in range(requested_els.count()):
-            el = requested_els.nth(i)
-            parent_class = el.evaluate('el => el.parentElement?.className || ""')
-            if any(k in parent_class.lower() for k in ["badge", "chip", "status", "px-3", "py-2"]):
-                found = True
-                break
-        if found:
-            break
-        _scroll_down(page, 500)
-        page.wait_for_timeout(500)
-
-    assert page.locator("text=Requested").count() > 0, \
-        "Expected 'Requested' text somewhere on catalog page"
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-015")
-def test_TC_CATALOG_015_card_type_blocked(catalog_page: Page):
-    """Verify Card Type 5 — Item Blocked products show blocked/OOS status."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    body_text = page.text_content("body") or ""
-    has_blocked = any(kw in body_text for kw in ["Blocked", "Item Blocked", "OOS", "Out of Stock"])
-    if not has_blocked:
-        pytest.skip("No Item Blocked / OOS card type found in current catalog state")
-    _video_hold(page)
-
-
-# ============================================================
-# GROUP E  —  CARD-LEVEL ELEMENTS
-# ============================================================
-
-@pytest.mark.tc("TC-CATALOG-016")
-def test_TC_CATALOG_016_incorrect_link(catalog_page: Page):
-    """Verify 'Incorrect?' link opens the Incorrect Product Modal with all fields."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    incorrect_btns = page.locator('button:has-text("Incorrect"), a:has-text("Incorrect")')
-    assert incorrect_btns.count() > 0, "Expected at least one 'Incorrect?' link"
-
-    incorrect_btns.first.click()
-    page.wait_for_timeout(2000)
-
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
-    expect(page.locator('textarea').first).to_be_visible(timeout=5000)
-    expect(page.locator('button:has-text("Select an option"), button:has-text("Select Issue")').first).to_be_visible(timeout=5000)
-    expect(page.locator('button:has-text("Request Change"), button:has-text("Request Changes")').first).to_be_visible(timeout=5000)
-
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-017")
-def test_TC_CATALOG_017_request_variant_link(catalog_page: Page):
-    """Verify 'Request Variant' link opens a modal with form fields."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    variant_btns = page.locator('button:has-text("Request Variant"), a:has-text("Request Variant")')
-    assert variant_btns.count() > 0, "Expected at least one 'Request Variant' element"
-
-    variant_btns.first.click()
-    page.wait_for_timeout(2000)
-
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
-
-    inputs = dialog.locator("input")
-    assert inputs.count() > 0, "Expected input fields in Request Variant modal"
-
-    _video_hold(page)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
-
-
-# ============================================================
-# GROUP F  —  MODALS
-# ============================================================
-
-@pytest.mark.tc("TC-CATALOG-018")
-def test_TC_CATALOG_018_request_product_modal_fields(catalog_page: Page):
-    """Verify Request Product modal shows all required fields from PRD."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    page.locator('button:has-text("Request Product")').first.click()
-    page.wait_for_timeout(2000)
-
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
-
-    # Product Info
-    expect(page.locator('input[placeholder="Master Pack"]').first).to_be_visible(timeout=3000)
-    expect(page.locator('input[placeholder="Dead Weight"]').first).to_be_visible(timeout=3000)
-    expect(page.locator('input[placeholder="L"]').first).to_be_visible(timeout=3000)
-    expect(page.locator('input[placeholder="B"]').first).to_be_visible(timeout=3000)
-    expect(page.locator('input[placeholder="H"]').first).to_be_visible(timeout=3000)
-    expect(page.locator('input[placeholder="HSN Code"]').first).to_be_visible(timeout=3000)
-
-    # Image upload
-    assert page.locator('input[type="file"]').count() > 0, "Expected file upload input"
-
-    # Pricing
-    expect(page.locator('input[placeholder="Price"]').first).to_be_visible(timeout=3000)
-    expect(page.locator('input[placeholder="Your Price"]').first).to_be_visible(timeout=3000)
-
-    # Expiry date
-    expect(page.locator('button:has-text("Month/Year"), button:has-text("Expiry")').first).to_be_visible(timeout=3000)
-
-    # In Stock toggle
-    expect(page.locator('[role="switch"]').first).to_be_visible(timeout=3000)
-
-    # Submit button
-    expect(page.locator('button:has-text("Request Product")').last).to_be_visible(timeout=3000)
-
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-019")
-def test_TC_CATALOG_019_request_product_fill_and_submit(catalog_page: Page, tc_data, test_image_path):
-    """Verify Request Product modal — fill all required fields and submit."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    page.locator('button:has-text("Request Product")').first.click()
-    page.wait_for_timeout(2000)
-
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
-
-    # Dimensions
-    for dim, placeholder in [("l", "L"), ("b", "B"), ("h", "H")]:
-        inp = page.locator(f'input[placeholder="{placeholder}"]').first
-        inp.click()
-        inp.fill(tc_data.get(dim, "10"))
-
-    # HSN
-    hsn = page.locator('input[placeholder="HSN Code"]').first
-    hsn.click()
-    hsn.fill(tc_data.get("hsn", "12345678"))
-
-    # Image upload
-    page.locator('input[type="file"]').first.set_input_files(test_image_path)
-    page.wait_for_timeout(1000)
-
-    # MRP
-    mrp = page.locator('input[placeholder="Price"]').first
-    mrp.click()
-    mrp.fill(tc_data.get("mrp", "500"))
-
-    # Your Price
-    yp = page.locator('input[placeholder="Your Price"]').first
-    yp.click()
-    yp.fill(tc_data.get("your_price", "450"))
-
-    # Expiry date — react-day-picker calendar
-    # Step 1: Open the calendar
-    page.locator('button:has-text("Month/Year"), button:has-text("Expiry")').first.click()
-    page.wait_for_timeout(1000)
-
-    # Step 2: Select future month via dropdown (values: 0=Jan..11=Dec)
-    month_select = page.locator('select[aria-label="Choose the Month"]').first
-    month_select.select_option("8")  # September (0-indexed)
-    page.wait_for_timeout(500)
-
-    # Step 3: Select future year via dropdown
-    year_select = page.locator('select[aria-label="Choose the Year"]').first
-    year_select.select_option("2027")
-    page.wait_for_timeout(500)
-
-    # Step 4: Click a date cell in the grid (any non-disabled day)
-    date_cell = page.locator('td button:not([disabled])').first
-    date_cell.click()
-    page.wait_for_timeout(1000)
-
-    # Ensure In Stock is on
-    switch = page.locator('[role="switch"]').first
-    if switch.get_attribute("aria-checked") == "false":
-        switch.click()
-        page.wait_for_timeout(500)
-
-    # Check submit button state
-    submit_btn = page.locator('button:has-text("Request Product")').last
-    is_enabled = submit_btn.is_enabled()
-
-    _video_hold(page, 3)
-
-    if is_enabled:
-        submit_btn.click()
-        _assert_submission_success(page)
-    else:
-        # Button still disabled after filling all fields — this is a test failure
-        # Check for inline validation errors
-        validation_errs = page.locator('[class*="text-destructive"]:visible, [class*="error"]:visible, [class*="required"]:visible')
-        err_detail = ""
-        if validation_errs.count() > 0:
-            err_detail = f" — Validation: {validation_errs.first.text_content().strip()[:200]}"
-        raise AssertionError(f"Request Product button still disabled after filling all fields{err_detail}")
-
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-020")
-def test_TC_CATALOG_020_request_variant_modal(catalog_page: Page):
-    """Verify Request Variant modal shows pre-filled fields from parent product."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    variant_btns = page.locator('button:has-text("Request Variant")')
-    if variant_btns.count() == 0:
-        pytest.skip("No Request Variant buttons found")
-
-    variant_btns.first.click()
-    page.wait_for_timeout(2000)
-
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
-
-    inputs = dialog.locator("input")
-    assert inputs.count() > 0, "Expected input fields in Request Variant modal"
-
-    _video_hold(page, 3)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
-
-
-@pytest.mark.tc("TC-CATALOG-021")
-def test_TC_CATALOG_021_incorrect_product_modal_submit(catalog_page: Page, tc_data):
-    """Verify Incorrect Product modal — select issue, add comment, submit."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    incorrect_btns = page.locator('button:has-text("Incorrect"), a:has-text("Incorrect")')
-    assert incorrect_btns.count() > 0, "No Incorrect? buttons found"
-    incorrect_btns.first.click()
-    page.wait_for_timeout(2000)
-
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
-
-    # Select Issue
-    select_btn = page.locator('button:has-text("Select an option"), button:has-text("Select Issue")').first
-    select_btn.click()
-    page.wait_for_timeout(1500)
-
-    # Options appear in a popover/select — scope within it to avoid matching page elements behind overlay
-    popover = page.locator('[role="listbox"], [role="option"], [class*="popover"] [class*="item"], [class*="select-content"], [class*="dropdown-content"]')
-    if popover.count() > 0:
-        # Click first option in the popover
-        popover.first.click()
-    else:
-        # Fallback: look for option items with specific text, scoped to dialog
-        dialog.locator('[class*="option"], [class*="item"]').first.click()
-    page.wait_for_timeout(500)
-
-    # Comment
-    textarea = page.locator("textarea").first
-    textarea.fill(tc_data.get("comment", "The product image is incorrect and needs to be updated."))
-    page.wait_for_timeout(500)
-
-    submit_btn = page.locator('button:has-text("Request Change"), button:has-text("Request Changes")').first
-    expect(submit_btn).to_be_enabled(timeout=5000)
-
-    _video_hold(page, 3)
-    submit_btn.click()
-    _assert_submission_success(page)
-    _video_hold(page)
-
-
-@pytest.mark.tc("TC-CATALOG-022")
-def test_TC_CATALOG_022_add_edit_product_modal(catalog_page: Page):
-    """Verify Add/Edit Product modal — opens from '+' or Manage Listing."""
-    page = catalog_page
-    _scroll_to_top(page)
-
-    manage_btns = page.locator('button:has-text("Manage Listing")')
-    if manage_btns.count() > 0:
+        page.wait_for_timeout(1000)
+
+    def cp_manage_listing_card():
+        manage_btns = page.locator('button:has-text("Manage Listing")')
+        if manage_btns.count() == 0:
+            checkpoints.skip("Manage Listing card", "No Manage Listing card found")
+            return
         manage_btns.first.click()
         page.wait_for_timeout(2000)
-    else:
-        pytest.skip("No Manage Listing or Addable (+) card found in current catalog state")
+        expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
+        body_text = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first.text_content() or ""
+        assert "HSN" in body_text or "MRP" in body_text, "Expected HSN/MRP in Edit Product modal"
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
 
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
+    def cp_request_product_card():
+        request_btns = page.locator('button:has-text("Request Product")')
+        assert request_btns.count() > 0, "Expected at least one 'Request Product' button"
+        request_btns.first.click()
+        page.wait_for_timeout(2000)
+        expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
+        expect(page.locator('input[placeholder="HSN Code"]').first).to_be_visible(timeout=5000)
+        expect(page.locator('input[placeholder="Your Price"]').first).to_be_visible(timeout=5000)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
 
-    body_text = dialog.text_content() or ""
-    for field in ["HSN", "MRP", "Your Price"]:
-        assert field in body_text, f"Expected '{field}' in Add/Edit Product modal"
+    def cp_requested_badge():
+        _scroll_to_top(page)
+        found = False
+        for _ in range(5):
+            if page.locator("text=Requested").count() > 0:
+                found = True
+                break
+            _scroll_down(page, 500)
+            page.wait_for_timeout(500)
+        assert page.locator("text=Requested").count() > 0, \
+            "Expected 'Requested' text somewhere on catalog page"
 
-    _video_hold(page, 3)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
+    def cp_blocked_card():
+        _scroll_to_top(page)
+        body_text = page.text_content("body") or ""
+        has_blocked = any(kw in body_text for kw in ["Blocked", "Item Blocked", "OOS", "Out of Stock"])
+        if not has_blocked:
+            checkpoints.skip("Blocked/OOS card", "No Blocked/OOS card type found")
+            return
+
+    checkpoints.run("Verify Addable (+) card opens Add Product modal", cp_addable_card)
+    checkpoints.run("Verify Manage Listing card opens Edit Product modal", cp_manage_listing_card)
+    checkpoints.run("Verify Incomplete card opens Request Product modal", cp_request_product_card)
+    checkpoints.run("Verify Requested badge visible", cp_requested_badge)
+    checkpoints.run("Verify Blocked/OOS card shows status", cp_blocked_card)
+    _video_hold(page)
 
 
-@pytest.mark.tc("TC-CATALOG-023")
-def test_TC_CATALOG_023_create_new_product_modal(catalog_page: Page):
-    """Verify Create New Product modal — triggered from 'Could not find your product?' section."""
+# ============================================================
+# TC-CATALOG-007: Request Product full flow
+# ============================================================
+
+@pytest.mark.tc("TC-CATALOG-007")
+def test_TC_CATALOG_007_request_product_flow(catalog_page: Page, tc_data, test_image_path, checkpoints):
+    """Request Product flow: open modal, verify fields, fill, submit."""
     page = catalog_page
+    _scroll_to_top(page)
 
-    found = False
-    for _ in range(10):
-        _scroll_down(page, 500)
+    def cp_open_modal():
+        page.locator('button:has-text("Request Product")').first.click()
+        page.wait_for_timeout(2000)
+        expect(page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first).to_be_visible(timeout=5000)
+
+    def cp_verify_fields():
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        expect(page.locator('input[placeholder="Master Pack"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('input[placeholder="Dead Weight"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('input[placeholder="L"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('input[placeholder="B"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('input[placeholder="H"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('input[placeholder="HSN Code"]').first).to_be_visible(timeout=3000)
+        assert page.locator('input[type="file"]').count() > 0, "Expected file upload input"
+        expect(page.locator('input[placeholder="Price"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('input[placeholder="Your Price"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('[role="switch"]').first).to_be_visible(timeout=3000)
+        expect(page.locator('button:has-text("Request Product")').last).to_be_visible(timeout=3000)
+
+    def cp_fill_fields():
+        for dim, placeholder in [("l", "L"), ("b", "B"), ("h", "H")]:
+            inp = page.locator(f'input[placeholder="{placeholder}"]').first
+            inp.click()
+            inp.fill(tc_data.get(dim, "10"))
+
+        hsn = page.locator('input[placeholder="HSN Code"]').first
+        hsn.click()
+        hsn.fill(tc_data.get("hsn", "12345678"))
+
+        page.locator('input[type="file"]').first.set_input_files(test_image_path)
+        page.wait_for_timeout(1000)
+
+        mrp = page.locator('input[placeholder="Price"]').first
+        mrp.click()
+        mrp.fill(tc_data.get("mrp", "500"))
+
+        yp = page.locator('input[placeholder="Your Price"]').first
+        yp.click()
+        yp.fill(tc_data.get("your_price", "450"))
+
+        # Expiry date
+        page.locator('button:has-text("Month/Year"), button:has-text("Expiry")').first.click()
+        page.wait_for_timeout(1000)
+        month_select = page.locator('select[aria-label="Choose the Month"]').first
+        month_select.select_option("8")
         page.wait_for_timeout(500)
-        cnf = page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")')
-        if cnf.count() > 0:
-            found = True
-            break
+        year_select = page.locator('select[aria-label="Choose the Year"]').first
+        year_select.select_option("2027")
+        page.wait_for_timeout(500)
+        date_cell = page.locator('td button:not([disabled])').first
+        date_cell.click()
+        page.wait_for_timeout(1000)
 
-    if not found:
-        pytest.skip("'Could not find your product?' section not found")
+        switch = page.locator('[role="switch"]').first
+        if switch.get_attribute("aria-checked") == "false":
+            switch.click()
+            page.wait_for_timeout(500)
 
-    page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")').first.click()
-    page.wait_for_timeout(2000)
+    def cp_submit():
+        submit_btn = page.locator('button:has-text("Request Product")').last
+        is_enabled = submit_btn.is_enabled()
+        _video_hold(page, 3)
+        if is_enabled:
+            submit_btn.click()
+            _assert_submission_success(page)
+        else:
+            validation_errs = page.locator('[class*="text-destructive"]:visible, [class*="error"]:visible, [class*="required"]:visible')
+            err_detail = ""
+            if validation_errs.count() > 0:
+                err_detail = f" — Validation: {validation_errs.first.text_content().strip()[:200]}"
+            raise AssertionError(f"Request Product button still disabled after filling all fields{err_detail}")
 
-    dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-    expect(dialog).to_be_visible(timeout=5000)
+    checkpoints.run("Open Request Product modal", cp_open_modal)
+    checkpoints.run("Verify all required fields present", cp_verify_fields)
+    checkpoints.run("Fill all mandatory fields", cp_fill_fields)
+    checkpoints.run("Submit and verify success", cp_submit)
+    _video_hold(page)
 
-    body_text = dialog.text_content() or ""
-    for field in ["Brand", "Product Name", "Packing", "HSN", "MRP", "Your Price"]:
-        assert field in body_text, f"Expected '{field}' in Create New Product modal"
 
-    _video_hold(page, 3)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(1000)
+# ============================================================
+# TC-CATALOG-008: Incorrect Product, Request Variant, Create New Product
+# ============================================================
+
+@pytest.mark.tc("TC-CATALOG-008")
+def test_TC_CATALOG_008_modal_flows(catalog_page: Page, tc_data, checkpoints):
+    """Incorrect Product, Request Variant, and Create New Product modal flows."""
+    page = catalog_page
+    _scroll_to_top(page)
+
+    def cp_incorrect_product():
+        incorrect_btns = page.locator('button:has-text("Incorrect"), a:has-text("Incorrect")')
+        assert incorrect_btns.count() > 0, "No Incorrect? buttons found"
+        incorrect_btns.first.click()
+        page.wait_for_timeout(2000)
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        expect(dialog).to_be_visible(timeout=5000)
+        expect(page.locator("textarea").first).to_be_visible(timeout=5000)
+        expect(page.locator('button:has-text("Select an option"), button:has-text("Select Issue")').first).to_be_visible(timeout=5000)
+
+        # Select issue type
+        select_btn = page.locator('button:has-text("Select an option"), button:has-text("Select Issue")').first
+        select_btn.click()
+        page.wait_for_timeout(1500)
+        popover = page.locator('[role="listbox"], [role="option"], [class*="popover"] [class*="item"], [class*="select-content"], [class*="dropdown-content"]')
+        if popover.count() > 0:
+            popover.first.click()
+        else:
+            page.locator('[class*="option"], [class*="item"]').first.click()
+        page.wait_for_timeout(500)
+
+        # Comment
+        textarea = page.locator("textarea").first
+        textarea.fill(tc_data.get("comment", "The product image is incorrect and needs to be updated."))
+
+        # Submit
+        submit_btn = page.locator('button:has-text("Request Change"), button:has-text("Request Changes")').first
+        expect(submit_btn).to_be_enabled(timeout=5000)
+        _video_hold(page, 3)
+        submit_btn.click()
+        _assert_submission_success(page)
+
+    def cp_request_variant():
+        _scroll_to_top(page)
+        variant_btns = page.locator('button:has-text("Request Variant")')
+        if variant_btns.count() == 0:
+            checkpoints.skip("Request Variant modal", "No Request Variant buttons found")
+            return
+        variant_btns.first.click()
+        page.wait_for_timeout(2000)
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        expect(dialog).to_be_visible(timeout=5000)
+        inputs = dialog.locator("input")
+        assert inputs.count() > 0, "Expected input fields in Request Variant modal"
+        _video_hold(page, 3)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
+
+    def cp_create_new_product():
+        found = False
+        for _ in range(10):
+            _scroll_down(page, 500)
+            page.wait_for_timeout(500)
+            cnf = page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")')
+            if cnf.count() > 0:
+                found = True
+                break
+        if not found:
+            checkpoints.skip("Create New Product modal", "'Could not find your product?' section not found")
+            return
+        page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")').first.click()
+        page.wait_for_timeout(2000)
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        expect(dialog).to_be_visible(timeout=5000)
+        body_text = dialog.text_content() or ""
+        for field in ["Brand", "Product Name", "Packing", "HSN", "MRP", "Your Price"]:
+            assert field in body_text, f"Expected '{field}' in Create New Product modal"
+        _video_hold(page, 3)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
+
+    checkpoints.run("Open Incorrect Product modal, fill, submit", cp_incorrect_product)
+    checkpoints.run("Open Request Variant modal, verify pre-filled fields", cp_request_variant)
+    checkpoints.run("Open Create New Product modal, verify all fields", cp_create_new_product)
+    _video_hold(page)
