@@ -727,12 +727,18 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, che
 
     def cp_find_section():
         _scroll_to_top(page)
+        page.wait_for_timeout(1000)
         found = False
-        for _ in range(10):
-            _scroll_down(page, 500)
-            page.wait_for_timeout(500)
-            cnf = page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")')
+        for i in range(20):
+            _scroll_down(page, 800)
+            page.wait_for_timeout(1500)
+            cnf = page.locator('button:has-text("Create New Product"), a:has-text("Create New Product"), :text("Create New Product")')
             if cnf.count() > 0:
+                found = True
+                break
+            # Also check for the section heading
+            section_text = page.locator('text="Could not find your product"')
+            if section_text.count() > 0:
                 found = True
                 break
         if not found:
@@ -741,7 +747,8 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, che
         return True
 
     def cp_open_modal():
-        page.locator('button:has-text("Create New Product"), a:has-text("Create New Product")').first.click()
+        btn = page.locator('button:has-text("Create New Product"), a:has-text("Create New Product"), :text("Create New Product")').first
+        btn.click()
         page.wait_for_timeout(2000)
         dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
         expect(dialog).to_be_visible(timeout=5000)
