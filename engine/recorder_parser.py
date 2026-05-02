@@ -122,6 +122,8 @@ def _step_comment(stype, desc, value=""):
         return f"Double-click {desc}"
     elif stype == "hover":
         return f"Hover over {desc}"
+    elif stype == "scroll":
+        return f"Scroll down {value}px" if value else "Scroll page"
     else:
         return desc[:60]
 
@@ -274,6 +276,23 @@ def parse_steps(ats_root):
             steps.append(step)
             continue
 
+        # Scroll (window.scrollBy or mouse.wheel)
+        if 'scrollBy' in stripped or 'scrollTo' in stripped or 'mouse.wheel' in stripped:
+            step["type"] = "scroll"
+            scroll_match = re.search(r'scrollBy\(0,\s*(\d+)\)', stripped)
+            if scroll_match:
+                step["value"] = scroll_match.group(1)
+                step["targetDescription"] = f'Scroll down {scroll_match.group(1)}px'
+            else:
+                scroll_match2 = re.search(r'scrollTo\(0,\s*(\d+)\)', stripped)
+                if scroll_match2:
+                    step["value"] = scroll_match2.group(1)
+                    step["targetDescription"] = f'Scroll to {scroll_match2.group(1)}px'
+                else:
+                    step["targetDescription"] = 'Scroll page'
+            steps.append(step)
+            continue
+
         # Fallback
         step["targetDescription"] = stripped[:80]
         steps.append(step)
@@ -418,11 +437,18 @@ def generate_from_review(payload, ats_root):
 
         # Comment
         test_lines.append(f"    # Step {sid}: {_step_comment(stype, desc, step.get('value', ''))}")
-        test_lines.append(f"    {raw}")
 
-        # Stability wait after interactive actions
-        if stype in ("fill", "type", "click", "select", "dblclick", "check", "press"):
-            test_lines.append("    page.wait_for_timeout(1000)")
+        # Generate code for scroll steps
+        if stype == "scroll":
+            px = step.get("value", "500")
+            test_lines.append(f"    page.evaluate(\"window.scrollBy(0, {px})\")")
+            test_lines.append("    page.wait_for_timeout(1500)")
+        else:
+            test_lines.append(f"    {raw}")
+
+            # Stability wait after interactive actions
+            if stype in ("fill", "type", "click", "select", "dblclick", "check", "press"):
+                test_lines.append("    page.wait_for_timeout(1000)")
 
         # Per-step assertions
         for a in assertions_by_step.get(sid, []):

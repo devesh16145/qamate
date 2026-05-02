@@ -486,6 +486,21 @@ select.compact {
     color: var(--accent-blue);
     border-color: var(--accent-blue);
 }
+.review-step-scroll-btn {
+    background: var(--bg-panel);
+    border: var(--border-width) solid var(--border-color);
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: var(--border-radius-xs);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.review-step-scroll-btn:hover {
+    background: var(--accent-blue-bg);
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+}
 
 /* ============================================================
    CENTER PANEL — Live Log + Test Data
