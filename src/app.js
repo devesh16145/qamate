@@ -713,7 +713,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         navigate: '&#x1F310;', click: '&#x1F446;', fill: '&#x270F;',
         type: '&#x2328;', select: '&#x1F4C7;', check: '&#x2611;',
         dblclick: '&#x1F446;&#x1F446;', hover: '&#x1F447;', press: '&#x2328;',
-        wait: '&#x23F3;', viewport: '&#x1F4FA;', other: '&#x25B6;'
+        wait: '&#x23F3;', viewport: '&#x1F4FA;', scroll: '&#x2B07;', other: '&#x25B6;'
     };
 
     let reviewState = { steps: [], assertions: [], criteria: [], tcId: '', desc: '', flowId: '' };
@@ -750,6 +750,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         <span class="review-step-val" title="${step.value || ''}">${step.value || ''}</span>
                     </div>` : ''}
                 </div>
+                <button class="review-step-scroll-btn" data-step-id="${step.id}" title="Insert scroll down after this step">⬇ Scroll</button>
                 <button class="review-step-assert-btn" data-step-id="${step.id}" title="Add assertion after this step">+ Assert</button>
             `;
             reviewStepsList.appendChild(el);
@@ -767,6 +768,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Assert button handlers
         reviewStepsList.querySelectorAll('.review-step-assert-btn').forEach(btn => {
             btn.addEventListener('click', () => openAssertionBuilder(parseInt(btn.dataset.stepId)));
+        });
+        // Scroll button handlers — insert a scroll step after this step
+        reviewStepsList.querySelectorAll('.review-step-scroll-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const afterStep = parseInt(btn.dataset.stepId);
+                const scrollStep = {
+                    id: reviewState.steps.length + 1,
+                    rawLine: 'page.evaluate("window.scrollBy(0, 500)")',
+                    type: 'scroll',
+                    target: '',
+                    targetDescription: 'Scroll down 500px',
+                    value: '500',
+                    varName: '',
+                };
+                // Insert after the clicked step
+                let insertIdx = reviewState.steps.findIndex(s => s.id === afterStep);
+                if (insertIdx === -1) insertIdx = reviewState.steps.length;
+                reviewState.steps.splice(insertIdx + 1, 0, scrollStep);
+                // Re-number step IDs
+                reviewState.steps.forEach((s, i) => s.id = i + 1);
+                renderReviewSteps();
+                addLog('Scroll step inserted', 'system');
+            });
         });
     }
 
