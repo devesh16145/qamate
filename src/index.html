@@ -11,82 +11,92 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Top Action Bar: consolidated header + execution controls -->
-        <header class="app-header">
-            <div class="header-left">
-                <div class="logo-section">
-                    <div class="logo-icon">🧪</div>
-                    <h1>AGRIM ATS</h1>
+        <!-- Top Bar -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <div class="brand">
+                    <div class="brand-icon">🧪</div>
+                    <span class="brand-text">AGRIM ATS</span>
                 </div>
-                <div class="header-divider"></div>
-                <button id="run-btn" class="primary-btn">▶ RUN</button>
-                <button id="stop-btn" class="danger-btn" disabled>⏹ STOP</button>
-                <div class="header-divider"></div>
-                <label class="header-label">User</label>
-                <select id="user-select" class="control-select compact" title="Select user account"></select>
-                <label class="header-label">Mode</label>
-                <select id="exec-mode-select" class="control-select compact" title="Execution mode">
-                    <option value="sequential">Sequential</option>
-                    <option value="parallel">Parallel</option>
-                </select>
-            </div>
-            <div class="header-right">
+                <div class="topbar-divider"></div>
+                <button id="run-btn" class="btn-primary run-btn">
+                    <span class="run-btn-label">▶ RUN</span>
+                    <span class="run-caret">▾</span>
+                </button>
+                <button id="stop-btn" class="btn stop-btn" disabled>⏹ STOP</button>
+                <div class="topbar-divider"></div>
+                <div class="topbar-field">
+                    <span class="topbar-label">USER</span>
+                    <select id="user-select" class="topbar-select" title="Select user account"></select>
+                </div>
+                <div class="topbar-field">
+                    <span class="topbar-label">MODE</span>
+                    <select id="exec-mode-select" class="topbar-select" title="Execution mode">
+                        <option value="sequential">Sequential</option>
+                        <option value="parallel">Parallel</option>
+                    </select>
+                </div>
+                <div class="topbar-divider"></div>
                 <div class="progress-inline">
-                    <div class="progress-bar-container">
-                        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                    <div class="progress-track">
+                        <div id="progress-bar" class="progress-fill" style="width: 0%"></div>
                     </div>
                     <span id="progress-text" class="progress-label">0/0</span>
                 </div>
-                <div class="header-divider"></div>
-                <select id="env-select" class="control-select compact">
+            </div>
+            <div class="topbar-right">
+                <select id="env-select" class="topbar-select">
                     <option value="dev">Dev</option>
                     <option value="staging">Staging</option>
                 </select>
-                <select id="browser-select" class="control-select compact">
+                <select id="browser-select" class="topbar-select">
                     <option value="chromium">Chromium</option>
                     <option value="firefox">Firefox</option>
                     <option value="webkit">WebKit</option>
                 </select>
-                <select id="viewport-select" class="control-select compact" title="Browser zoom level">
+                <select id="viewport-select" class="topbar-select" title="Browser zoom level">
                     <option value="100">100%</option>
                     <option value="80">80%</option>
                     <option value="75">75%</option>
                     <option value="60">60%</option>
                 </select>
-                <button id="settings-btn" class="icon-btn compact">⚙️</button>
+                <button id="settings-btn" class="btn-icon" title="Settings">⚙</button>
             </div>
         </header>
 
-        <main class="app-content">
-            <!-- Left Panel: Flow Selector -->
-            <aside class="side-panel flow-panel">
+        <!-- Layout -->
+        <main class="layout">
+            <!-- Left Panel: Test Cases -->
+            <aside class="panel left-panel">
                 <div class="panel-header">
-                    <h2>TEST CASES</h2>
-                    <div class="panel-header-actions">
-                        <button id="record-test-btn" class="secondary-btn small">⏺ Record</button>
-                        <div class="search-box">
-                            <input type="text" id="flow-search" placeholder="🔍 Search...">
-                        </div>
-                    </div>
+                    <span class="panel-title">Test Cases</span>
+                </div>
+                <div class="panel-controls">
+                    <button id="record-test-btn" class="btn btn-sm">⏺ Record</button>
+                    <input type="text" id="flow-search" class="search-input" placeholder="Search…">
                 </div>
                 <div id="flow-tree" class="flow-tree">
                     <!-- Flows will be injected here -->
-                    <div class="loading">Loading flows...</div>
+                    <div class="loading">Loading flows…</div>
+                </div>
+                <div class="panel-footer">
+                    <span class="panel-footer-text">Showing all test cases</span>
                 </div>
             </aside>
 
-            <!-- Center Panel: Live Log + Test Data -->
-            <section class="main-panel">
-                <div class="log-section">
-                    <div class="panel-header">
-                        <h2>LIVE LOG</h2>
-                        <span id="parallel-status" class="log-status-badge">Sequential</span>
-                    </div>
-                    <div id="log-console" class="log-console">
-                        <div class="log-entry system">ATS System Ready. Select test cases and click Run.</div>
+            <!-- Center Panel: Live Log -->
+            <section class="panel center-panel">
+                <div class="panel-header">
+                    <span class="panel-title">Live Log</span>
+                    <div class="log-header-controls">
+                        <span id="parallel-status" class="badge">Sequential</span>
                     </div>
                 </div>
+                <div id="log-console" class="log-console">
+                    <div class="log-entry system">ATS System Ready. Select test cases and click Run.</div>
+                </div>
 
+                <!-- Bottom Panel (Test Data / User Stories / Test Steps) -->
                 <div id="bottom-panel" class="bottom-panel hidden">
                     <div class="tab-bar">
                         <button class="tab-btn active" data-tab="test-data">Test Data</button>
@@ -110,7 +120,7 @@
                             <button id="td-variant-dup" class="td-action-btn small" title="Duplicate current variant">📋 Dup</button>
                             <button id="td-variant-del" class="td-action-btn small" title="Delete current variant">🗑️</button>
                         </div>
-                        <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data..."></textarea>
+                        <textarea id="td-editor" class="td-editor" spellcheck="false" placeholder="Select test cases to view/edit their data…"></textarea>
                         <div id="td-status" class="td-status"></div>
                     </div>
 
@@ -129,14 +139,13 @@
             </section>
 
             <!-- Right Panel: Results -->
-            <aside class="side-panel results-panel">
+            <aside class="panel right-panel">
                 <div class="panel-header">
-                    <h2>RESULTS</h2>
-                    <span id="mode-status" class="log-status-badge">Headless</span>
+                    <span class="panel-title">Results</span>
+                    <span id="mode-status" class="badge">Headless</span>
                 </div>
-
                 <div class="results-scroll">
-                    <div id="last-run-card" class="result-card hidden">
+                    <div id="last-run-card" class="stat-card hidden">
                         <div class="run-time" id="last-run-time">Last Run: Just now</div>
                         <div class="stats-grid">
                             <div class="stat-item passed">
@@ -154,8 +163,8 @@
                         </div>
                         <div class="duration-info">⏱ Duration: <span id="run-duration">0s</span></div>
                         <div class="card-actions">
-                            <button id="view-report-btn" class="secondary-btn small">📊 View Report</button>
-                            <button id="open-folder-btn" class="secondary-btn small">📁 Open Folder</button>
+                            <button id="view-report-btn" class="btn btn-sm">📊 View Report</button>
+                            <button id="open-folder-btn" class="btn btn-sm">📁 Open Folder</button>
                         </div>
                     </div>
 
@@ -217,13 +226,13 @@
                         <input type="text" id="setting-jira-project" placeholder="PM" value="PM">
                     </div>
                     <div class="setting-item" style="margin-top:4px;">
-                        <button id="test-jira-btn" class="secondary-btn small" type="button">Test Connection</button>
+                        <button id="test-jira-btn" class="btn btn-sm" type="button">Test Connection</button>
                         <span id="jira-test-status" style="font-size:11px;margin-left:8px;"></span>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="save-settings-btn" class="primary-btn">Save Changes</button>
+                <button id="save-settings-btn" class="btn-primary">Save Changes</button>
             </div>
         </div>
     </div>
@@ -252,12 +261,12 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="start-record-btn" class="primary-btn">Start Recording</button>
+                <button id="start-record-btn" class="btn-primary">Start Recording</button>
             </div>
         </div>
     </div>
 
-    <!-- Recording Review Modal (post-capture: steps + assertions + criteria) -->
+    <!-- Recording Review Modal -->
     <div id="review-modal" class="modal hidden">
         <div class="modal-content review-modal-content">
             <div class="modal-header">
@@ -265,7 +274,6 @@
                 <button class="close-modal" data-close="review-modal">&times;</button>
             </div>
             <div class="modal-body review-body">
-                <!-- Top: Preconditions / Expected Result -->
                 <div class="review-meta-row">
                     <div class="review-meta-field">
                         <label>Preconditions</label>
@@ -277,13 +285,9 @@
                     </div>
                 </div>
 
-                <!-- Steps list -->
                 <div class="review-section-label">Captured Steps</div>
-                <div id="review-steps-list" class="review-steps-list">
-                    <!-- Steps populated dynamically -->
-                </div>
+                <div id="review-steps-list" class="review-steps-list"></div>
 
-                <!-- Per-step assertion builder (hidden, shown on click) -->
                 <div id="review-assertion-builder" class="review-assertion-builder hidden">
                     <div class="review-ab-header">Add Assertion after Step <span id="review-ab-step-num">1</span></div>
                     <div class="review-ab-form">
@@ -337,22 +341,19 @@
                             <input type="text" id="review-ab-desc" placeholder="e.g. Success toast should appear">
                         </div>
                         <div class="review-ab-actions">
-                            <button id="review-ab-add" class="primary-btn small">Add Assertion</button>
-                            <button id="review-ab-cancel" class="secondary-btn small">Cancel</button>
+                            <button id="review-ab-add" class="btn-primary btn-sm">Add Assertion</button>
+                            <button id="review-ab-cancel" class="btn btn-sm">Cancel</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Assertions list -->
                 <div class="review-section-label" id="review-assertions-label" style="display:none">Assertions</div>
                 <div id="review-assertions-list" class="review-assertions-list"></div>
 
-                <!-- Success / Failure Criteria -->
                 <div class="review-section-label">Success / Failure Criteria (runs at end of test)</div>
                 <div id="review-criteria-list" class="review-assertions-list"></div>
-                <button id="review-add-criteria-btn" class="secondary-btn small">+ Add Criteria</button>
+                <button id="review-add-criteria-btn" class="btn btn-sm">+ Add Criteria</button>
 
-                <!-- Criteria builder (reuses assertion builder form, hidden) -->
                 <div id="review-criteria-builder" class="review-assertion-builder hidden">
                     <div class="review-ab-header">Add Success/Failure Criteria</div>
                     <div class="review-ab-form">
@@ -385,15 +386,15 @@
                             <input type="text" id="review-cb-desc" placeholder="e.g. Success message should appear">
                         </div>
                         <div class="review-ab-actions">
-                            <button id="review-cb-add" class="primary-btn small">Add Criteria</button>
-                            <button id="review-cb-cancel" class="secondary-btn small">Cancel</button>
+                            <button id="review-cb-add" class="btn-primary btn-sm">Add Criteria</button>
+                            <button id="review-cb-cancel" class="btn btn-sm">Cancel</button>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="review-save-btn" class="primary-btn">Save Test</button>
-                <button id="review-cancel-btn" class="secondary-btn">Cancel</button>
+                <button id="review-save-btn" class="btn-primary">Save Test</button>
+                <button id="review-cancel-btn" class="btn">Cancel</button>
             </div>
         </div>
     </div>
@@ -406,25 +407,25 @@
                 <button class="close-modal">&times;</button>
             </div>
             <div class="modal-body">
-                <p id="data-tc-label" style="margin-bottom: 12px; font-weight: 700; color: var(--accent-green); font-family: 'Consolas', monospace;"></p>
+                <p id="data-tc-label" class="data-tc-label"></p>
                 <div class="tc-meta-fields">
                     <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
-                        <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Test Case Heading</label>
+                        <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);">Test Case Heading</label>
                         <input type="text" id="tc-meta-heading" placeholder="Short title for this test case" style="width:100%;">
                     </div>
                     <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
-                        <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Description</label>
-                        <textarea id="tc-meta-desc" rows="3" placeholder="Detailed description of what this test verifies" style="width:100%; resize:vertical; font-family:var(--font-family); font-size:12px; padding:8px; border:2px solid #1A1D23; border-radius:10px; background:#FAFAFA; color:var(--text-primary); outline:none;"></textarea>
+                        <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);">Description</label>
+                        <textarea id="tc-meta-desc" rows="3" placeholder="Detailed description of what this test verifies" style="width:100%; resize:vertical; font-family:var(--font); font-size:12px; padding:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); color:var(--text); outline:none;"></textarea>
                     </div>
                 </div>
-                <hr style="border:none; border-top:1px solid rgba(26,29,35,0.1); margin:12px 0;">
-                <div class="td-section-label" style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px;">Test Data Variables</div>
+                <hr class="divider">
+                <div class="td-section-label">Test Data Variables</div>
                 <div id="data-fields-container">
                     <!-- Data fields injected here -->
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="save-data-btn" class="primary-btn">Save All Changes</button>
+                <button id="save-data-btn" class="btn-primary">Save All Changes</button>
             </div>
         </div>
     </div>
@@ -438,26 +439,26 @@
             </div>
             <div class="modal-body">
                 <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
-                    <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Issue Type</label>
-                    <div id="jira-issue-type" style="font-size:13px; font-weight:700; color:var(--accent-purple); padding:6px 0;"></div>
+                    <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);">Issue Type</label>
+                    <div id="jira-issue-type" style="font-size:13px; font-weight:600; color:var(--text-2); padding:6px 0;"></div>
                 </div>
                 <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
-                    <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Summary</label>
+                    <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);">Summary</label>
                     <input type="text" id="jira-summary" placeholder="Bug: TC-XXX — description" style="width:100%;">
                 </div>
                 <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
-                    <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Labels <span style="font-weight:400; text-transform:none;">(comma-separated)</span></label>
+                    <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);">Labels <span style="font-weight:400; text-transform:none;">(comma-separated)</span></label>
                     <input type="text" id="jira-labels" placeholder="automated-test, ats" style="width:100%;">
                 </div>
                 <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:4px;">
-                    <label style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Description</label>
-                    <textarea id="jira-description" rows="8" placeholder="Describe the issue or story..." style="width:100%; resize:vertical; font-family:var(--font-family); font-size:12px; padding:8px; border:2px solid #1A1D23; border-radius:10px; background:#FAFAFA; color:var(--text-primary); outline:none;"></textarea>
+                    <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);">Description</label>
+                    <textarea id="jira-description" rows="8" placeholder="Describe the issue or story…" style="width:100%; resize:vertical; font-family:var(--font); font-size:12px; padding:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); color:var(--text); outline:none;"></textarea>
                 </div>
-                <div id="jira-attachments-info" style="font-size:11px; color:var(--text-muted); padding:4px 0;"></div>
+                <div id="jira-attachments-info" style="font-size:11px; color:var(--text-3); padding:4px 0;"></div>
             </div>
             <div class="modal-footer">
-                <button id="jira-submit-btn" class="primary-btn">Create Issue</button>
-                <button id="jira-cancel-btn" class="secondary-btn">Cancel</button>
+                <button id="jira-submit-btn" class="btn-primary">Create Issue</button>
+                <button id="jira-cancel-btn" class="btn">Cancel</button>
             </div>
         </div>
     </div>
