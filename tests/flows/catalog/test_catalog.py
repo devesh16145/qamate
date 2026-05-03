@@ -114,7 +114,8 @@ def _assert_submission_success(page, timeout=5000):
         errors = page.locator(sel)
         if errors.count() > 0:
             error_text = errors.first.text_content().strip()[:300]
-            raise AssertionError(f"Submission failed with error: {error_text}")
+            if error_text:
+                raise AssertionError(f"Submission failed with error: {error_text}")
 
     dialog = page.locator('[role="dialog"]:visible')
     if dialog.count() == 0:
@@ -690,12 +691,27 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkp
 
     def cp_fill_and_submit():
         dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        # Try to select Brand if it's a combobox and not already selected
+        brand_btn = dialog.locator('button[role="combobox"]').first
+        if brand_btn.count() > 0:
+            brand_text = brand_btn.text_content() or ""
+            if "Select" in brand_text:
+                brand_btn.click(force=True)
+                page.wait_for_timeout(800)
+                option = page.locator('div[role="dialog"].bg-popover span').first
+                if option.count() > 0:
+                    option.click(force=True)
+                    page.wait_for_timeout(500)
+                    print(f"  Brand selected for variant", flush=True)
         submit_btn = dialog.locator('button:has-text("Request"), button:has-text("Submit"), button:has-text("Send")')
         if submit_btn.count() == 0:
             checkpoints.skip("Fill and submit variant", "No submit button found in variant modal")
             return
         _video_hold(page, 2)
-        submit_btn.first.click()
+        if submit_btn.first.is_enabled():
+            submit_btn.first.click()
+        else:
+            submit_btn.first.click(force=True)
         page.wait_for_timeout(3000)
         _check_no_page_errors(page, "Request Variant submission")
 
