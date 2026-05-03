@@ -628,6 +628,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             </div>
         `).join('');
+        // Populate admin user fields
+        const adminUsersList = document.getElementById('admin-users-config-list');
+        adminUsersList.innerHTML = (config.admin_users || []).map((user, i) => `
+            <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #333;">
+                <h4 style="color: #94a3b8; margin-bottom: 8px;">${user.label || 'Admin ' + (i + 1)}</h4>
+                <div class="setting-item">
+                    <label>Email</label>
+                    <input type="text" class="admin-user-email" data-index="${i}" value="${user.email || ''}">
+                </div>
+                <div class="setting-item">
+                    <label>Password</label>
+                    <input type="password" class="admin-user-pass" data-index="${i}" value="${user.password || ''}">
+                </div>
+            </div>
+        `).join('');
 
         // Populate Jira fields
         const jira = config.jira || {};
@@ -680,6 +695,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (config.users[idx]) {
                 config.users[idx].password = input.value;
             }
+        });
+        document.querySelectorAll('.admin-user-email').forEach((input) => {
+            const idx = parseInt(input.dataset.index);
+            if (!config.admin_users) config.admin_users = [];
+            if (!config.admin_users[idx]) config.admin_users[idx] = {};
+            config.admin_users[idx].email = input.value;
+        });
+        document.querySelectorAll('.admin-user-pass').forEach((input) => {
+            const idx = parseInt(input.dataset.index);
+            if (!config.admin_users) config.admin_users = [];
+            if (!config.admin_users[idx]) config.admin_users[idx] = {};
+            config.admin_users[idx].password = input.value;
         });
 
         // Save Jira config

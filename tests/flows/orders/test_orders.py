@@ -1467,7 +1467,7 @@ def test_TC_ORDERS_062_full_progression_accepted_to_packed(orders_page):
 
 
 @pytest.mark.tc("TC-ORDERS-063")
-def test_TC_ORDERS_063(page: Page, tc_data, admin_url):
+def test_TC_ORDERS_063(page: Page, tc_data, admin_url, admin_user):
     """Create PO via admin panel"""
     # Navigate to admin panel login
     target_url = admin_url + "#/login"
@@ -1476,9 +1476,9 @@ def test_TC_ORDERS_063(page: Page, tc_data, admin_url):
     page.wait_for_load_state("domcontentloaded")
     print(f"  Current URL: {page.url}", flush=True)
 
-    # Login
-    page.get_by_role("textbox", name="Username").fill(tc_data.get("input_1", ""))
-    page.get_by_role("textbox", name="Password").fill(tc_data.get("input_2", ""))
+    # Login with admin credentials
+    page.get_by_role("textbox", name="Username").fill(admin_user.get("email", ""))
+    page.get_by_role("textbox", name="Password").fill(admin_user.get("password", ""))
     page.get_by_role("button", name="Sign in").click()
     page.wait_for_timeout(2000)
 
