@@ -61,16 +61,16 @@ class CheckpointRunner:
     def run(self, name, fn, *args, **kwargs):
         """Execute a checkpoint. Returns True if passed, False if failed."""
         cp_entry = {"name": name, "status": "PASS", "error": None}
-        print(f"[{self.tc_id}] ▶ {name}", flush=True)
+        print(f"[{self.tc_id}] >> {name}", flush=True)
         try:
             fn(*args, **kwargs)
-            print(f"[{self.tc_id}] ✔ {name} — PASS", flush=True)
+            print(f"[{self.tc_id}] OK {name}", flush=True)
         except Exception as e:
             cp_entry["status"] = "FAIL"
             cp_entry["error"] = str(e)[:500]
             if self._first_error is None:
                 self._first_error = e
-            print(f"[{self.tc_id}] ✘ {name} — FAIL: {str(e)[:200]}", flush=True)
+            print(f"[{self.tc_id}] FAIL {name}: {str(e)[:200]}", flush=True)
         self.checkpoints.append(cp_entry)
         # Flush checkpoints to file after each one (so partial results survive early exits)
         _write_checkpoints(self.tc_id, self.checkpoints)
@@ -79,7 +79,7 @@ class CheckpointRunner:
     def skip(self, name, reason="Skipped"):
         """Record a skipped checkpoint (e.g. optional feature not present)."""
         self.checkpoints.append({"name": name, "status": "SKIP", "error": reason})
-        print(f"[{self.tc_id}] ⊘ {name} — SKIP: {reason}", flush=True)
+        print(f"[{self.tc_id}] SKIP {name}: {reason}", flush=True)
         _write_checkpoints(self.tc_id, self.checkpoints)
 
     def finalize(self):
