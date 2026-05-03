@@ -476,8 +476,8 @@ textarea:focus {
 .tc-dropdown-item {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
+    justify-content: flex-start;
+    padding: 8px 16px;
     font-size: 13px !important;
     color: var(--text) !important;
     background: transparent !important;
@@ -486,6 +486,7 @@ textarea:focus {
     transition: background 0.1s;
     white-space: nowrap;
     border-radius: 0 !important;
+    text-align: left;
 }
 .tc-dropdown-item:hover {
     background: var(--surface-2);
