@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 </div>
                             </label>
                             <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
+                            <button class="icon-btn edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Edit test steps & assertions">✏️</button>
                             <button class="icon-btn re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Re-record test case">🎬</button>
                             <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
                         </div>
@@ -139,6 +140,40 @@ document.addEventListener('DOMContentLoaded', async () => {
                     document.getElementById('record-tc-id').value = tcId;
                     document.getElementById('record-desc').value = desc;
                     recordModal.classList.remove('hidden');
+                });
+            });
+            // Edit Test button listeners — open review modal with existing assertions/criteria
+            moduleEl.querySelectorAll('.edit-tc-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tcId = btn.dataset.tcId;
+                    const flowId = btn.dataset.module;
+                    const desc = btn.dataset.description;
+                    // Load existing assertions/criteria from test_cases.json
+                    const flow = allFlows.find(f => f.id === flowId);
+                    const tc = flow?.test_cases?.find(t => t.tc_id === tcId);
+                    // Build steps from checkpoints
+                    const steps = (tc?.checkpoints || []).map((cp, i) => ({
+                        id: i + 1,
+                        rawLine: '',
+                        type: 'other',
+                        target: '',
+                        targetDescription: cp,
+                        value: '',
+                        varName: '',
+                    }));
+                    // Load existing assertions and criteria
+                    const assertions = (tc?.assertions || []).map((a, i) => ({ ...a, idx: i }));
+                    const criteria = (tc?.criteria || []).map((c, i) => ({ ...c, idx: i }));
+                    reviewState = { steps, assertions, criteria, tcId, description: desc, flowId };
+                    document.getElementById('review-modal-title').textContent = `Edit Test - ${tcId}`;
+                    document.getElementById('review-preconditions').value = tc?.preconditions || '';
+                    document.getElementById('review-expected').value = tc?.expected_result || '';
+                    reviewAbBuilder.classList.add('hidden');
+                    reviewCbBuilder.classList.add('hidden');
+                    renderReviewSteps();
+                    renderReviewAssertions();
+                    renderReviewCriteria();
+                    reviewModal.classList.remove('hidden');
                 });
             });
 
@@ -752,6 +787,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
                 <button class="review-step-scroll-btn" data-step-id="${step.id}" title="Insert scroll down after this step">⬇ Scroll</button>
                 <button class="review-step-assert-btn" data-step-id="${step.id}" title="Add assertion after this step">+ Assert</button>
+                <button class="review-step-delete-btn" data-step-id="${step.id}" title="Delete this step">✕</button>
             `;
             reviewStepsList.appendChild(el);
         }
@@ -790,6 +826,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 reviewState.steps.forEach((s, i) => s.id = i + 1);
                 renderReviewSteps();
                 addLog('Scroll step inserted', 'system');
+            });
+        });
+        // Delete step button handlers
+        reviewStepsList.querySelectorAll('.review-step-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const stepId = parseInt(btn.dataset.stepId);
+                reviewState.steps = reviewState.steps.filter(s => s.id !== stepId);
+                reviewState.steps.forEach((s, i) => s.id = i + 1);
+                renderReviewSteps();
+                addLog('Step deleted', 'system');
             });
         });
     }

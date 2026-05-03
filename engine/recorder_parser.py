@@ -441,7 +441,7 @@ def generate_from_review(payload, ats_root):
         # Generate code for scroll steps
         if stype == "scroll":
             px = step.get("value", "500")
-            test_lines.append(f"    page.evaluate(\"window.scrollBy(0, {px})\")")
+            test_lines.append(f"    page.mouse.wheel(0, {px})")
             test_lines.append("    page.wait_for_timeout(1500)")
         else:
             test_lines.append(f"    {raw}")
