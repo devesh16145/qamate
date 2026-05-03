@@ -718,7 +718,7 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkp
 # ============================================================
 
 @pytest.mark.tc("TC-CATALOG-010")
-def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, checkpoints):
+def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, test_image_path, checkpoints):
     """Scroll to find 'Create New Product' button, open modal, verify fields, fill, submit."""
     page = catalog_page
 
@@ -747,50 +747,98 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, che
         print("  Modal opened", flush=True)
 
     def cp_verify_fields():
-        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        dialog = page.locator('[role="dialog"]').first
         body_text = dialog.text_content() or ""
-        # Check for common field labels in the modal
-        found_fields = []
-        for field in ["Brand", "Product", "Packing", "HSN", "MRP", "Price"]:
-            if field in body_text:
-                found_fields.append(field)
-        assert len(found_fields) >= 2, f"Expected at least 2 form fields in modal, found: {found_fields}"
-        print(f"  Fields found: {', '.join(found_fields)}", flush=True)
+        expected_fields = ["Brand", "Product Name", "Packing", "HSN", "MRP", "Your Price",
+                           "Dead Weight", "LBH", "Image"]
+        found = [f for f in expected_fields if f in body_text]
+        assert len(found) >= 5, f"Expected at least 5 form fields, found: {found}"
+        print(f"  Fields found: {', '.join(found)}", flush=True)
 
-    def cp_fill_fields():
-        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-        inputs = dialog.locator('input:visible')
-        count = inputs.count()
-        print(f"  Found {count} visible inputs in modal", flush=True)
-        # Fill each input with test data
-        field_data = [
-            tc_data.get("brand", "Test Brand"),
-            tc_data.get("product_name", "Test Product ATS"),
-            tc_data.get("packing", "500g"),
-            tc_data.get("hsn", "12345678"),
-            tc_data.get("mrp", "300"),
-            tc_data.get("your_price", "250"),
-        ]
-        for i in range(min(count, len(field_data))):
-            inp = inputs.nth(i)
-            if inp.is_enabled():
+    def cp_upload_image():
+        dialog = page.locator('[role="dialog"]').first
+        file_input = dialog.locator('input[type="file"]').first
+        if file_input.count() > 0:
+            img_path = test_image_path
+            file_input.set_input_files(img_path)
+            page.wait_for_timeout(1000)
+            print("  Image uploaded", flush=True)
+        else:
+            print("  No file input found, skipping image upload", flush=True)
+
+    def cp_fill_dropdowns():
+        dialog = page.locator('[role="dialog"]').first
+        # Brand dropdown
+        brand_select = dialog.locator('button:has-text("Select brand")').first
+        if brand_select.count() > 0:
+            brand_select.click()
+            page.wait_for_timeout(500)
+            # Type to search and select first option
+            brand = tc_data.get("brand", "Test Brand")
+            page.keyboard.type(brand, delay=30)
+            page.wait_for_timeout(500)
+            option = page.locator('[role="option"], [role="listbox"] [role="option"], [class*="option"]').first
+            if option.count() > 0:
+                option.click()
+            else:
+                page.keyboard.press("Enter")
+            page.wait_for_timeout(500)
+            print(f"  Brand selected: {brand}", flush=True)
+        # Packing dropdown
+        packing_select = dialog.locator('button:has-text("Select Packing")').first
+        if packing_select.count() > 0:
+            packing_select.click()
+            page.wait_for_timeout(500)
+            packing = tc_data.get("packing", "500g")
+            page.keyboard.type(packing, delay=30)
+            page.wait_for_timeout(500)
+            option = page.locator('[role="option"], [role="listbox"] [role="option"], [class*="option"]').first
+            if option.count() > 0:
+                option.click()
+            else:
+                page.keyboard.press("Enter")
+            page.wait_for_timeout(500)
+            print(f"  Packing selected: {packing}", flush=True)
+
+    def cp_fill_text_fields():
+        dialog = page.locator('[role="dialog"]').first
+        # Fill text inputs by placeholder
+        text_fields = {
+            "Product Name": tc_data.get("product_name", "Test Product ATS"),
+            "Master Pack": tc_data.get("master_pack", "10"),
+            "Dead Weight": tc_data.get("dead_weight", "1.5"),
+            "HSN Code": tc_data.get("hsn", "12345678"),
+            "PRICE": tc_data.get("mrp", "300"),
+            "Your Price": tc_data.get("your_price", "250"),
+        }
+        # L, B, H are small fields
+        for placeholder, value in text_fields.items():
+            inp = dialog.locator(f'input[placeholder="{placeholder}"]').first
+            if inp.count() > 0 and inp.is_visible():
                 inp.click()
-                inp.fill("")
-                inp.fill(field_data[i])
-                page.wait_for_timeout(300)
-        page.wait_for_timeout(1000)
+                inp.fill(value)
+                page.wait_for_timeout(200)
+        # Fill L, B, H
+        for dim in ["L", "B", "H"]:
+            val = tc_data.get(dim.lower(), "10")
+            inp = dialog.locator(f'input[placeholder="{dim}"]').first
+            if inp.count() > 0 and inp.is_visible():
+                inp.click()
+                inp.fill(val)
+                page.wait_for_timeout(200)
+        page.wait_for_timeout(500)
+        print(f"  All text fields filled", flush=True)
 
     def cp_submit():
-        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
-        submit_btn = dialog.locator('button:has-text("Create"), button:has-text("Submit"), button:has-text("Request")')
+        dialog = page.locator('[role="dialog"]').first
+        submit_btn = dialog.locator('button:has-text("Request Product"), button:has-text("Create"), button:has-text("Submit")')
         if submit_btn.count() > 0 and submit_btn.first.is_enabled():
             _video_hold(page, 2)
             submit_btn.first.click()
             page.wait_for_timeout(3000)
             _check_no_page_errors(page, "Create New Product submission")
-            print("  Submitted successfully", flush=True)
+            print("  Submitted", flush=True)
         else:
-            _video_hold(page, 2)
             checkpoints.skip("Submit new product", "Submit button not found or not enabled")
 
     def cp_close():
@@ -801,8 +849,10 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, che
     found = checkpoints.run("Scroll to find 'Create New Product' button", cp_scroll_to_button)
     if found:
         checkpoints.run("Open Create New Product modal", cp_open_modal)
-        checkpoints.run("Verify form fields present", cp_verify_fields)
-        checkpoints.run("Fill form fields with test data", cp_fill_fields)
+        checkpoints.run("Verify form fields present (Brand, Product Name, Packing, etc.)", cp_verify_fields)
+        checkpoints.run("Upload product image", cp_upload_image)
+        checkpoints.run("Select Brand and Packing from dropdowns", cp_fill_dropdowns)
+        checkpoints.run("Fill all text fields (Name, Weight, LBH, HSN, MRP, Price)", cp_fill_text_fields)
         checkpoints.run("Submit and verify no errors", cp_submit)
         checkpoints.run("Close modal", cp_close)
     _video_hold(page)

@@ -13,10 +13,18 @@
     "TC-CATALOG-009": {},
     "TC-CATALOG-010": {
         "brand": "Test Brand",
-        "product_name": "Test Product ATS",
         "packing": "500g",
+        "product_name": "Test Product ATS",
+        "master_pack": "10",
+        "dead_weight": "1.5",
+        "l": "20",
+        "b": "15",
+        "h": "10",
         "hsn": "12345678",
         "mrp": "300",
-        "your_price": "250"
+        "expiry_month": "12",
+        "expiry_year": "2026",
+        "your_price": "250",
+        "in_stock": "Yes"
     }
 }
