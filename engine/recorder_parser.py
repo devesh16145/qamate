@@ -389,6 +389,45 @@ def generate_from_review(payload, ats_root):
     flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
     os.makedirs(flow_dir, exist_ok=True)
 
+    # ── Edit mode: only update JSON metadata, don't regenerate test code ──
+    edit_mode = payload.get("editMode", False)
+    if edit_mode:
+        tc_file = os.path.join(flow_dir, "test_cases.json")
+        tcs = []
+        if os.path.exists(tc_file):
+            with open(tc_file, "r", encoding="utf-8") as f:
+                try:
+                    tcs = json.load(f)
+                except Exception:
+                    pass
+        tc_entry = {
+            "tc_id": tc_id,
+            "description": description,
+            "preconditions": preconditions,
+            "expected_result": expected_result,
+            "assertions": assertions,
+            "criteria": criteria,
+        }
+        exists = False
+        for tc in tcs:
+            if tc.get("tc_id") == tc_id:
+                tc.update(tc_entry)
+                exists = True
+                break
+        if not exists:
+            tcs.append(tc_entry)
+        with open(tc_file, "w", encoding="utf-8") as f:
+            json.dump(tcs, f, indent=4)
+        return {
+            "status": "success",
+            "tc_id": tc_id,
+            "flow": flow_id,
+            "data": {},
+            "assertions_count": len(assertions),
+            "criteria_count": len(criteria),
+            "editMode": True,
+        }
+
     # Build data dict from steps
     data_dict = {}
     for step in steps:
