@@ -70,14 +70,14 @@ in_stock_btn = dialog.locator('button[role="combobox"]').nth(2)
 
 ## 3. Radix Calendar/Date Picker (Expiry Date)
 
+There are TWO different calendar implementations used in the app:
+
+### 3a. Radix popover calendar (Create New Product modal)
+
 The Expiry Date uses a Radix month/year calendar picker — a `button:has-text("Month/Year")` trigger that opens a popover with:
 - A year `<select>` dropdown at top
 - A grid of month `<button>` elements (Jan, Feb, Mar, ..., Dec)
 - A "Today" button
-
-**Critical: Use `button:has-text("Dec")` NOT `:text("Dec")`** — the year `<select>` has hidden `<option>` elements that `:text()` matches instead.
-
-**Critical: Scope to the calendar popover dialog.**
 
 ```python
 expiry_btn = dialog.locator('button:has-text("Month/Year")')
@@ -89,15 +89,30 @@ cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
 if cal_popover.count() == 0:
     cal_popover = page.locator('div[role="dialog"]:visible').last
 
-# Map month number to abbreviation
-month_names = {"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
-               "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
-               "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"}
 month_abbr = month_names.get(target_month, "Dec")
-
 month_btn = cal_popover.locator(f'button:has-text("{month_abbr}")')
 month_btn.first.click(force=True)
-page.wait_for_timeout(500)
+```
+
+### 3b. react-day-picker calendar (Request Variant modal)
+
+Some modals use react-day-picker which renders months as **hidden `<option>` elements** inside a `<select class="rdp-months_dropdown">` with `opacity:0`. `button:has-text("Dec")` WILL NOT WORK.
+
+**Fix: Use `page.select_option()` on the hidden select:**
+```python
+expiry_btn = dialog.locator('button:has-text("Month/Year")')
+expiry_btn.first.click(force=True)
+page.wait_for_timeout(1000)
+
+month_select = page.locator('select.rdp-months_dropdown')
+if month_select.count() > 0:
+    # value is 0-indexed: Jan=0, Feb=1, ..., Dec=11
+    month_val = str(int(target_month) - 1)
+    month_select.first.select_option(value=month_val)
+    page.wait_for_timeout(500)
+else:
+    # Fallback: try button:has-text (Radix calendar)
+    ...use 3a pattern...
 ```
 
 ---
