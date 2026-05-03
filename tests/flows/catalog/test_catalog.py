@@ -740,6 +740,15 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkp
                                "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
                                "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"}
                 print(f"  Expiry month selected: {month_names.get(target_month, target_month)}", flush=True)
+                # Click a day to confirm the date and close the calendar
+                cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
+                if cal_popover.count() > 0:
+                    day_btn = cal_popover.locator('button:has-text("1")')
+                    if day_btn.count() > 1:
+                        day_btn.nth(1).click(force=True)  # skip nav arrow, click day "1"
+                    elif day_btn.count() > 0:
+                        day_btn.first.click(force=True)
+                    page.wait_for_timeout(500)
             else:
                 # Fallback: try button:has-text (some calendars use buttons)
                 cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
@@ -759,7 +768,8 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkp
                 else:
                     page.keyboard.press("Escape")
                     print(f"  Month '{month_abbr}' not found in calendar", flush=True)
-        # Submit
+        # Submit — re-scope dialog to main modal (not calendar popover)
+        dialog = page.locator('[role="dialog"]').first
         submit_btn = dialog.locator('button:has-text("Request Product"), button:has-text("Submit")')
         if submit_btn.count() == 0:
             checkpoints.skip("Submit variant request", "Submit button not found")
@@ -930,6 +940,15 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
                 month_select.first.select_option(value=month_val)
                 page.wait_for_timeout(500)
                 print(f"  Expiry month selected: {month_abbr} (via select)", flush=True)
+                # Click a day to confirm the date and close the calendar
+                cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
+                if cal_popover.count() > 0:
+                    day_btn = cal_popover.locator('button:has-text("1")')
+                    if day_btn.count() > 1:
+                        day_btn.nth(1).click(force=True)
+                    elif day_btn.count() > 0:
+                        day_btn.first.click(force=True)
+                    page.wait_for_timeout(500)
             else:
                 # Radix calendar: month buttons inside the popover
                 cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
