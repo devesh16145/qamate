@@ -449,13 +449,48 @@ textarea:focus {
 
 .tc-actions {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 2px;
     flex-shrink: 0;
     align-self: flex-start;
-    margin-top: 4px;
+    position: relative;
 }
-
+.tc-menu-btn {
+    font-size: 16px !important;
+    font-weight: bold;
+    padding: 2px 8px !important;
+    letter-spacing: 1px;
+}
+.tc-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 100;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    min-width: 150px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    overflow: hidden;
+}
+.tc-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.1s;
+    white-space: nowrap;
+}
+.tc-dropdown-item:hover {
+    background: var(--surface-2);
+}
+.tc-dropdown-item.delete-tc-btn:hover {
+    background: var(--red-bg);
+    color: var(--red);
+}
 .config-data-btn {
     background: transparent;
     border: 1px solid var(--border);
