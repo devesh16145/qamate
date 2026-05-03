@@ -100,11 +100,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 </div>
                             </label>
                             <div class="tc-actions">
-                                <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
-                                <button class="icon-btn edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Edit test steps & assertions">✏️</button>
-                                <button class="icon-btn re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Re-record test case">🎬</button>
-                                <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
-                                <button class="icon-btn delete-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Delete test case">🗑️</button>
+                                <button class="icon-btn tc-menu-btn" title="Actions">⋯</button>
+                                <div class="tc-dropdown hidden">
+                                    <div class="tc-dropdown-item config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">📋 Test Data</div>
+                                    <div class="tc-dropdown-item edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">✏️ Edit Steps</div>
+                                    <div class="tc-dropdown-item re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">🎬 Re-record</div>
+                                    <div class="tc-dropdown-item jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">🎫 Jira Story</div>
+                                    <div class="tc-dropdown-item delete-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">🗑️ Delete</div>
+                                </div>
                             </div>
                         </div>
                     `).join('')}
@@ -129,6 +132,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 moduleEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
             });
 
+            // Dropdown menu toggle — close others, toggle current
+            moduleEl.querySelectorAll('.tc-menu-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const dropdown = btn.nextElementSibling;
+                    const isOpen = !dropdown.classList.contains('hidden');
+                    // Close all dropdowns first
+                    document.querySelectorAll('.tc-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
+                    if (!isOpen) dropdown.classList.remove('hidden');
+                });
+            });
             // Configure Data button listeners
             moduleEl.querySelectorAll('.config-data-btn').forEach(btn => {
                 btn.addEventListener('click', () => openDataModal(btn.dataset.module, btn.dataset.tcId));
@@ -1689,6 +1703,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target.closest('.select-all-btn') || e.target.closest('.deselect-all-btn')) {
             setTimeout(refreshTestDataPanel, 50);
         }
+    });
+
+    // Close dropdown menus when clicking outside
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.tc-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
     });
 
     // Kick off
