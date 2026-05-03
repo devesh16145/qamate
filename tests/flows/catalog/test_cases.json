@@ -136,8 +136,8 @@
             "Open Create New Product modal",
             "Verify form fields present (Brand, Product Name, Packing, etc.)",
             "Upload product image",
-            "Select Brand and Packing from dropdowns",
-            "Fill all text fields (Name, Weight, LBH, HSN, MRP, Price)",
+            "Select Brand, Packing, and In Stock from dropdowns",
+            "Fill all text fields (Name, Weight, LBH, HSN, MRP, Price, Expiry)",
             "Submit and verify no errors",
             "Close modal"
         ],
