@@ -99,6 +99,8 @@ ipcMain.handle('run-tests', async (event, options) => {
       PYTHONUNBUFFERED: '1',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: false,
+    detached: true,
   });
 
   // Buffer for partial lines from stdout
