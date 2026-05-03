@@ -149,6 +149,13 @@ def base_url(ats_config):
 
 
 @pytest.fixture(scope="session")
+def admin_user(ats_config):
+    """The admin panel user account for this test run."""
+    users = ats_config.get("admin_users", [])
+    return users[0] if users else {"email": "", "password": "", "label": "Default Admin"}
+
+
+@pytest.fixture(scope="session")
 def admin_url(ats_config):
     """Admin panel URL for the active environment."""
     env_name = os.environ.get("ATS_ENV", "dev")
