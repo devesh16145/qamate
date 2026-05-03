@@ -1480,9 +1480,10 @@ def test_TC_ORDERS_063(page: Page, tc_data, admin_url):
     page.wait_for_timeout(2000)
 
     # Navigate to Purchase Orders > All Orders
-    page.get_by_role("button", name="Purchase orders").click()
+    po_btn = page.locator('button:has-text("Purchase orders"), button:has-text("Purchase Orders")').first
+    po_btn.click()
     page.wait_for_timeout(500)
-    page.get_by_role("menuitem", name="All Orders").click()
+    page.locator('[role="menuitem"]:has-text("All Orders")').first.click()
     page.wait_for_timeout(2000)
 
     # Create new PO — look for Create/Add button
