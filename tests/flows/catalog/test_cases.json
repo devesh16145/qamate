@@ -128,18 +128,17 @@
     {
         "tc_id": "TC-CATALOG-010",
         "module": "Catalog",
-        "description": "Verify All Products/Requested tabs switch correctly and product cards display key details",
+        "description": "Scroll to find 'Create New Product' button, open modal, verify fields, fill, submit",
         "preconditions": "Seller is on Catalog page",
         "checkpoints": [
             "Navigate to catalog page",
-            "Click All Products tab",
-            "Verify product cards visible",
-            "Verify card details (Top selling, Incorrect?, Request Variant)",
-            "Click Requested tab",
-            "Verify Requested tab content",
-            "Switch back to All Products",
-            "Scroll and verify products persist"
+            "Scroll to find 'Create New Product' button",
+            "Open Create New Product modal",
+            "Verify form fields present",
+            "Fill form fields with test data",
+            "Submit and verify no errors",
+            "Close modal"
         ],
-        "expected_result": "Tab switching works correctly, product cards show details with action buttons"
+        "expected_result": "Create New Product modal opens after scrolling, displays form fields, accepts input data, and submits"
     }
 ]
