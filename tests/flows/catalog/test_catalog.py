@@ -844,21 +844,27 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
         if expiry_btn.count() > 0 and expiry_btn.first.is_visible():
             expiry_btn.first.click(force=True)
             page.wait_for_timeout(800)
-            # A month grid popover appears — click the target month button
+            # A month grid popover opens as a separate dialog — scope to it
+            cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
+            if cal_popover.count() == 0:
+                cal_popover = page.locator('div[role="dialog"]:visible').last
             target_month = tc_data.get("expiry_month", "12")
-            # Map month number to 3-letter abbreviation
             month_names = {"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
                            "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
                            "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"}
             month_abbr = month_names.get(target_month, "Dec")
-            month_btn = page.locator(f'button:has-text("{month_abbr}")').last
+            # Find the month button inside the calendar popover
+            month_btn = cal_popover.locator(f'button:has-text("{month_abbr}")')
+            if month_btn.count() == 0:
+                # Fallback: try any clickable element with the month text
+                month_btn = cal_popover.locator(f':text("{month_abbr}")')
             if month_btn.count() > 0:
-                month_btn.click(force=True)
+                month_btn.first.click(force=True)
                 page.wait_for_timeout(500)
                 print(f"  Expiry month selected: {month_abbr}", flush=True)
             else:
                 page.keyboard.press("Escape")
-                print(f"  Month button '{month_abbr}' not found in picker", flush=True)
+                print(f"  Month '{month_abbr}' not found in calendar popover", flush=True)
         page.wait_for_timeout(500)
         print(f"  All text fields filled", flush=True)
 
