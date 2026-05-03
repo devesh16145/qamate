@@ -1470,8 +1470,11 @@ def test_TC_ORDERS_062_full_progression_accepted_to_packed(orders_page):
 def test_TC_ORDERS_063(page: Page, tc_data, admin_url):
     """Create PO via admin panel"""
     # Navigate to admin panel login
-    page.goto(admin_url + "#/login")
+    target_url = admin_url + "#/login"
+    print(f"  Navigating to: {target_url}", flush=True)
+    page.goto(target_url)
     page.wait_for_load_state("domcontentloaded")
+    print(f"  Current URL: {page.url}", flush=True)
 
     # Login
     page.get_by_role("textbox", name="Username").fill(tc_data.get("input_1", ""))
