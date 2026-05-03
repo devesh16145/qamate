@@ -728,19 +728,38 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, che
     def cp_find_section():
         _scroll_to_top(page)
         page.wait_for_timeout(1000)
+        # Try incremental scroll to find the section
+        selectors = [
+            'button:has-text("Create New Product")',
+            'a:has-text("Create New Product")',
+            ':text("Create New Product")',
+            'text="Could not find your product"',
+        ]
         found = False
-        for i in range(20):
-            _scroll_down(page, 800)
-            page.wait_for_timeout(1500)
-            cnf = page.locator('button:has-text("Create New Product"), a:has-text("Create New Product"), :text("Create New Product")')
-            if cnf.count() > 0:
-                found = True
+        for i in range(10):
+            _scroll_down(page, 600)
+            page.wait_for_timeout(800)
+            for sel in selectors:
+                el = page.locator(sel)
+                if el.count() > 0:
+                    print(f"  Found section after {i+1} scrolls", flush=True)
+                    found = True
+                    break
+            if found:
                 break
-            # Also check for the section heading
-            section_text = page.locator('text="Could not find your product"')
-            if section_text.count() > 0:
-                found = True
-                break
+        # If not found by incremental scroll, try jumping to bottom with End key
+        if not found:
+            print("  Incremental scroll didn't find section, trying End key...", flush=True)
+            _scroll_to_top(page)
+            page.wait_for_timeout(500)
+            page.keyboard.press("End")
+            page.wait_for_timeout(2000)
+            for sel in selectors:
+                el = page.locator(sel)
+                if el.count() > 0:
+                    print(f"  Found section at page bottom", flush=True)
+                    found = True
+                    break
         if not found:
             checkpoints.skip("Find Create New Product section", "'Could not find your product?' section not found after scrolling")
             return False
