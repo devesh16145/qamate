@@ -326,7 +326,13 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) 
         baseUrl
       ], {
         cwd: __dirname,
-        env: { ...process.env }
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: false,
+        detached: true
+      });
+      codegenProcess.stderr?.on('data', (d) => {
+        console.log('[codegen stderr]', d.toString());
       });
 
       // Live polling: send step count updates to renderer every 2s
