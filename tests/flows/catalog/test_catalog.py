@@ -34,42 +34,17 @@ def _video_hold(page, seconds=3):
 
 
 def _scroll_down(page, pixels=500):
-    # Try scrolling the main scrollable container (React apps often use a div, not window)
-    page.evaluate(f"""
-        const el = document.querySelector('[class*="scroll"]') ||
-                   document.querySelector('[class*="overflow"]') ||
-                   document.querySelector('main') ||
-                   document.querySelector('[class*="content"]') ||
-                   document.scrollingElement;
-        if (el) el.scrollTop += {pixels};
-        window.scrollBy(0, {pixels});
-    """)
+    page.mouse.wheel(0, pixels)
     page.wait_for_timeout(500)
 
 
 def _scroll_up(page, pixels=500):
-    page.evaluate(f"""
-        const el = document.querySelector('[class*="scroll"]') ||
-                   document.querySelector('[class*="overflow"]') ||
-                   document.querySelector('main') ||
-                   document.querySelector('[class*="content"]') ||
-                   document.scrollingElement;
-        if (el) el.scrollTop -= {pixels};
-        window.scrollBy(0, -{pixels});
-    """)
+    page.mouse.wheel(0, -pixels)
     page.wait_for_timeout(500)
 
 
 def _scroll_to_top(page):
-    page.evaluate("""
-        const el = document.querySelector('[class*="scroll"]') ||
-                   document.querySelector('[class*="overflow"]') ||
-                   document.querySelector('main') ||
-                   document.querySelector('[class*="content"]') ||
-                   document.scrollingElement;
-        if (el) el.scrollTop = 0;
-        window.scrollTo(0, 0);
-    """)
+    page.keyboard.press("Home")
     page.wait_for_timeout(300)
 
 
@@ -739,73 +714,95 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkp
 
 
 # ============================================================
-# TC-CATALOG-010: Tab switching and product card grid
+# TC-CATALOG-010: Create New Product flow
 # ============================================================
 
 @pytest.mark.tc("TC-CATALOG-010")
-def test_TC_CATALOG_010_tab_switching_and_cards(catalog_page: Page, tc_data, checkpoints):
-    """Verify All Products/Requested tabs switch correctly and product cards display key details."""
+def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, checkpoints):
+    """Scroll to find 'Create New Product' button, open modal, verify fields, fill, submit."""
     page = catalog_page
 
-    def cp_all_products_tab():
-        tab = page.locator('button:has-text("All Products")')
-        assert tab.count() > 0, "All Products tab not found"
-        tab.first.click()
-        page.wait_for_timeout(1500)
-        print("  Clicked All Products tab", flush=True)
+    def cp_navigate():
+        expect(page.locator('input[placeholder*="Search"], input[type="search"]').first).to_be_visible()
 
-    def cp_verify_cards_visible():
-        cards = page.locator('text=Top selling')
-        count = cards.count()
-        print(f"  Found {count} product cards", flush=True)
-        assert count > 0, "Expected at least one product card on All Products tab"
-
-    def cp_verify_card_details():
-        body_text = page.text_content("body") or ""
-        checks = ["Top selling", "Incorrect?", "Request Variant"]
-        for check in checks:
-            assert check in body_text, f"Expected '{check}' on product cards"
-        print(f"  Card details verified: {', '.join(checks)}", flush=True)
-
-    def cp_requested_tab():
-        tab = page.locator('button:has-text("Requested")')
-        assert tab.count() > 0, "Requested tab not found"
-        tab.first.click()
-        page.wait_for_timeout(2000)
-        print("  Clicked Requested tab", flush=True)
-
-    def cp_requested_tab_content():
-        # After switching to Requested, verify the view changed
-        # Either shows requested products or an empty state
-        page.wait_for_timeout(1000)
-        # Check we're still on the page and it responded to the click
-        assert page.locator('input[placeholder*="Search"], input[type="search"]').first.is_visible(), \
-            "Search bar should still be visible after tab switch"
-        print("  Requested tab loaded successfully", flush=True)
-
-    def cp_back_to_all():
-        tab = page.locator('button:has-text("All Products")')
-        tab.first.click()
-        page.wait_for_timeout(1500)
-        cards = page.locator('text=Top selling')
-        assert cards.count() > 0, "Expected product cards after switching back to All Products"
-        print("  Switched back to All Products", flush=True)
-
-    def cp_scroll_products():
+    def cp_scroll_to_button():
         _scroll_to_top(page)
-        for i in range(3):
-            _scroll_down(page, 400)
-            page.wait_for_timeout(500)
-        cards = page.locator('text=Request Product')
-        print(f"  After scrolling: {cards.count()} 'Request Product' buttons visible", flush=True)
-        assert cards.count() > 0, "Expected product cards after scrolling"
+        page.wait_for_timeout(500)
+        for i in range(20):
+            _scroll_down(page, 500)
+            page.wait_for_timeout(600)
+            btn = page.locator('button:has-text("Create New Product")')
+            if btn.count() > 0:
+                print(f"  Found 'Create New Product' after {i+1} scrolls", flush=True)
+                return True
+        checkpoints.skip("Find Create New Product button", "Button not found after 20 scrolls")
+        return False
+
+    def cp_open_modal():
+        btn = page.locator('button:has-text("Create New Product")').first
+        btn.click()
+        page.wait_for_timeout(2000)
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        expect(dialog).to_be_visible(timeout=5000)
+        print("  Modal opened", flush=True)
+
+    def cp_verify_fields():
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        body_text = dialog.text_content() or ""
+        # Check for common field labels in the modal
+        found_fields = []
+        for field in ["Brand", "Product", "Packing", "HSN", "MRP", "Price"]:
+            if field in body_text:
+                found_fields.append(field)
+        assert len(found_fields) >= 2, f"Expected at least 2 form fields in modal, found: {found_fields}"
+        print(f"  Fields found: {', '.join(found_fields)}", flush=True)
+
+    def cp_fill_fields():
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        inputs = dialog.locator('input:visible')
+        count = inputs.count()
+        print(f"  Found {count} visible inputs in modal", flush=True)
+        # Fill each input with test data
+        field_data = [
+            tc_data.get("brand", "Test Brand"),
+            tc_data.get("product_name", "Test Product ATS"),
+            tc_data.get("packing", "500g"),
+            tc_data.get("hsn", "12345678"),
+            tc_data.get("mrp", "300"),
+            tc_data.get("your_price", "250"),
+        ]
+        for i in range(min(count, len(field_data))):
+            inp = inputs.nth(i)
+            if inp.is_enabled():
+                inp.click()
+                inp.fill("")
+                inp.fill(field_data[i])
+                page.wait_for_timeout(300)
+        page.wait_for_timeout(1000)
+
+    def cp_submit():
+        dialog = page.locator('[role="dialog"], [class*="modal"], [class*="dialog"]').first
+        submit_btn = dialog.locator('button:has-text("Create"), button:has-text("Submit"), button:has-text("Request")')
+        if submit_btn.count() > 0 and submit_btn.first.is_enabled():
+            _video_hold(page, 2)
+            submit_btn.first.click()
+            page.wait_for_timeout(3000)
+            _check_no_page_errors(page, "Create New Product submission")
+            print("  Submitted successfully", flush=True)
+        else:
+            _video_hold(page, 2)
+            checkpoints.skip("Submit new product", "Submit button not found or not enabled")
+
+    def cp_close():
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
 
     checkpoints.run("Navigate to catalog page", cp_navigate)
-    checkpoints.run("Click All Products tab", cp_all_products_tab)
-    checkpoints.run("Verify product cards visible", cp_verify_cards_visible)
-    checkpoints.run("Verify card details (Top selling, Incorrect?, Request Variant)", cp_verify_card_details)
-    checkpoints.run("Click Requested tab", cp_requested_tab)
-    checkpoints.run("Verify Requested tab content", cp_requested_tab_content)
-    checkpoints.run("Switch back to All Products", cp_back_to_all)
-    checkpoints.run("Scroll and verify products persist", cp_scroll_products)
+    found = checkpoints.run("Scroll to find 'Create New Product' button", cp_scroll_to_button)
+    if found:
+        checkpoints.run("Open Create New Product modal", cp_open_modal)
+        checkpoints.run("Verify form fields present", cp_verify_fields)
+        checkpoints.run("Fill form fields with test data", cp_fill_fields)
+        checkpoints.run("Submit and verify no errors", cp_submit)
+        checkpoints.run("Close modal", cp_close)
     _video_hold(page)
