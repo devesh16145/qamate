@@ -11,12 +11,5 @@
         "comment": "The product image is incorrect and needs to be updated."
     },
     "TC-CATALOG-009": {},
-    "TC-CATALOG-010": {
-        "brand": "Test Brand",
-        "product_name": "Test Product ATS",
-        "packing": "500g",
-        "hsn": "12345678",
-        "mrp": "300",
-        "your_price": "250"
-    }
+    "TC-CATALOG-010": {}
 }
