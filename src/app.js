@@ -95,13 +95,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 <input type="checkbox" data-tc-id="${tc.tc_id}" data-module="${flow.id}">
                                 <div class="tc-info">
                                     <span class="tc-id">${tc.tc_id}</span>
-                                    <span class="tc-desc">${tc.description}</span>
+                                    <span class="tc-name">${tc.description}</span>
+                                    ${tc.preconditions ? `<span class="tc-precond">Pre: ${tc.preconditions}</span>` : ''}
                                 </div>
                             </label>
-                            <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
-                            <button class="icon-btn edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Edit test steps & assertions">✏️</button>
-                            <button class="icon-btn re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Re-record test case">🎬</button>
-                            <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
+                            <div class="tc-actions">
+                                <button class="icon-btn config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Configure test data">📋</button>
+                                <button class="icon-btn edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Edit test steps & assertions">✏️</button>
+                                <button class="icon-btn re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Re-record test case">🎬</button>
+                                <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
+                            </div>
                         </div>
                     `).join('')}
                 </div>
