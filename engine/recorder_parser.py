@@ -379,7 +379,7 @@ def generate_from_review(payload, ats_root):
     """
     tc_id = payload["tc_id"]
     description = payload.get("description", "")
-    flow_id = payload.get("flowId", "general")
+    flow_id = payload.get("flowId") or "general"
     preconditions = payload.get("preconditions", "")
     expected_result = payload.get("expectedResult", "")
     steps = payload.get("steps", [])
