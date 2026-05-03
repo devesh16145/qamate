@@ -723,24 +723,34 @@ def test_TC_CATALOG_009_request_variant_flow(catalog_page: Page, tc_data, checkp
                 inp.click()
                 inp.fill(val)
                 page.wait_for_timeout(200)
-        # Expiry Date — Radix calendar picker
+        # Expiry Date — Radix calendar picker (proven pattern from ATS_TEST_PATTERNS.md)
         expiry_btn = dialog.locator('button:has-text("Month/Year")')
-        if expiry_btn.count() > 0:
+        if expiry_btn.count() > 0 and expiry_btn.first.is_visible():
             expiry_btn.first.click(force=True)
-            page.wait_for_timeout(800)
+            page.wait_for_timeout(1000)
+            # Scope to the calendar popover (last visible dialog)
             cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
+            if cal_popover.count() == 0:
+                cal_popover = page.locator('div[role="dialog"]:visible').last
             target_month = tc_data.get("expiry_month", "12")
             month_names = {"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
                            "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
                            "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"}
             month_abbr = month_names.get(target_month, "Dec")
+            # CRITICAL: use button:has-text NOT :text to avoid hidden <option> elements
             month_btn = cal_popover.locator(f'button:has-text("{month_abbr}")')
             if month_btn.count() == 0:
+                # Fallback: search entire page for the month button
                 month_btn = page.locator(f'button:has-text("{month_abbr}")')
             if month_btn.count() > 0:
                 month_btn.first.click(force=True)
                 page.wait_for_timeout(500)
                 print(f"  Expiry month selected: {month_abbr}", flush=True)
+            else:
+                page.keyboard.press("Escape")
+                print(f"  Month '{month_abbr}' not found in calendar", flush=True)
+        else:
+            print("  No Month/Year button found", flush=True)
         # Submit
         submit_btn = dialog.locator('button:has-text("Request Product"), button:has-text("Submit")')
         if submit_btn.count() == 0:
