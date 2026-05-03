@@ -1827,6 +1827,14 @@ textarea:focus {
     color: var(--blue) !important;
     border-color: var(--blue) !important;
 }
+.delete-tc-btn {
+    font-size: 13px !important;
+}
+.delete-tc-btn:hover {
+    background: var(--red-bg) !important;
+    color: var(--red) !important;
+    border-color: var(--red) !important;
+}
 
 /* Assertion builder */
 .review-assertion-builder {

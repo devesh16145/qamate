@@ -104,6 +104,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 <button class="icon-btn edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Edit test steps & assertions">✏️</button>
                                 <button class="icon-btn re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}" title="Re-record test case">🎬</button>
                                 <button class="icon-btn jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Create Jira Story">🎫</button>
+                                <button class="icon-btn delete-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" title="Delete test case">🗑️</button>
                             </div>
                         </div>
                     `).join('')}
@@ -206,6 +207,32 @@ document.addEventListener('DOMContentLoaded', async () => {
                         runFolder: null,
                         errors: [],
                     });
+                });
+            });
+            // Delete Test button listeners
+            moduleEl.querySelectorAll('.delete-tc-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const tcId = btn.dataset.tcId;
+                    const flowId = btn.dataset.module;
+                    if (!confirm(`Delete test case "${tcId}"?\n\nThis will remove it from test_cases.json, test_data.json, and the Python test file.`)) return;
+                    try {
+                        const result = await window.ats.deleteTest({ flowId, tcId });
+                        if (result?.success) {
+                            // Remove the TC item from the UI
+                            const tcItem = btn.closest('.tc-item');
+                            if (tcItem) tcItem.remove();
+                            // Remove from allFlows cache
+                            const flow = allFlows.find(f => f.id === flowId);
+                            if (flow?.test_cases) {
+                                flow.test_cases = flow.test_cases.filter(t => t.tc_id !== tcId);
+                            }
+                            addLog(`Deleted test case ${tcId}`, 'success');
+                        } else {
+                            alert('Failed to delete: ' + (result?.error || 'Unknown error'));
+                        }
+                    } catch (e) {
+                        alert('Delete error: ' + e.message);
+                    }
                 });
             });
         });

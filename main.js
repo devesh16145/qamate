@@ -482,6 +482,53 @@ ipcMain.handle('save-tc-meta', async (event, { flowId, tcId, heading, descriptio
     return { success: false, error: e.message };
   }
 });
+// IPC: Delete test case — removes from test_cases.json, test_data.json, and Python file
+ipcMain.handle('delete-test', async (event, { flowId, tcId }) => {
+  try {
+    const flowDir = path.join(__dirname, 'tests', 'flows', flowId);
+    const tcFile = path.join(flowDir, 'test_cases.json');
+    const dataFile = path.join(flowDir, 'test_data.json');
+
+    // 1. Remove from test_cases.json
+    if (fs.existsSync(tcFile)) {
+      const tcs = JSON.parse(fs.readFileSync(tcFile, 'utf8'));
+      const filtered = tcs.filter(t => t.tc_id !== tcId);
+      fs.writeFileSync(tcFile, JSON.stringify(filtered, null, 4), 'utf8');
+    }
+
+    // 2. Remove from test_data.json
+    if (fs.existsSync(dataFile)) {
+      const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+      delete data[tcId];
+      fs.writeFileSync(dataFile, JSON.stringify(data, null, 4), 'utf8');
+    }
+
+    // 3. Remove Python test function from the test file
+    // TC IDs like TC-CATALOG-009 -> test function name: test_TC_CATALOG_009_*
+    const tcUnderscore = tcId.replace(/-/g, '_');
+    const pyFiles = fs.readdirSync(flowDir).filter(f => f.startsWith('test_') && f.endsWith('.py'));
+    for (const pyFile of pyFiles) {
+      const pyPath = path.join(flowDir, pyFile);
+      const content = fs.readFileSync(pyPath, 'utf8');
+      // Find the decorator + function for this TC
+      const pattern = new RegExp(
+        `(?:^|\\n)(@pytest\\.mark\\.tc\\("${tcId}"\\)[\\s\\S]*?def test_${tcUnderscore}[\\s\\S]*?(?=\\n@pytest|\\n\\nclass |\\n\\ndef [a-z]|\\Z))`,
+        'm'
+      );
+      const match = content.match(pattern);
+      if (match) {
+        let newContent = content.replace(match[0], '');
+        // Clean up extra blank lines
+        newContent = newContent.replace(/\n{3,}/g, '\n\n');
+        fs.writeFileSync(pyPath, newContent, 'utf8');
+      }
+    }
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 ipcMain.handle('get-tc-data', async (event, { flowId, tcId }) => {
   try {
     const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
