@@ -36,17 +36,17 @@ def _video_hold(page, seconds=3):
 
 
 def _scroll_down(page, pixels=500):
-    page.evaluate(f"window.scrollBy(0, {pixels})")
+    page.mouse.wheel(0, pixels)
     page.wait_for_timeout(500)
 
 
 def _scroll_up(page, pixels=500):
-    page.evaluate(f"window.scrollBy(0, -{pixels})")
+    page.mouse.wheel(0, -pixels)
     page.wait_for_timeout(500)
 
 
 def _scroll_to_top(page):
-    page.evaluate("window.scrollTo(0, 0)")
+    page.keyboard.press("Home")
     page.wait_for_timeout(300)
 
 
