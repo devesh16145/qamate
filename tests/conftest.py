@@ -189,12 +189,12 @@ def browser_context_args(browser_context_args, results_dir):
         "viewport": {"width": vp_w, "height": vp_h},
     }
 
-    # In sequential mode, don't add video — sequential_page handles it
-    if os.environ.get("ATS_EXEC_MODE") != "sequential":
-        video_dir = os.path.join(results_dir, "videos")
-        os.makedirs(video_dir, exist_ok=True)
-        args["record_video_dir"] = video_dir
-        args["record_video_size"] = {"width": base_w, "height": base_h}
+    # Always enable video recording — sequential_page has its own context,
+    # and per-test pages (e.g. admin panel tests) also need video
+    video_dir = os.path.join(results_dir, "videos")
+    os.makedirs(video_dir, exist_ok=True)
+    args["record_video_dir"] = video_dir
+    args["record_video_size"] = {"width": base_w, "height": base_h}
 
     return args
 
@@ -272,7 +272,17 @@ def pytest_runtest_makereport(item, call):
 def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
     """After each test, capture a screenshot AND page error text if the test failed.
     Also stashes the video path for later renaming."""
-    active_page = sequential_page if sequential_page is not None else page
+    # Use the test's own page by default; fall back to sequential_page only
+    # if the test actually requested it (via orders_page/catalog_page fixtures)
+    active_page = page
+    if sequential_page is not None:
+        # Check if this test uses a fixture that wraps sequential_page
+        # (orders_page, catalog_page). If it uses raw `page`, prefer that.
+        fixturenames = getattr(request.node, 'fixturenames', [])
+        page_only_fixtures = {'page'}  # tests using only raw page
+        sequential_fixtures = {'orders_page', 'catalog_page', 'sequential_page'}
+        if any(f in sequential_fixtures for f in fixturenames):
+            active_page = sequential_page
     try:
         if active_page.video:
             request.node._video_path = active_page.video.path()
