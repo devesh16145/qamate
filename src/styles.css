@@ -1790,6 +1790,30 @@ textarea:focus {
     color: var(--blue);
     background: var(--blue-bg);
 }
+.review-step-delete-btn {
+    background: none;
+    border: 1px dashed transparent;
+    border-radius: 4px;
+    color: var(--text-4);
+    padding: 2px 6px;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+    align-self: center;
+}
+.review-step-delete-btn:hover {
+    border-color: var(--red);
+    color: var(--red);
+    background: var(--red-bg);
+}
+.edit-tc-btn {
+    font-size: 13px !important;
+}
+.edit-tc-btn:hover {
+    background: var(--blue-bg) !important;
+    color: var(--blue) !important;
+    border-color: var(--blue) !important;
+}
 
 /* Assertion builder */
 .review-assertion-builder {

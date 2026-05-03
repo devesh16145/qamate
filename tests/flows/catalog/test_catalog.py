@@ -768,37 +768,38 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
 
     def cp_fill_dropdowns():
         dialog = page.locator('[role="dialog"]').first
-        # Brand dropdown
-        brand_select = dialog.locator('button:has-text("Select brand")').first
-        if brand_select.count() > 0:
-            brand_select.click()
-            page.wait_for_timeout(500)
-            # Type to search and select first option
-            brand = tc_data.get("brand", "Test Brand")
-            page.keyboard.type(brand, delay=30)
-            page.wait_for_timeout(500)
-            option = page.locator('[role="option"], [role="listbox"] [role="option"], [class*="option"]').first
-            if option.count() > 0:
-                option.click()
+        # Brand: click combobox, wait for popover, click first option
+        brand_btn = dialog.locator('button[role="combobox"]:has-text("Select brand")').first
+        if brand_btn.count() > 0:
+            brand_btn.click()
+            page.wait_for_timeout(800)
+            # Popover appears with brand names — click the first one
+            popover = page.locator('[role="dialog"].bg-popover:visible, [class*="popover"]:not([role="dialog"][class*="animate"]):visible').last
+            if popover.count() > 0:
+                # Get all text items in the popover
+                first_option = popover.locator('div:visible, span:visible, button:visible').first
+                if first_option.count() > 0:
+                    first_option.click()
+                    page.wait_for_timeout(500)
+                    print("  Brand selected from dropdown", flush=True)
             else:
-                page.keyboard.press("Enter")
-            page.wait_for_timeout(500)
-            print(f"  Brand selected: {brand}", flush=True)
-        # Packing dropdown
-        packing_select = dialog.locator('button:has-text("Select Packing")').first
-        if packing_select.count() > 0:
-            packing_select.click()
-            page.wait_for_timeout(500)
-            packing = tc_data.get("packing", "500g")
-            page.keyboard.type(packing, delay=30)
-            page.wait_for_timeout(500)
-            option = page.locator('[role="option"], [role="listbox"] [role="option"], [class*="option"]').first
-            if option.count() > 0:
-                option.click()
+                page.keyboard.press("Escape")
+                print("  Brand popover not found", flush=True)
+        # Packing: same pattern
+        packing_btn = dialog.locator('button[role="combobox"]:has-text("Select Packing")').first
+        if packing_btn.count() > 0:
+            packing_btn.click()
+            page.wait_for_timeout(800)
+            popover = page.locator('[role="dialog"].bg-popover:visible, [class*="popover"]:not([role="dialog"][class*="animate"]):visible').last
+            if popover.count() > 0:
+                first_option = popover.locator('div:visible, span:visible, button:visible').first
+                if first_option.count() > 0:
+                    first_option.click()
+                    page.wait_for_timeout(500)
+                    print("  Packing selected from dropdown", flush=True)
             else:
-                page.keyboard.press("Enter")
-            page.wait_for_timeout(500)
-            print(f"  Packing selected: {packing}", flush=True)
+                page.keyboard.press("Escape")
+                print("  Packing popover not found", flush=True)
 
     def cp_fill_text_fields():
         dialog = page.locator('[role="dialog"]').first
