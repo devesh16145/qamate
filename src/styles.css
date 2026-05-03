@@ -428,19 +428,32 @@ textarea:focus {
     width: fit-content;
 }
 
-.tc-desc {
-    font-size: 11px;
-    color: var(--text-2);
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+.tc-name {
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 500;
+    line-height: 1.4;
     word-break: break-word;
 }
 
-.test-case-item:hover .tc-desc {
+.tc-precond {
+    font-size: 10px;
+    color: var(--text-3);
+    line-height: 1.3;
+    font-style: italic;
+}
+
+.test-case-item:hover .tc-name {
     color: var(--text);
+}
+
+.tc-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 4px;
 }
 
 .config-data-btn {
