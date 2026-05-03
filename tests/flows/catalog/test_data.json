@@ -10,7 +10,15 @@
     "TC-CATALOG-008": {
         "comment": "The product image is incorrect and needs to be updated."
     },
-    "TC-CATALOG-009": {},
+    "TC-CATALOG-009": {
+        "packing": "100G",
+        "l": "15",
+        "b": "10",
+        "h": "8",
+        "mrp": "250",
+        "your_price": "200",
+        "expiry_month": "12"
+    },
     "TC-CATALOG-010": {
         "brand": "Test Brand",
         "packing": "500g",
