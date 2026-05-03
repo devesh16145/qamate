@@ -478,11 +478,14 @@ textarea:focus {
     align-items: center;
     gap: 6px;
     padding: 8px 12px;
-    font-size: 13px;
-    color: var(--text);
+    font-size: 13px !important;
+    color: var(--text) !important;
+    background: transparent !important;
+    border: none !important;
     cursor: pointer;
     transition: background 0.1s;
     white-space: nowrap;
+    border-radius: 0 !important;
 }
 .tc-dropdown-item:hover {
     background: var(--surface-2);
