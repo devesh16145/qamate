@@ -134,11 +134,13 @@
             "Navigate to catalog page",
             "Scroll to find 'Create New Product' button",
             "Open Create New Product modal",
-            "Verify form fields present",
-            "Fill form fields with test data",
+            "Verify form fields present (Brand, Product Name, Packing, etc.)",
+            "Upload product image",
+            "Select Brand and Packing from dropdowns",
+            "Fill all text fields (Name, Weight, LBH, HSN, MRP, Price)",
             "Submit and verify no errors",
             "Close modal"
         ],
-        "expected_result": "Create New Product modal opens after scrolling, displays form fields, accepts input data, and submits"
+        "expected_result": "Create New Product modal opens, image uploads, all fields fill correctly, and form submits"
     }
 ]
