@@ -1,11 +1,25 @@
 {
-  "TC-ORDERS-006": {
-    "search_po": "PO"
-  },
-  "TC-ORDERS-007": {
-    "search_sku": "urea"
-  },
-  "TC-ORDERS-045": {
-    "reject_reason": "Out of stock - supply exhausted for requested SKUs"
-  }
+    "TC-ORDERS-006": {
+        "search_po": "PO"
+    },
+    "TC-ORDERS-007": {
+        "search_sku": "urea"
+    },
+    "TC-ORDERS-045": {
+        "reject_reason": "Out of stock - supply exhausted for requested SKUs"
+    },
+    "TC-ORDERS-063": {
+        "input_1": "amit.dalal@agrim.app",
+        "input_2": "Amit#dalal@123",
+        "input_3": "sh",
+        "search_brand": "M&M_Brand1",
+        "seller_name": "MAHINDRA AND MAHINDRA LTD.",
+        "seller_address": "123 Main St, Bangalore, kerala - 560001",
+        "ship_to_address": "212, Shiv Towers, Tiswadi,",
+        "warehouse_region": "DELHI",
+        "warehouse_name": "DELHI WH",
+        "ship_to_region": "Goa",
+        "load_type": "Full Load",
+        "inventory_type": "Business Purchase"
+    }
 }

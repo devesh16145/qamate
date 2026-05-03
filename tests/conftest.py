@@ -149,6 +149,15 @@ def base_url(ats_config):
 
 
 @pytest.fixture(scope="session")
+def admin_url(ats_config):
+    """Admin panel URL for the active environment."""
+    env_name = os.environ.get("ATS_ENV", "dev")
+    env_config = ats_config.get("environments", {}).get(env_name, {})
+    url = env_config.get("admin_url", "https://admin-dev.agrim.app/")
+    return url if url.endswith("/") else url + "/"
+
+
+@pytest.fixture(scope="session")
 def results_dir():
     """Directory where this run's artifacts are stored."""
     d = os.environ.get("ATS_RESULTS_DIR", os.path.join(os.path.dirname(__file__), "results", "manual"))

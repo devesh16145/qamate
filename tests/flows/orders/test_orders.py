@@ -1464,3 +1464,109 @@ def test_TC_ORDERS_062_full_progression_accepted_to_packed(orders_page):
         pytest.skip("Order not in Accepted status or Pack not available")
     _video_hold(page, 2)
     _check_no_page_errors(page, "progression accepted to packed")
+
+
+@pytest.mark.tc("TC-ORDERS-063")
+def test_TC_ORDERS_063(page: Page, tc_data, admin_url):
+    """Create PO via admin panel"""
+    # Navigate to admin panel login
+    page.goto(admin_url + "#/login")
+    page.wait_for_load_state("domcontentloaded")
+
+    # Login
+    page.get_by_role("textbox", name="Username").fill(tc_data.get("input_1", ""))
+    page.get_by_role("textbox", name="Password").fill(tc_data.get("input_2", ""))
+    page.get_by_role("button", name="Sign in").click()
+    page.wait_for_timeout(2000)
+
+    # Navigate to Purchase Orders > All Orders
+    page.get_by_role("button", name="Purchase orders").click()
+    page.wait_for_timeout(500)
+    page.get_by_role("menuitem", name="All Orders").click()
+    page.wait_for_timeout(2000)
+
+    # Create new PO — look for Create/Add button
+    create_btn = page.locator('button:has-text("Create"), button:has-text("Add"), button:has-text("New")').first
+    if create_btn.is_visible():
+        create_btn.click()
+        page.wait_for_timeout(1500)
+
+    # Search and select brand
+    search = page.get_by_role("textbox", name="Search").first
+    if search.is_visible():
+        search.fill(tc_data.get("input_3", ""))
+        page.wait_for_timeout(1000)
+        brand = page.get_by_text(tc_data.get("search_brand", "M&M_Brand1"))
+        if brand.is_visible():
+            brand.dblclick()
+            page.wait_for_timeout(1000)
+
+    # Select seller
+    seller_name = tc_data.get("seller_name", "")
+    if seller_name:
+        edit_btn = page.get_by_role("img", name="Edit").first
+        if edit_btn.is_visible():
+            edit_btn.click()
+            page.wait_for_timeout(500)
+        seller_el = page.get_by_text(seller_name)
+        if seller_el.is_visible():
+            seller_el.click()
+            page.wait_for_timeout(500)
+
+    # Select seller address
+    seller_address = tc_data.get("seller_address", "")
+    if seller_address:
+        addr_el = page.get_by_text(seller_address, exact=False)
+        if addr_el.is_visible():
+            addr_el.click()
+            page.wait_for_timeout(500)
+
+    # Select warehouse region
+    region = tc_data.get("warehouse_region", "")
+    if region:
+        page.get_by_text(region, exact=True).click()
+        page.wait_for_timeout(500)
+
+    # Select warehouse
+    wh_name = tc_data.get("warehouse_name", "")
+    if wh_name:
+        page.get_by_role("menuitem", name=wh_name).click()
+        page.wait_for_timeout(500)
+
+    # Select load type
+    load_type = tc_data.get("load_type", "")
+    if load_type:
+        page.get_by_text(load_type, exact=True).click()
+        page.wait_for_timeout(500)
+
+    # Select inventory type
+    inv_type = tc_data.get("inventory_type", "")
+    if inv_type:
+        page.get_by_text(inv_type, exact=True).click()
+        page.wait_for_timeout(500)
+
+    # Select ship-to address
+    ship_addr = tc_data.get("ship_to_address", "")
+    if ship_addr:
+        addr_el = page.get_by_text(ship_addr, exact=False)
+        if addr_el.is_visible():
+            addr_el.click()
+            page.wait_for_timeout(500)
+
+    # Select ship-to region
+    ship_region = tc_data.get("ship_to_region", "")
+    if ship_region:
+        page.get_by_text(ship_region, exact=True).click()
+        page.wait_for_timeout(500)
+
+    # Submit PO
+    page.wait_for_timeout(1000)
+    submit_btn = page.locator('button:has-text("Submit"), button:has-text("Create"), button:has-text("Save")').first
+    if submit_btn.is_visible() and submit_btn.is_enabled():
+        submit_btn.click()
+        page.wait_for_timeout(3000)
+        print("  PO submitted", flush=True)
+    else:
+        print("  Submit button not available", flush=True)
+
+    _check_no_page_errors(page, "create PO via admin")
