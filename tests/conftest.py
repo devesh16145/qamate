@@ -63,8 +63,14 @@ class CheckpointRunner:
         cp_entry = {"name": name, "status": "PASS", "error": None}
         print(f"[{self.tc_id}] >> {name}", flush=True)
         try:
-            fn(*args, **kwargs)
-            print(f"[{self.tc_id}] OK {name}", flush=True)
+            result = fn(*args, **kwargs)
+            # If fn returns False explicitly, treat as skip (used for gating subsequent steps)
+            if result is False:
+                cp_entry["status"] = "SKIP"
+                cp_entry["error"] = "Step returned False (condition not met)"
+                print(f"[{self.tc_id}] SKIP {name}: condition not met", flush=True)
+            else:
+                print(f"[{self.tc_id}] OK {name}", flush=True)
         except Exception as e:
             cp_entry["status"] = "FAIL"
             cp_entry["error"] = str(e)[:500]

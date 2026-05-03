@@ -34,17 +34,42 @@ def _video_hold(page, seconds=3):
 
 
 def _scroll_down(page, pixels=500):
-    page.evaluate(f"window.scrollBy(0, {pixels})")
+    # Try scrolling the main scrollable container (React apps often use a div, not window)
+    page.evaluate(f"""
+        const el = document.querySelector('[class*="scroll"]') ||
+                   document.querySelector('[class*="overflow"]') ||
+                   document.querySelector('main') ||
+                   document.querySelector('[class*="content"]') ||
+                   document.scrollingElement;
+        if (el) el.scrollTop += {pixels};
+        window.scrollBy(0, {pixels});
+    """)
     page.wait_for_timeout(500)
 
 
 def _scroll_up(page, pixels=500):
-    page.evaluate(f"window.scrollBy(0, -{pixels})")
+    page.evaluate(f"""
+        const el = document.querySelector('[class*="scroll"]') ||
+                   document.querySelector('[class*="overflow"]') ||
+                   document.querySelector('main') ||
+                   document.querySelector('[class*="content"]') ||
+                   document.scrollingElement;
+        if (el) el.scrollTop -= {pixels};
+        window.scrollBy(0, -{pixels});
+    """)
     page.wait_for_timeout(500)
 
 
 def _scroll_to_top(page):
-    page.evaluate("window.scrollTo(0, 0)")
+    page.evaluate("""
+        const el = document.querySelector('[class*="scroll"]') ||
+                   document.querySelector('[class*="overflow"]') ||
+                   document.querySelector('main') ||
+                   document.querySelector('[class*="content"]') ||
+                   document.scrollingElement;
+        if (el) el.scrollTop = 0;
+        window.scrollTo(0, 0);
+    """)
     page.wait_for_timeout(300)
 
 
