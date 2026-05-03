@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // Load existing assertions and criteria
                     const assertions = (tc?.assertions || []).map((a, i) => ({ ...a, idx: i }));
                     const criteria = (tc?.criteria || []).map((c, i) => ({ ...c, idx: i }));
-                    reviewState = { steps, assertions, criteria, tcId, description: desc, flowId };
+                    reviewState = { steps, assertions, criteria, tcId, description: desc, flowId, editMode: true };
                     document.getElementById('review-modal-title').textContent = `Edit Test - ${tcId}`;
                     document.getElementById('review-preconditions').value = tc?.preconditions || '';
                     document.getElementById('review-expected').value = tc?.expected_result || '';
@@ -1026,6 +1026,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             steps: reviewState.steps,
             assertions: reviewState.assertions,
             criteria: reviewState.criteria,
+            editMode: reviewState.editMode || false,
         };
 
         try {
