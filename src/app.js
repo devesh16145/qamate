@@ -102,11 +102,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <div class="tc-actions">
                                 <button class="icon-btn tc-menu-btn" title="Actions">⋯</button>
                                 <div class="tc-dropdown hidden">
-                                    <div class="tc-dropdown-item config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">📋 Test Data</div>
-                                    <div class="tc-dropdown-item edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">✏️ Edit Steps</div>
-                                    <div class="tc-dropdown-item re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">🎬 Re-record</div>
-                                    <div class="tc-dropdown-item jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">🎫 Jira Story</div>
-                                    <div class="tc-dropdown-item delete-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">🗑️ Delete</div>
+                                    <div class="tc-dropdown-item config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">Test Data</div>
+                                    <div class="tc-dropdown-item edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">Edit Steps</div>
+                                    <div class="tc-dropdown-item re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">Re-record</div>
+                                    <div class="tc-dropdown-item jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">Jira Story</div>
+                                    <div class="tc-dropdown-item delete-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">Delete</div>
                                 </div>
                             </div>
                         </div>
