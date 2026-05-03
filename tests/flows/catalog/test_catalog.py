@@ -856,8 +856,11 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
             # Find the month button inside the calendar popover
             month_btn = cal_popover.locator(f'button:has-text("{month_abbr}")')
             if month_btn.count() == 0:
-                # Fallback: try any clickable element with the month text
-                month_btn = cal_popover.locator(f':text("{month_abbr}")')
+                # Fallback: try any visible div/span with the month text (not hidden option elements)
+                month_btn = cal_popover.locator(f'div:has-text("{month_abbr}"), span:has-text("{month_abbr}")')
+            if month_btn.count() == 0:
+                # Fallback: search the entire visible page for the month button
+                month_btn = page.locator(f'button:has-text("{month_abbr}")')
             if month_btn.count() > 0:
                 month_btn.first.click(force=True)
                 page.wait_for_timeout(500)
