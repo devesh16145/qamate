@@ -3,13 +3,23 @@
     "dev": {
       "name": "Development",
       "base_url": "https://supplier-dev.agrim.app/",
+      "admin_url": "https://admin-dev.agrim.app/",
       "is_default": true
     },
     "staging": {
       "name": "Staging",
-      "base_url": "https://supplier-staging.agrim.app/"
+      "base_url": "https://supplier-staging.agrim.app/",
+      "admin_url": "https://admin-staging.agrim.app/"
     }
   },
+  "admin_users": [
+    {
+      "id": "admin_1",
+      "email": "amit.dalal@agrim.app",
+      "password": "Amit#dalal@123",
+      "label": "Admin 1"
+    }
+  ],
   "users": [
     {
       "id": "user_1",
