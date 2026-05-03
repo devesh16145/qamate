@@ -913,35 +913,38 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
                 inp.click()
                 inp.fill(val)
                 page.wait_for_timeout(200)
-        # Fill Expiry Date — it's a Radix month/year calendar picker
+        # Fill Expiry Date — dual approach: try react-day-picker select first, then Radix buttons
         expiry_btn = dialog.locator('button:has-text("Month/Year")')
         if expiry_btn.count() > 0 and expiry_btn.first.is_visible():
             expiry_btn.first.click(force=True)
-            page.wait_for_timeout(800)
-            # A month grid popover opens as a separate dialog — scope to it
-            cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
-            if cal_popover.count() == 0:
-                cal_popover = page.locator('div[role="dialog"]:visible').last
+            page.wait_for_timeout(1000)
             target_month = tc_data.get("expiry_month", "12")
             month_names = {"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
                            "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
                            "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"}
             month_abbr = month_names.get(target_month, "Dec")
-            # Find the month button inside the calendar popover
-            month_btn = cal_popover.locator(f'button:has-text("{month_abbr}")')
-            if month_btn.count() == 0:
-                # Fallback: try any visible div/span with the month text (not hidden option elements)
-                month_btn = cal_popover.locator(f'div:has-text("{month_abbr}"), span:has-text("{month_abbr}")')
-            if month_btn.count() == 0:
-                # Fallback: search the entire visible page for the month button
-                month_btn = page.locator(f'button:has-text("{month_abbr}")')
-            if month_btn.count() > 0:
-                month_btn.first.click(force=True)
+            # Try react-day-picker: hidden <select class="rdp-months_dropdown">
+            month_select = page.locator('select.rdp-months_dropdown')
+            if month_select.count() > 0:
+                month_val = str(int(target_month) - 1)
+                month_select.first.select_option(value=month_val)
                 page.wait_for_timeout(500)
-                print(f"  Expiry month selected: {month_abbr}", flush=True)
+                print(f"  Expiry month selected: {month_abbr} (via select)", flush=True)
             else:
-                page.keyboard.press("Escape")
-                print(f"  Month '{month_abbr}' not found in calendar popover", flush=True)
+                # Radix calendar: month buttons inside the popover
+                cal_popover = page.locator('div[role="dialog"].bg-popover:visible').last
+                if cal_popover.count() == 0:
+                    cal_popover = page.locator('div[role="dialog"]:visible').last
+                month_btn = cal_popover.locator(f'button:has-text("{month_abbr}")')
+                if month_btn.count() == 0:
+                    month_btn = page.locator(f'button:has-text("{month_abbr}")')
+                if month_btn.count() > 0:
+                    month_btn.first.click(force=True)
+                    page.wait_for_timeout(500)
+                    print(f"  Expiry month selected: {month_abbr} (via button)", flush=True)
+                else:
+                    page.keyboard.press("Escape")
+                    print(f"  Month '{month_abbr}' not found in calendar", flush=True)
         page.wait_for_timeout(500)
         print(f"  All text fields filled", flush=True)
 
