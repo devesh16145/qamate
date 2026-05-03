@@ -767,39 +767,51 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
             print("  No file input found, skipping image upload", flush=True)
 
     def cp_fill_dropdowns():
-        dialog = page.locator('[role="dialog"]').first
-        # Brand: click combobox, wait for popover, click first option
-        brand_btn = dialog.locator('button[role="combobox"]:has-text("Select brand")').first
+        dialog = page.locator('div[role="dialog"][data-state="open"]').last
+        # Brand: click combobox (force=True to bypass dialog overlay interception)
+        brand_btn = dialog.locator('button[role="combobox"]').first
         if brand_btn.count() > 0:
-            brand_btn.click()
+            brand_btn.click(force=True)
             page.wait_for_timeout(800)
-            # Popover appears with brand names — click the first one
-            popover = page.locator('[role="dialog"].bg-popover:visible, [class*="popover"]:not([role="dialog"][class*="animate"]):visible').last
-            if popover.count() > 0:
-                # Get all text items in the popover
-                first_option = popover.locator('div:visible, span:visible, button:visible').first
-                if first_option.count() > 0:
-                    first_option.click()
-                    page.wait_for_timeout(500)
-                    print("  Brand selected from dropdown", flush=True)
+            # Popover appears as a second dialog with brand options as <span> elements
+            # Click the first option in the popover
+            brand_option = page.locator('div[role="dialog"].bg-popover span').first
+            if brand_option.count() > 0:
+                selected_brand = brand_option.text_content() or "brand"
+                brand_option.click(force=True)
+                page.wait_for_timeout(500)
+                print(f"  Brand selected: {selected_brand}", flush=True)
             else:
                 page.keyboard.press("Escape")
-                print("  Brand popover not found", flush=True)
-        # Packing: same pattern
-        packing_btn = dialog.locator('button[role="combobox"]:has-text("Select Packing")').first
+                print("  Brand popover options not found", flush=True)
+        # Packing: click combobox
+        packing_btn = dialog.locator('button[role="combobox"]').nth(1)
         if packing_btn.count() > 0:
-            packing_btn.click()
+            packing_btn.click(force=True)
             page.wait_for_timeout(800)
-            popover = page.locator('[role="dialog"].bg-popover:visible, [class*="popover"]:not([role="dialog"][class*="animate"]):visible').last
-            if popover.count() > 0:
-                first_option = popover.locator('div:visible, span:visible, button:visible').first
-                if first_option.count() > 0:
-                    first_option.click()
-                    page.wait_for_timeout(500)
-                    print("  Packing selected from dropdown", flush=True)
+            packing_option = page.locator('div[role="dialog"].bg-popover span').first
+            if packing_option.count() > 0:
+                selected_packing = packing_option.text_content() or "packing"
+                packing_option.click(force=True)
+                page.wait_for_timeout(500)
+                print(f"  Packing selected: {selected_packing}", flush=True)
             else:
                 page.keyboard.press("Escape")
-                print("  Packing popover not found", flush=True)
+                print("  Packing popover options not found", flush=True)
+        # In Stock: click the 3rd combobox
+        in_stock_btn = dialog.locator('button[role="combobox"]').nth(2)
+        if in_stock_btn.count() > 0:
+            in_stock_btn.click(force=True)
+            page.wait_for_timeout(800)
+            in_stock_option = page.locator('div[role="dialog"].bg-popover span').first
+            if in_stock_option.count() > 0:
+                selected_stock = in_stock_option.text_content() or "Yes"
+                in_stock_option.click(force=True)
+                page.wait_for_timeout(500)
+                print(f"  In Stock selected: {selected_stock}", flush=True)
+            else:
+                page.keyboard.press("Escape")
+                print("  In Stock popover not found", flush=True)
 
     def cp_fill_text_fields():
         dialog = page.locator('[role="dialog"]').first
@@ -827,6 +839,20 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
                 inp.click()
                 inp.fill(val)
                 page.wait_for_timeout(200)
+        # Fill Expiry Date if it's a month/year input
+        expiry_input = dialog.locator('input[placeholder*="Month"], input[placeholder*="Expiry"]').first
+        if expiry_input.count() > 0 and expiry_input.is_visible():
+            month = tc_data.get("expiry_month", "12")
+            year = tc_data.get("expiry_year", "2026")
+            expiry_input.click()
+            page.wait_for_timeout(200)
+            # Try typing as MM/YYYY
+            expiry_input.fill(f"{month}/{year}")
+            page.wait_for_timeout(200)
+            # Tab away to confirm
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            print(f"  Expiry date filled: {month}/{year}", flush=True)
         page.wait_for_timeout(500)
         print(f"  All text fields filled", flush=True)
 
@@ -852,8 +878,8 @@ def test_TC_CATALOG_010_create_new_product_flow(catalog_page: Page, tc_data, tes
         checkpoints.run("Open Create New Product modal", cp_open_modal)
         checkpoints.run("Verify form fields present (Brand, Product Name, Packing, etc.)", cp_verify_fields)
         checkpoints.run("Upload product image", cp_upload_image)
-        checkpoints.run("Select Brand and Packing from dropdowns", cp_fill_dropdowns)
-        checkpoints.run("Fill all text fields (Name, Weight, LBH, HSN, MRP, Price)", cp_fill_text_fields)
+        checkpoints.run("Select Brand, Packing, and In Stock from dropdowns", cp_fill_dropdowns)
+        checkpoints.run("Fill all text fields (Name, Weight, LBH, HSN, MRP, Price, Expiry)", cp_fill_text_fields)
         checkpoints.run("Submit and verify no errors", cp_submit)
         checkpoints.run("Close modal", cp_close)
     _video_hold(page)
