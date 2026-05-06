@@ -31,7 +31,8 @@ def log(message):
     emit({"event": "log", "message": str(message)})
 
 
-def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec_mode="sequential"):
+def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec_mode="sequential",
+              seller_user_index=None, admin_user_index=None):
     """Execute selected test cases via pytest subprocess."""
     start_time = time.time()
 
@@ -103,8 +104,11 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     if zoom:
         test_env["ATS_ZOOM"] = zoom
 
-    # User index for test credentials
+    # User index for test credentials (backward compat)
     test_env["ATS_USER_INDEX"] = str(user_index)
+    # Platform-specific user indices
+    test_env["ATS_SELLER_USER_INDEX"] = str(seller_user_index if seller_user_index is not None else user_index)
+    test_env["ATS_ADMIN_USER_INDEX"] = str(admin_user_index if admin_user_index is not None else 0)
 
     # Execution mode (sequential / parallel)
     test_env["ATS_EXEC_MODE"] = exec_mode
@@ -259,6 +263,8 @@ def main():
             ats_root = data.get("ats_root", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             zoom = data.get("zoom", "")
             user_index = data.get("userIndex", 0)
+            seller_user_index = data.get("sellerUserIndex", user_index)
+            admin_user_index = data.get("adminUserIndex", 0)
             exec_mode = data.get("execMode", "sequential")
 
             if not tc_ids:
@@ -269,9 +275,11 @@ def main():
             log(f"Execution mode: {exec_mode}")
             if zoom:
                 log(f"Browser zoom: {zoom}%")
-            log(f"User index: {user_index}")
+            log(f"Seller user: {seller_user_index}, Admin user: {admin_user_index}")
             # Run in a thread so stdin remains readable (for stop commands)
-            t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index, exec_mode), daemon=True)
+            t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index, exec_mode),
+                                 kwargs={"seller_user_index": seller_user_index, "admin_user_index": admin_user_index},
+                                 daemon=True)
             t.start()
 
         elif action == "stop":

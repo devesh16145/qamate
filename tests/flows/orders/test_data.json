@@ -9,17 +9,14 @@
         "reject_reason": "Out of stock - supply exhausted for requested SKUs"
     },
     "TC-ORDERS-063": {
-        "input_1": "amit.dalal@agrim.app",
-        "input_2": "Amit#dalal@123",
-        "input_3": "sh",
-        "search_brand": "M&M_Brand1",
-        "seller_name": "MAHINDRA AND MAHINDRA LTD.",
-        "seller_address": "123 Main St, Bangalore, kerala - 560001",
-        "ship_to_address": "212, Shiv Towers, Tiswadi,",
-        "warehouse_region": "DELHI",
-        "warehouse_name": "DELHI WH",
-        "ship_to_region": "Goa",
-        "load_type": "Full Load",
-        "inventory_type": "Business Purchase"
+        "admin_email": "amit.dalal@agrim.app",
+        "admin_password": "Amit#dalal@123",
+        "vendor_search": "M&M",
+        "vendor_name": "M&M_Brand1",
+        "branch_name": "MAHARASHTRA",
+        "warehouse_name": "AKOLA WH",
+        "product_search_term": "test",
+        "quantity": "10",
+        "unit_price": "50"
     }
 }

@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const browserSelect = document.getElementById('browser-select');
     const zoomSelect = document.getElementById('viewport-select');
     const userSelect = document.getElementById('user-select');
+    const adminUserSelect = document.getElementById('admin-user-select');
     const execModeSelect = document.getElementById('exec-mode-select');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsModal = document.getElementById('settings-modal');
@@ -427,15 +428,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('parallel-status').textContent = `Parallel: ${config.execution.parallel_workers || 1} workers`;
         }
         // Populate user selector
-        if (config.users && config.users.length > 0) {
+        const sellerUsers = config.platforms?.seller?.users || config.users || [];
+        if (sellerUsers.length > 0) {
             const prev = userSelect.value;
-            userSelect.innerHTML = config.users.map((u, i) =>
+            userSelect.innerHTML = sellerUsers.map((u, i) =>
                 `<option value="${i}">${u.label || 'User ' + (i+1)} (${u.email})</option>`
             ).join('');
-            // Restore previous selection if still valid
-            if (prev && parseInt(prev) < config.users.length) {
+            if (prev && parseInt(prev) < sellerUsers.length) {
                 userSelect.value = prev;
             }
+        }
+        // Populate admin user selector
+        const adminUsers = config.platforms?.admin?.users || config.admin_users || [];
+        if (adminUsers.length > 0) {
+            const prevAdmin = adminUserSelect.value;
+            adminUserSelect.innerHTML = adminUsers.map((u, i) =>
+                `<option value="${i}">${u.label || 'Admin ' + (i+1)} (${u.email})</option>`
+            ).join('');
+            if (prevAdmin && parseInt(prevAdmin) < adminUsers.length) {
+                adminUserSelect.value = prevAdmin;
+            }
+        } else {
+            adminUserSelect.innerHTML = '<option value="0">No admin users</option>';
         }
         // Update parallel status based on exec mode
         const execMode = execModeSelect.value;
@@ -474,7 +488,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastRunCard.classList.add('hidden');
 
         addLog(`▶ Starting ${selectedTCs.length} test(s)...`, 'system');
-        addLog(`  Environment: ${envSelect.value} | Mode: ${execModeSelect.value} | Zoom: ${zoomSelect.value}% | User: ${config.users?.[userSelect.value]?.label || 'Default'}`, 'system');
+        const sellerLabel = config.platforms?.seller?.users?.[userSelect.value]?.label || config.users?.[userSelect.value]?.label || 'Default';
+        const adminLabel = config.platforms?.admin?.users?.[adminUserSelect.value]?.label || 'None';
+        addLog(`  Env: ${envSelect.value} | Mode: ${execModeSelect.value} | Seller: ${sellerLabel} | Admin: ${adminLabel}`, 'system');
 
         const options = {
             tc_ids: selectedTCs,
@@ -484,6 +500,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             parallel: execModeSelect.value === 'parallel' ? (config.execution?.parallel_workers || 1) : 1,
             zoom: zoomSelect.value,
             userIndex: parseInt(userSelect.value) || 0,
+            sellerUserIndex: parseInt(userSelect.value) || 0,
+            adminUserIndex: parseInt(adminUserSelect.value) || 0,
         };
 
         try {
@@ -615,7 +633,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('setting-workers').value = config.execution?.parallel_workers || 4;
 
         const usersList = document.getElementById('users-config-list');
-        usersList.innerHTML = (config.users || []).map((user, i) => `
+        usersList.innerHTML = (config.platforms?.seller?.users || config.users || []).map((user, i) => `
             <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                 <h4 style="color: #94a3b8; margin-bottom: 8px;">${user.label || 'User ' + (i + 1)}</h4>
                 <div class="setting-item">
@@ -630,7 +648,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         `).join('');
         // Populate admin user fields
         const adminUsersList = document.getElementById('admin-users-config-list');
-        adminUsersList.innerHTML = (config.admin_users || []).map((user, i) => `
+        adminUsersList.innerHTML = (config.platforms?.admin?.users || config.admin_users || []).map((user, i) => `
             <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #333;">
                 <h4 style="color: #94a3b8; margin-bottom: 8px;">${user.label || 'Admin ' + (i + 1)}</h4>
                 <div class="setting-item">
@@ -686,27 +704,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         document.querySelectorAll('.user-email').forEach((input) => {
             const idx = parseInt(input.dataset.index);
-            if (config.users[idx]) {
-                config.users[idx].email = input.value;
+            const users = config.platforms?.seller?.users || config.users;
+            if (users && users[idx]) {
+                users[idx].email = input.value;
             }
         });
         document.querySelectorAll('.user-pass').forEach((input) => {
             const idx = parseInt(input.dataset.index);
-            if (config.users[idx]) {
-                config.users[idx].password = input.value;
+            const users = config.platforms?.seller?.users || config.users;
+            if (users && users[idx]) {
+                users[idx].password = input.value;
             }
         });
         document.querySelectorAll('.admin-user-email').forEach((input) => {
             const idx = parseInt(input.dataset.index);
-            if (!config.admin_users) config.admin_users = [];
-            if (!config.admin_users[idx]) config.admin_users[idx] = {};
-            config.admin_users[idx].email = input.value;
+            const adminUsers = config.platforms?.admin?.users || (() => {
+                if (!config.admin_users) config.admin_users = [];
+                return config.admin_users;
+            })();
+            if (!adminUsers[idx]) adminUsers[idx] = {};
+            adminUsers[idx].email = input.value;
         });
         document.querySelectorAll('.admin-user-pass').forEach((input) => {
             const idx = parseInt(input.dataset.index);
-            if (!config.admin_users) config.admin_users = [];
-            if (!config.admin_users[idx]) config.admin_users[idx] = {};
-            config.admin_users[idx].password = input.value;
+            const adminUsers = config.platforms?.admin?.users || (() => {
+                if (!config.admin_users) config.admin_users = [];
+                return config.admin_users;
+            })();
+            if (!adminUsers[idx]) adminUsers[idx] = {};
+            adminUsers[idx].password = input.value;
         });
 
         // Save Jira config

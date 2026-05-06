@@ -1,13 +1,12 @@
 """
 Agrim ATS — Pytest Configuration (conftest.py)
 
-Provides fixtures for:
-- Loading app config from config.json
-- Resolving the base URL from the active environment
-- Setting up video recording directories
-- Setting browser timeouts to prevent infinite hangs
-- Capturing screenshots on test failure
-- Checkpoint-based test reporting (milestones within a single TC)
+Multi-platform architecture:
+- Platforms (seller, admin) each have their own URL and user list in config.json
+- Login happens once per platform per session (storage_state saved)
+- Each test gets a fresh page with platform cookies applied
+- Every test has exactly ONE video (from its own page context)
+- Sequential/parallel is just execution strategy, not platform selection
 """
 
 import pytest
@@ -122,46 +121,92 @@ def checkpoints(request):
     runner.finalize()
 
 
-# ── Fixtures ──
-@pytest.fixture(scope="session")
-def ats_config():
-    """Full ATS configuration dictionary."""
-    return _load_config()
+# ── Platform helpers ──
+
+def _get_platform_config(ats_config, platform_name):
+    """Get platform config from the new platforms section."""
+    return ats_config.get("platforms", {}).get(platform_name, {})
 
 
-@pytest.fixture(scope="session")
-def test_user(ats_config):
-    """The selected user account for this test run."""
-    user_index = int(os.environ.get("ATS_USER_INDEX", "0"))
-    users = ats_config.get("users", [])
+def _get_platform_url(ats_config, platform_name):
+    """Get platform URL for the active environment."""
+    env = os.environ.get("ATS_ENV", "dev")
+    platform = _get_platform_config(ats_config, platform_name)
+    url = platform.get("urls", {}).get(env, "")
+    if not url:
+        return ""
+    return url if url.endswith("/") else url + "/"
+
+
+def _get_platform_user(ats_config, platform_name):
+    """Get the selected user for a platform."""
+    env_var = f"ATS_{platform_name.upper()}_USER_INDEX"
+    user_index = int(os.environ.get(env_var, "0"))
+    users = _get_platform_config(ats_config, platform_name).get("users", [])
     if user_index < len(users):
         return users[user_index]
     return users[0] if users else {"email": "", "password": "", "label": "Default"}
 
 
+def _do_platform_login(browser, ats_config, platform_name):
+    """Login to a platform in a temporary context, return storage_state."""
+    platform = _get_platform_config(ats_config, platform_name)
+    user = _get_platform_user(ats_config, platform_name)
+    env = os.environ.get("ATS_ENV", "dev")
+    url = platform.get("urls", {}).get(env, "")
+    login_path = platform.get("login_path", "login")
+    full_url = url + login_path
+
+    context = browser.new_context()
+    page = context.new_page()
+    page.set_default_timeout(30000)
+    page.set_default_navigation_timeout(30000)
+    page.goto(full_url, wait_until="domcontentloaded")
+    page.wait_for_timeout(2000)
+
+    # Generic login: works for both seller app and admin panel
+    email_field = page.locator(
+        'input[placeholder*="Email"], input[type="email"], input[name="username"]'
+    ).first
+    password_field = page.locator('input[type="password"]').first
+    submit_btn = page.locator(
+        'button:has-text("Sign In"), button:has-text("Sign in"), button[type="submit"]'
+    ).first
+
+    email_field.wait_for(state="visible", timeout=15000)
+    email_field.fill(user["email"])
+    password_field.fill(user["password"])
+    submit_btn.click()
+    page.wait_for_timeout(4000)
+    page.wait_for_load_state("domcontentloaded")
+
+    state = context.storage_state()
+    page.close()
+    context.close()
+    return state
+
+
+def _apply_login_state(page, state, url):
+    """Apply saved login state (cookies + localStorage) to a page."""
+    page.context.add_cookies(state.get("cookies", []))
+    page.goto(url, wait_until="domcontentloaded")
+    for origin_data in state.get("origins", []):
+        for item in origin_data.get("localStorage", []):
+            try:
+                page.evaluate(
+                    f"localStorage.setItem({json.dumps(item['name'])}, {json.dumps(item['value'])})"
+                )
+            except Exception:
+                pass
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_timeout(2000)
+
+
+# ── Fixtures ──
 @pytest.fixture(scope="session")
-def base_url(ats_config):
-    """Base URL for the active environment (dev/staging)."""
-    env_name = os.environ.get("ATS_ENV", "dev")
-    env_config = ats_config.get("environments", {}).get(env_name, {})
-    url = env_config.get("base_url", "https://supplier-dev.agrim.app/")
-    return url if url.endswith("/") else url + "/"
-
-
-@pytest.fixture(scope="session")
-def admin_user(ats_config):
-    """The admin panel user account for this test run."""
-    users = ats_config.get("admin_users", [])
-    return users[0] if users else {"email": "", "password": "", "label": "Default Admin"}
-
-
-@pytest.fixture(scope="session")
-def admin_url(ats_config):
-    """Admin panel URL for the active environment."""
-    env_name = os.environ.get("ATS_ENV", "dev")
-    env_config = ats_config.get("environments", {}).get(env_name, {})
-    url = env_config.get("admin_url", "https://admin-dev.agrim.app/")
-    return url if url.endswith("/") else url + "/"
+def ats_config():
+    """Full ATS configuration dictionary."""
+    return _load_config()
 
 
 @pytest.fixture(scope="session")
@@ -173,12 +218,39 @@ def results_dir():
 
 
 @pytest.fixture(scope="session")
-def browser_context_args(browser_context_args, results_dir):
-    """Extend playwright browser context with zoom-scaled viewport.
-    In sequential mode, skip video here — sequential_page handles its own recording."""
-    base_w, base_h = 1280, 720
+def seller_url(ats_config):
+    """Seller app URL for the active environment."""
+    return _get_platform_url(ats_config, "seller")
 
-    # Zoom calculation
+
+@pytest.fixture(scope="session")
+def admin_url(ats_config):
+    """Admin panel URL for the active environment."""
+    return _get_platform_url(ats_config, "admin")
+
+
+@pytest.fixture(scope="session")
+def base_url(seller_url):
+    """Seller app URL — backward compatibility alias."""
+    return seller_url
+
+
+@pytest.fixture(scope="session")
+def test_user(ats_config):
+    """Selected seller user — backward compatibility."""
+    return _get_platform_user(ats_config, "seller")
+
+
+@pytest.fixture(scope="session")
+def admin_user(ats_config):
+    """Selected admin user."""
+    return _get_platform_user(ats_config, "admin")
+
+
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args, results_dir):
+    """Extend playwright browser context with zoom-scaled viewport and video recording."""
+    base_w, base_h = 1280, 720
     zoom_str = os.environ.get("ATS_ZOOM", "")
     vp_w, vp_h = base_w, base_h
     if zoom_str:
@@ -196,13 +268,11 @@ def browser_context_args(browser_context_args, results_dir):
         "viewport": {"width": vp_w, "height": vp_h},
     }
 
-    # Always enable video recording — sequential_page has its own context,
-    # and per-test pages (e.g. admin panel tests) also need video
+    # Always enable video — each test gets its own context with video
     video_dir = os.path.join(results_dir, "videos")
     os.makedirs(video_dir, exist_ok=True)
     args["record_video_dir"] = video_dir
     args["record_video_size"] = {"width": base_w, "height": base_h}
-
     return args
 
 
@@ -216,46 +286,51 @@ def browser_type_launch_args(browser_type_launch_args):
 
 
 @pytest.fixture(scope="session")
-def sequential_page(browser_type, browser_type_launch_args, browser_context_args, test_user, base_url, results_dir):
-    """Session-scoped page for sequential mode — login once, reuse for all tests.
-    Returns None when not in sequential mode (tests fall back to per-test login)."""
-    if os.environ.get("ATS_EXEC_MODE") != "sequential":
-        yield None
-        return
+def seller_login_state(browser, ats_config):
+    """Login to seller app once, save state (cookies + localStorage) for reuse."""
+    try:
+        return _do_platform_login(browser, ats_config, "seller")
+    except Exception as e:
+        print(f"[WARNING] Seller login failed: {e}", flush=True)
+        return {"cookies": [], "origins": []}
 
-    browser = browser_type.launch(**browser_type_launch_args)
 
-    # Set up video recording for the sequential session
-    video_dir = os.path.join(results_dir, "videos")
-    os.makedirs(video_dir, exist_ok=True)
+@pytest.fixture(scope="session")
+def admin_login_state(browser, ats_config):
+    """Login to admin panel once, save state for reuse."""
+    try:
+        return _do_platform_login(browser, ats_config, "admin")
+    except Exception as e:
+        print(f"[WARNING] Admin login failed: {e}", flush=True)
+        return {"cookies": [], "origins": []}
 
-    ctx_args = {k: v for k, v in browser_context_args.items() if k not in ("record_video_dir", "record_video_size")}
-    ctx_args["record_video_dir"] = video_dir
-    ctx_args["record_video_size"] = {"width": 1280, "height": 720}
 
-    context = browser.new_context(**ctx_args)
+@pytest.fixture
+def seller_page(page, seller_login_state, seller_url):
+    """Per-test page logged into seller app. Has its own video recording."""
+    _apply_login_state(page, seller_login_state, seller_url)
+    return page
+
+
+@pytest.fixture
+def admin_page(browser, browser_context_args, admin_login_state, admin_url, request):
+    """Per-test page logged into admin panel. Own browser context so it can
+    coexist with seller_page in the same test."""
+    context = browser.new_context(**browser_context_args)
     page = context.new_page()
     page.set_default_timeout(30000)
     page.set_default_navigation_timeout(30000)
-
-    # Login once
-    page.goto(base_url + "login", wait_until="domcontentloaded")
-    email_field = page.locator('input[placeholder*="Email"], input[type="email"]').first
-    password_field = page.locator('input[type="password"]').first
-    sign_in_button = page.locator('button:has-text("Sign In"), button[type="submit"]').first
-    email_field.wait_for(state="visible", timeout=15000)
-    email_field.click()
-    page.keyboard.type(test_user["email"], delay=50)
-    password_field.click()
-    page.keyboard.type(test_user["password"], delay=50)
-    sign_in_button.click()
-    page.wait_for_timeout(3000)
-    page.wait_for_load_state("domcontentloaded")
-
+    _apply_login_state(page, admin_login_state, admin_url)
+    # Track video path so screenshot/video fixtures know about this context
+    try:
+        if page.video:
+            request.node._admin_video_path = page.video.path()
+            request.node._admin_page = page
+    except Exception:
+        pass
     yield page
-
+    page.close()
     context.close()
-    browser.close()
 
 
 @pytest.fixture(autouse=True)
@@ -276,27 +351,19 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture(autouse=True)
-def capture_screenshot_on_failure(page, request, results_dir, sequential_page):
+def capture_screenshot_on_failure(page, request, results_dir):
     """After each test, capture a screenshot AND page error text if the test failed.
-    Also stashes the video path for later renaming."""
-    # Use the test's own page by default; fall back to sequential_page only
-    # if the test actually requested it (via orders_page/catalog_page fixtures)
-    active_page = page
-    if sequential_page is not None:
-        # Check if this test uses a fixture that wraps sequential_page
-        # (orders_page, catalog_page). If it uses raw `page`, prefer that.
-        fixturenames = getattr(request.node, 'fixturenames', [])
-        page_only_fixtures = {'page'}  # tests using only raw page
-        sequential_fixtures = {'orders_page', 'catalog_page', 'sequential_page'}
-        if any(f in sequential_fixtures for f in fixturenames):
-            active_page = sequential_page
+    Stashes the video path for later renaming."""
     try:
-        if active_page.video:
-            request.node._video_path = active_page.video.path()
+        if page.video:
+            request.node._video_path = page.video.path()
     except Exception:
         pass
 
     yield
+
+    # Prefer admin page for screenshots if test used admin_page
+    active_page = getattr(request.node, '_admin_page', page)
     rep = getattr(request.node, "rep_call", None)
     if rep and rep.failed:
         tc_name = request.node.name.split("[")[0]
@@ -368,7 +435,8 @@ def _extract_tc_id(node_name):
 def pytest_runtest_teardown(item, nextitem):
     """After all fixtures teardown (page closed), rename video to TC ID."""
     yield
-    video_path = getattr(item, "_video_path", None)
+    # Prefer admin video path if test used admin_page
+    video_path = getattr(item, "_admin_video_path", None) or getattr(item, "_video_path", None)
     if not video_path:
         return
 
