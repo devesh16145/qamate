@@ -1,64 +1,742 @@
 [
-    {"tc_id":"TC-ORDERS-001","module":"Orders","description":"Verify Orders page loads with all required sections and content","preconditions":"Seller is logged in","steps":["Log in","Navigate to Orders page","Verify page loads without errors","Verify order-related content is visible"],"expected_result":"Page loads without errors showing order-related content"},
-    {"tc_id":"TC-ORDERS-002","module":"Orders","description":"Verify order summary/stats cards at top show counts by status","preconditions":"Seller is on Orders page","steps":["Scroll to top","Look for stat/summary cards with counts","Verify stats display numeric values"],"expected_result":"Stats cards visible (Total Orders, Pending, Accepted, etc.) with counts"},
-    {"tc_id":"TC-ORDERS-003","module":"Orders","description":"Verify order list table shows all required columns","preconditions":"Seller is on Orders page","steps":["Inspect table headers","Verify columns: PO ID, Status, Date, Amount, Qty, Seller"],"expected_result":"At least 3 key columns visible (Order, Status, Date, Amount, etc.)"},
-    {"tc_id":"TC-ORDERS-004","module":"Orders","description":"Verify status navigation tabs are present","preconditions":"Seller is on Orders page","steps":["Look for tab bar with status options","Verify tabs: All, Pending, Accepted, Packed, Ready, Dispatched, Rejected"],"expected_result":"At least 3 status tabs visible"},
-    {"tc_id":"TC-ORDERS-005","module":"Orders","description":"Verify orders page scrolls smoothly","preconditions":"Seller is on Orders page","steps":["Scroll down twice","Scroll up once","Scroll to top","Verify no errors throughout"],"expected_result":"Page scrolls smoothly without errors"},
-    {"tc_id":"TC-ORDERS-006","module":"Orders","description":"Verify search by PO number returns matching order","preconditions":"Seller is on Orders page","steps":["Enter PO number in search","Wait for results","Verify matching order appears"],"expected_result":"Search by PO number filters to matching orders"},
-    {"tc_id":"TC-ORDERS-007","module":"Orders","description":"Verify search by SKU/product name filters orders","preconditions":"Seller is on Orders page","steps":["Enter SKU/product name in search","Wait for results","Verify filtered orders"],"expected_result":"Search by SKU name filters orders containing that product"},
-    {"tc_id":"TC-ORDERS-008","module":"Orders","description":"Verify search works with partial keywords","preconditions":"Seller is on Orders page","steps":["Type partial keyword 'ORD'","Verify results update","Clear and type 'PO'","Verify results update again"],"expected_result":"Partial keywords return relevant results"},
-    {"tc_id":"TC-ORDERS-009","module":"Orders","description":"Verify search with non-existent keyword shows empty state","preconditions":"Seller is on Orders page","steps":["Type non-existent keyword 'ZZZZNONEXISTENT999'","Verify empty/no results state"],"expected_result":"No orders shown and empty state message displayed"},
-    {"tc_id":"TC-ORDERS-010","module":"Orders","description":"Verify Pending/Sent status filter shows only pending orders","preconditions":"Seller is on Orders page","steps":["Click Pending or Sent filter tab","Wait for list to update","Verify only pending orders shown"],"expected_result":"Only pending/sent orders displayed"},
-    {"tc_id":"TC-ORDERS-011","module":"Orders","description":"Verify Accepted filter shows only accepted orders","preconditions":"Seller is on Orders page","steps":["Click Accepted filter tab","Wait for list to update"],"expected_result":"Only accepted orders displayed"},
-    {"tc_id":"TC-ORDERS-012","module":"Orders","description":"Verify Packed filter shows only packed orders","preconditions":"Seller is on Orders page","steps":["Click Packed filter tab","Wait for list to update"],"expected_result":"Only packed orders displayed"},
-    {"tc_id":"TC-ORDERS-013","module":"Orders","description":"Verify Ready filter shows only ready-for-pickup orders","preconditions":"Seller is on Orders page","steps":["Click Ready filter tab","Wait for list to update"],"expected_result":"Only ready orders displayed"},
-    {"tc_id":"TC-ORDERS-014","module":"Orders","description":"Verify Dispatched filter shows only dispatched orders","preconditions":"Seller is on Orders page","steps":["Click Dispatched filter tab","Wait for list to update"],"expected_result":"Only dispatched orders displayed"},
-    {"tc_id":"TC-ORDERS-015","module":"Orders","description":"Verify Rejected filter shows only rejected orders","preconditions":"Seller is on Orders page","steps":["Click Rejected filter tab","Wait for list to update"],"expected_result":"Only rejected orders displayed"},
-    {"tc_id":"TC-ORDERS-016","module":"Orders","description":"Verify Cancelled filter shows only cancelled orders","preconditions":"Seller is on Orders page","steps":["Click Cancelled filter tab","Wait for list to update"],"expected_result":"Only cancelled orders displayed"},
-    {"tc_id":"TC-ORDERS-017","module":"Orders","description":"Verify date range filter is available and functional","preconditions":"Seller is on Orders page","steps":["Find date filter element","Click it","Verify no errors"],"expected_result":"Date filter is clickable without errors"},
-    {"tc_id":"TC-ORDERS-018","module":"Orders","description":"Verify combining status filter with search narrows results","preconditions":"Seller is on Orders page","steps":["Apply status filter (Pending/Accepted)","Then type search keyword","Verify narrowed results"],"expected_result":"Combined status + search filters produce correct narrowed results"},
-    {"tc_id":"TC-ORDERS-019","module":"Orders","description":"Verify combining status filter with date range","preconditions":"Seller is on Orders page","steps":["Apply status filter (Accepted/Packed)","Then apply date range filter","Verify results"],"expected_result":"Combined status + date filter produces correct results"},
-    {"tc_id":"TC-ORDERS-020","module":"Orders","description":"Verify sorting orders by date","preconditions":"Seller is on Orders page","steps":["Find sort control","Click date sort","Verify order changes"],"expected_result":"Sort by date reorders the list correctly"},
-    {"tc_id":"TC-ORDERS-021","module":"Orders","description":"Verify sorting orders by amount","preconditions":"Seller is on Orders page","steps":["Find sort control","Click amount sort","Verify order changes"],"expected_result":"Sort by amount reorders the list correctly"},
-    {"tc_id":"TC-ORDERS-022","module":"Orders","description":"Verify More Filters reveals additional filter options","preconditions":"Seller is on Orders page","steps":["Click More Filters button","Verify additional filter options appear"],"expected_result":"Additional filters revealed without errors"},
-    {"tc_id":"TC-ORDERS-023","module":"Orders","description":"Verify All filter resets and shows all orders","preconditions":"Seller has filtered orders","steps":["Apply a specific status filter","Then click All filter","Verify all orders shown"],"expected_result":"All filter resets filters and shows complete list"},
-    {"tc_id":"TC-ORDERS-024","module":"Orders","description":"Verify pagination controls for large order lists","preconditions":"Seller is on Orders page with many orders","steps":["Scroll to bottom","Look for Next/Previous/page numbers"],"expected_result":"Pagination controls visible when list exceeds one page"},
-    {"tc_id":"TC-ORDERS-025","module":"Orders","description":"Verify clicking an order opens detail view","preconditions":"Orders list has at least one order","steps":["Click first order row","Wait for detail to load","Verify content visible"],"expected_result":"Detail view opens showing order info, items, and amounts"},
-    {"tc_id":"TC-ORDERS-026","module":"Orders","description":"Verify order detail displays PO/Order number","preconditions":"Order detail is open","steps":["Look for PO/ORD identifier"],"expected_result":"PO/Order number displayed prominently"},
-    {"tc_id":"TC-ORDERS-027","module":"Orders","description":"Verify order detail shows order date","preconditions":"Order detail is open","steps":["Look for date field or date pattern"],"expected_result":"Order/PO date is displayed"},
-    {"tc_id":"TC-ORDERS-028","module":"Orders","description":"Verify order detail shows customer/retailer info","preconditions":"Order detail is open","steps":["Scroll to customer section","Verify name, phone, address fields"],"expected_result":"Customer/retailer information displayed"},
-    {"tc_id":"TC-ORDERS-029","module":"Orders","description":"Verify order detail shows shipping address","preconditions":"Order detail is open","steps":["Look for address section","Verify pincode, city, state, street"],"expected_result":"Shipping/delivery address with all components shown"},
-    {"tc_id":"TC-ORDERS-030","module":"Orders","description":"Verify order detail shows SKU/item list with qty, price, amount","preconditions":"Order detail is open","steps":["Scroll to items section","Verify SKU names, quantities, prices, amounts"],"expected_result":"SKU list with quantity, unit price, and line total shown"},
-    {"tc_id":"TC-ORDERS-031","module":"Orders","description":"Verify order detail shows total order amount","preconditions":"Order detail is open","steps":["Look for total/grand total"],"expected_result":"Order total amount displayed"},
-    {"tc_id":"TC-ORDERS-032","module":"Orders","description":"Verify order detail shows current status badge","preconditions":"Order detail is open","steps":["Look for status badge/tag/chip"],"expected_result":"Current order status displayed as badge"},
-    {"tc_id":"TC-ORDERS-033","module":"Orders","description":"Verify order detail shows Expected Delivery Date","preconditions":"Order detail is open","steps":["Look for EDD or estimated delivery date"],"expected_result":"EDD displayed"},
-    {"tc_id":"TC-ORDERS-034","module":"Orders","description":"Verify order detail shows payment method","preconditions":"Order detail is open","steps":["Look for payment method (Prepaid/COD/Credit)"],"expected_result":"Payment method displayed"},
-    {"tc_id":"TC-ORDERS-035","module":"Orders","description":"Verify order detail shows status timeline/history","preconditions":"Order detail is open","steps":["Scroll to timeline section","Verify status history entries"],"expected_result":"Timeline shows status progression"},
-    {"tc_id":"TC-ORDERS-036","module":"Orders","description":"Verify order detail shows download links for documents","preconditions":"Order detail is open, order has documents","steps":["Look for download links (invoice, label, e-way bill)"],"expected_result":"Document download links available"},
-    {"tc_id":"TC-ORDERS-037","module":"Orders","description":"Verify order detail shows GST/HSN information","preconditions":"Order detail is open","steps":["Look for GST/HSN/tax fields"],"expected_result":"GST/HSN details shown (if applicable)"},
-    {"tc_id":"TC-ORDERS-038","module":"Orders","description":"Verify order detail page scrolls smoothly","preconditions":"Order detail is open","steps":["Scroll down twice","Scroll up once","Scroll to top"],"expected_result":"Detail page scrolls smoothly without errors"},
-    {"tc_id":"TC-ORDERS-039","module":"Orders","description":"Verify back navigation from detail to orders list","preconditions":"Order detail is open","steps":["Click Back button or navigate back","Verify orders list shown"],"expected_result":"Returns to orders list successfully"},
-    {"tc_id":"TC-ORDERS-040","module":"Orders","description":"Verify auto-accepted POs are visible in accepted list","preconditions":"Auto-accepted POs exist","steps":["Filter by Accepted status","Look for auto-accepted indicator"],"expected_result":"Auto-accepted POs shown with appropriate status"},
-    {"tc_id":"TC-ORDERS-041","module":"Orders","description":"Verify Accept button is visible for pending/sent POs","preconditions":"Pending/sent PO exists","steps":["Filter Pending/Sent","Open first order","Verify Accept button visible"],"expected_result":"Accept button visible for Pending/Sent POs"},
-    {"tc_id":"TC-ORDERS-042","module":"Orders","description":"Verify accepting a pending PO transitions status to Accepted","preconditions":"Pending PO exists","steps":["Open pending PO","Click Accept","Confirm acceptance","Verify success toast"],"expected_result":"PO accepted, status transitions to Accepted"},
-    {"tc_id":"TC-ORDERS-043","module":"Orders","description":"Verify Reject button is visible for pending/sent POs","preconditions":"Pending/sent PO exists","steps":["Filter Pending/Sent","Open first order","Verify Reject button visible"],"expected_result":"Reject button visible for Pending/Sent POs"},
-    {"tc_id":"TC-ORDERS-044","module":"Orders","description":"Verify reject flow shows reason dropdown/selection","preconditions":"Pending PO exists","steps":["Open pending PO","Click Reject","Verify reason field appears (dropdown or textarea)","Select/enter reason"],"expected_result":"Reason selection/entry required before rejection"},
-    {"tc_id":"TC-ORDERS-045","module":"Orders","description":"Verify rejecting a PO with reason transitions to Rejected","preconditions":"Pending PO exists","steps":["Open pending PO","Click Reject","Enter reason","Confirm rejection","Verify success toast"],"expected_result":"PO rejected with reason, status transitions to Rejected"},
-    {"tc_id":"TC-ORDERS-046","module":"Orders","description":"Verify auto-cancelled POs are visible with cancellation status","preconditions":"Cancelled POs exist","steps":["Filter by Cancelled status","Verify cancelled orders shown"],"expected_result":"Auto-cancelled POs visible with Cancelled status"},
-    {"tc_id":"TC-ORDERS-047","module":"Orders","description":"Verify cancelled PO detail shows cancellation reason","preconditions":"Cancelled PO exists","steps":["Open cancelled PO","Look for cancellation reason"],"expected_result":"Cancellation reason displayed (timeout, customer cancelled, etc.)"},
-    {"tc_id":"TC-ORDERS-048","module":"Orders","description":"Verify Pack button is visible for accepted POs","preconditions":"Accepted PO exists","steps":["Filter Accepted","Open first order","Verify Pack button visible"],"expected_result":"Pack button visible for Accepted POs"},
-    {"tc_id":"TC-ORDERS-049","module":"Orders","description":"Verify packing an accepted PO transitions to Packed","preconditions":"Accepted PO exists","steps":["Open accepted PO","Click Pack","Confirm packing","Verify success toast"],"expected_result":"PO packed, status transitions to Packed"},
-    {"tc_id":"TC-ORDERS-050","module":"Orders","description":"Verify label/shipping document is generated after packing","preconditions":"Packed PO exists","steps":["Open packed PO","Look for label/manifest/tracking document"],"expected_result":"Label or shipping document available for packed PO"},
-    {"tc_id":"TC-ORDERS-051","module":"Orders","description":"Verify label download link is available for packed orders","preconditions":"Packed PO with label exists","steps":["Open packed PO","Find label download button/link","Verify it is clickable"],"expected_result":"Label download link clickable without errors"},
-    {"tc_id":"TC-ORDERS-052","module":"Orders","description":"Verify Mark as Ready button visible for packed POs","preconditions":"Packed PO exists","steps":["Filter Packed","Open first order","Verify Ready button visible"],"expected_result":"Mark as Ready button visible for Packed POs"},
-    {"tc_id":"TC-ORDERS-053","module":"Orders","description":"Verify ready proof photo upload when marking as Ready","preconditions":"Packed PO exists","steps":["Open packed PO","Click Ready button","Verify file upload for ready proof","Upload test image"],"expected_result":"Ready proof upload field present and functional"},
-    {"tc_id":"TC-ORDERS-054","module":"Orders","description":"Verify marking packed PO as Ready transitions status","preconditions":"Packed PO exists","steps":["Open packed PO","Click Ready","Upload proof if required","Confirm","Verify success toast"],"expected_result":"Status transitions from Packed to Ready"},
-    {"tc_id":"TC-ORDERS-055","module":"Orders","description":"Verify Picked Up button visible for ready POs","preconditions":"Ready PO exists","steps":["Filter Ready","Open first order","Verify Picked Up button visible"],"expected_result":"Picked Up button visible for Ready POs"},
-    {"tc_id":"TC-ORDERS-056","module":"Orders","description":"Verify tax invoice upload during Picked Up action","preconditions":"Ready PO exists","steps":["Open ready PO","Click Picked Up","Verify tax invoice upload field","Upload test file"],"expected_result":"Tax invoice upload field present and functional"},
-    {"tc_id":"TC-ORDERS-057","module":"Orders","description":"Verify e-way bill upload during Picked Up (orders > 50K)","preconditions":"Ready PO with value > 50K","steps":["Open ready PO","Click Picked Up","Verify e-way bill upload field"],"expected_result":"E-way bill upload field present for high-value orders"},
-    {"tc_id":"TC-ORDERS-058","module":"Orders","description":"Verify proof of pickup photo upload during Picked Up","preconditions":"Ready PO exists","steps":["Open ready PO","Click Picked Up","Verify proof of pickup upload field","Upload test image"],"expected_result":"Proof of pickup upload field present and functional"},
-    {"tc_id":"TC-ORDERS-059","module":"Orders","description":"Verify marking ready PO as Picked Up with required uploads","preconditions":"Ready PO exists","steps":["Open ready PO","Click Picked Up","Upload all required files","Confirm","Verify success toast"],"expected_result":"Status transitions to Picked Up after all uploads"},
-    {"tc_id":"TC-ORDERS-060","module":"Orders","description":"Verify dispatched/picked-up order shows tracking details","preconditions":"Dispatched PO exists","steps":["Filter Dispatched","Open order","Look for tracking/waybill/courier info"],"expected_result":"Tracking/dispatch details shown"},
-    {"tc_id":"TC-ORDERS-061","module":"Orders","description":"Verify PO progression: Sent → Accepted","preconditions":"Sent/pending PO exists","steps":["Open sent PO","Verify current status is Sent/Pending","Verify Accept button available"],"expected_result":"Sent PO shows Accept option for progression"},
-    {"tc_id":"TC-ORDERS-062","module":"Orders","description":"Verify PO progression: Accepted → Packed","preconditions":"Accepted PO exists","steps":["Open accepted PO","Verify current status is Accepted","Verify Pack button available"],"expected_result":"Accepted PO shows Pack option for progression"}
+    {
+        "tc_id": "TC-ORDERS-001",
+        "module": "Orders",
+        "description": "Verify Orders page loads with all required sections and content",
+        "preconditions": "Seller is logged in",
+        "steps": [
+            "Log in",
+            "Navigate to Orders page",
+            "Verify page loads without errors",
+            "Verify order-related content is visible"
+        ],
+        "expected_result": "Page loads without errors showing order-related content"
+    },
+    {
+        "tc_id": "TC-ORDERS-002",
+        "module": "Orders",
+        "description": "Verify order summary/stats cards at top show counts by status",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Scroll to top",
+            "Look for stat/summary cards with counts",
+            "Verify stats display numeric values"
+        ],
+        "expected_result": "Stats cards visible (Total Orders, Pending, Accepted, etc.) with counts"
+    },
+    {
+        "tc_id": "TC-ORDERS-003",
+        "module": "Orders",
+        "description": "Verify order list table shows all required columns",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Inspect table headers",
+            "Verify columns: PO ID, Status, Date, Amount, Qty, Seller"
+        ],
+        "expected_result": "At least 3 key columns visible (Order, Status, Date, Amount, etc.)"
+    },
+    {
+        "tc_id": "TC-ORDERS-004",
+        "module": "Orders",
+        "description": "Verify status navigation tabs are present",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Look for tab bar with status options",
+            "Verify tabs: All, Pending, Accepted, Packed, Ready, Dispatched, Rejected"
+        ],
+        "expected_result": "At least 3 status tabs visible"
+    },
+    {
+        "tc_id": "TC-ORDERS-005",
+        "module": "Orders",
+        "description": "Verify orders page scrolls smoothly",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Scroll down twice",
+            "Scroll up once",
+            "Scroll to top",
+            "Verify no errors throughout"
+        ],
+        "expected_result": "Page scrolls smoothly without errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-006",
+        "module": "Orders",
+        "description": "Verify search by PO number returns matching order",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Enter PO number in search",
+            "Wait for results",
+            "Verify matching order appears"
+        ],
+        "expected_result": "Search by PO number filters to matching orders"
+    },
+    {
+        "tc_id": "TC-ORDERS-007",
+        "module": "Orders",
+        "description": "Verify search by SKU/product name filters orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Enter SKU/product name in search",
+            "Wait for results",
+            "Verify filtered orders"
+        ],
+        "expected_result": "Search by SKU name filters orders containing that product"
+    },
+    {
+        "tc_id": "TC-ORDERS-008",
+        "module": "Orders",
+        "description": "Verify search works with partial keywords",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Type partial keyword 'ORD'",
+            "Verify results update",
+            "Clear and type 'PO'",
+            "Verify results update again"
+        ],
+        "expected_result": "Partial keywords return relevant results"
+    },
+    {
+        "tc_id": "TC-ORDERS-009",
+        "module": "Orders",
+        "description": "Verify search with non-existent keyword shows empty state",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Type non-existent keyword 'ZZZZNONEXISTENT999'",
+            "Verify empty/no results state"
+        ],
+        "expected_result": "No orders shown and empty state message displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-010",
+        "module": "Orders",
+        "description": "Verify Pending/Sent status filter shows only pending orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Pending or Sent filter tab",
+            "Wait for list to update",
+            "Verify only pending orders shown"
+        ],
+        "expected_result": "Only pending/sent orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-011",
+        "module": "Orders",
+        "description": "Verify Accepted filter shows only accepted orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Accepted filter tab",
+            "Wait for list to update"
+        ],
+        "expected_result": "Only accepted orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-012",
+        "module": "Orders",
+        "description": "Verify Packed filter shows only packed orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Packed filter tab",
+            "Wait for list to update"
+        ],
+        "expected_result": "Only packed orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-013",
+        "module": "Orders",
+        "description": "Verify Ready filter shows only ready-for-pickup orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Ready filter tab",
+            "Wait for list to update"
+        ],
+        "expected_result": "Only ready orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-014",
+        "module": "Orders",
+        "description": "Verify Dispatched filter shows only dispatched orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Dispatched filter tab",
+            "Wait for list to update"
+        ],
+        "expected_result": "Only dispatched orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-015",
+        "module": "Orders",
+        "description": "Verify Rejected filter shows only rejected orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Rejected filter tab",
+            "Wait for list to update"
+        ],
+        "expected_result": "Only rejected orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-016",
+        "module": "Orders",
+        "description": "Verify Cancelled filter shows only cancelled orders",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click Cancelled filter tab",
+            "Wait for list to update"
+        ],
+        "expected_result": "Only cancelled orders displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-017",
+        "module": "Orders",
+        "description": "Verify date range filter is available and functional",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Find date filter element",
+            "Click it",
+            "Verify no errors"
+        ],
+        "expected_result": "Date filter is clickable without errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-018",
+        "module": "Orders",
+        "description": "Verify combining status filter with search narrows results",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Apply status filter (Pending/Accepted)",
+            "Then type search keyword",
+            "Verify narrowed results"
+        ],
+        "expected_result": "Combined status + search filters produce correct narrowed results"
+    },
+    {
+        "tc_id": "TC-ORDERS-019",
+        "module": "Orders",
+        "description": "Verify combining status filter with date range",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Apply status filter (Accepted/Packed)",
+            "Then apply date range filter",
+            "Verify results"
+        ],
+        "expected_result": "Combined status + date filter produces correct results"
+    },
+    {
+        "tc_id": "TC-ORDERS-020",
+        "module": "Orders",
+        "description": "Verify sorting orders by date",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Find sort control",
+            "Click date sort",
+            "Verify order changes"
+        ],
+        "expected_result": "Sort by date reorders the list correctly"
+    },
+    {
+        "tc_id": "TC-ORDERS-021",
+        "module": "Orders",
+        "description": "Verify sorting orders by amount",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Find sort control",
+            "Click amount sort",
+            "Verify order changes"
+        ],
+        "expected_result": "Sort by amount reorders the list correctly"
+    },
+    {
+        "tc_id": "TC-ORDERS-022",
+        "module": "Orders",
+        "description": "Verify More Filters reveals additional filter options",
+        "preconditions": "Seller is on Orders page",
+        "steps": [
+            "Click More Filters button",
+            "Verify additional filter options appear"
+        ],
+        "expected_result": "Additional filters revealed without errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-023",
+        "module": "Orders",
+        "description": "Verify All filter resets and shows all orders",
+        "preconditions": "Seller has filtered orders",
+        "steps": [
+            "Apply a specific status filter",
+            "Then click All filter",
+            "Verify all orders shown"
+        ],
+        "expected_result": "All filter resets filters and shows complete list"
+    },
+    {
+        "tc_id": "TC-ORDERS-024",
+        "module": "Orders",
+        "description": "Verify pagination controls for large order lists",
+        "preconditions": "Seller is on Orders page with many orders",
+        "steps": [
+            "Scroll to bottom",
+            "Look for Next/Previous/page numbers"
+        ],
+        "expected_result": "Pagination controls visible when list exceeds one page"
+    },
+    {
+        "tc_id": "TC-ORDERS-025",
+        "module": "Orders",
+        "description": "Verify clicking an order opens detail view",
+        "preconditions": "Orders list has at least one order",
+        "steps": [
+            "Click first order row",
+            "Wait for detail to load",
+            "Verify content visible"
+        ],
+        "expected_result": "Detail view opens showing order info, items, and amounts"
+    },
+    {
+        "tc_id": "TC-ORDERS-026",
+        "module": "Orders",
+        "description": "Verify order detail displays PO/Order number",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for PO/ORD identifier"
+        ],
+        "expected_result": "PO/Order number displayed prominently"
+    },
+    {
+        "tc_id": "TC-ORDERS-027",
+        "module": "Orders",
+        "description": "Verify order detail shows order date",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for date field or date pattern"
+        ],
+        "expected_result": "Order/PO date is displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-028",
+        "module": "Orders",
+        "description": "Verify order detail shows customer/retailer info",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Scroll to customer section",
+            "Verify name, phone, address fields"
+        ],
+        "expected_result": "Customer/retailer information displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-029",
+        "module": "Orders",
+        "description": "Verify order detail shows shipping address",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for address section",
+            "Verify pincode, city, state, street"
+        ],
+        "expected_result": "Shipping/delivery address with all components shown"
+    },
+    {
+        "tc_id": "TC-ORDERS-030",
+        "module": "Orders",
+        "description": "Verify order detail shows SKU/item list with qty, price, amount",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Scroll to items section",
+            "Verify SKU names, quantities, prices, amounts"
+        ],
+        "expected_result": "SKU list with quantity, unit price, and line total shown"
+    },
+    {
+        "tc_id": "TC-ORDERS-031",
+        "module": "Orders",
+        "description": "Verify order detail shows total order amount",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for total/grand total"
+        ],
+        "expected_result": "Order total amount displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-032",
+        "module": "Orders",
+        "description": "Verify order detail shows current status badge",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for status badge/tag/chip"
+        ],
+        "expected_result": "Current order status displayed as badge"
+    },
+    {
+        "tc_id": "TC-ORDERS-033",
+        "module": "Orders",
+        "description": "Verify order detail shows Expected Delivery Date",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for EDD or estimated delivery date"
+        ],
+        "expected_result": "EDD displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-034",
+        "module": "Orders",
+        "description": "Verify order detail shows payment method",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for payment method (Prepaid/COD/Credit)"
+        ],
+        "expected_result": "Payment method displayed"
+    },
+    {
+        "tc_id": "TC-ORDERS-035",
+        "module": "Orders",
+        "description": "Verify order detail shows status timeline/history",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Scroll to timeline section",
+            "Verify status history entries"
+        ],
+        "expected_result": "Timeline shows status progression"
+    },
+    {
+        "tc_id": "TC-ORDERS-036",
+        "module": "Orders",
+        "description": "Verify order detail shows download links for documents",
+        "preconditions": "Order detail is open, order has documents",
+        "steps": [
+            "Look for download links (invoice, label, e-way bill)"
+        ],
+        "expected_result": "Document download links available"
+    },
+    {
+        "tc_id": "TC-ORDERS-037",
+        "module": "Orders",
+        "description": "Verify order detail shows GST/HSN information",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Look for GST/HSN/tax fields"
+        ],
+        "expected_result": "GST/HSN details shown (if applicable)"
+    },
+    {
+        "tc_id": "TC-ORDERS-038",
+        "module": "Orders",
+        "description": "Verify order detail page scrolls smoothly",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Scroll down twice",
+            "Scroll up once",
+            "Scroll to top"
+        ],
+        "expected_result": "Detail page scrolls smoothly without errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-039",
+        "module": "Orders",
+        "description": "Verify back navigation from detail to orders list",
+        "preconditions": "Order detail is open",
+        "steps": [
+            "Click Back button or navigate back",
+            "Verify orders list shown"
+        ],
+        "expected_result": "Returns to orders list successfully"
+    },
+    {
+        "tc_id": "TC-ORDERS-040",
+        "module": "Orders",
+        "description": "Verify auto-accepted POs are visible in accepted list",
+        "preconditions": "Auto-accepted POs exist",
+        "steps": [
+            "Filter by Accepted status",
+            "Look for auto-accepted indicator"
+        ],
+        "expected_result": "Auto-accepted POs shown with appropriate status"
+    },
+    {
+        "tc_id": "TC-ORDERS-041",
+        "module": "Orders",
+        "description": "Verify Accept button is visible for pending/sent POs",
+        "preconditions": "Pending/sent PO exists",
+        "steps": [
+            "Filter Pending/Sent",
+            "Open first order",
+            "Verify Accept button visible"
+        ],
+        "expected_result": "Accept button visible for Pending/Sent POs"
+    },
+    {
+        "tc_id": "TC-ORDERS-042",
+        "module": "Orders",
+        "description": "Verify accepting a pending PO transitions status to Accepted",
+        "preconditions": "Pending PO exists",
+        "steps": [
+            "Open pending PO",
+            "Click Accept",
+            "Confirm acceptance",
+            "Verify success toast"
+        ],
+        "expected_result": "PO accepted, status transitions to Accepted"
+    },
+    {
+        "tc_id": "TC-ORDERS-043",
+        "module": "Orders",
+        "description": "Verify Reject button is visible for pending/sent POs",
+        "preconditions": "Pending/sent PO exists",
+        "steps": [
+            "Filter Pending/Sent",
+            "Open first order",
+            "Verify Reject button visible"
+        ],
+        "expected_result": "Reject button visible for Pending/Sent POs"
+    },
+    {
+        "tc_id": "TC-ORDERS-044",
+        "module": "Orders",
+        "description": "Verify reject flow shows reason dropdown/selection",
+        "preconditions": "Pending PO exists",
+        "steps": [
+            "Open pending PO",
+            "Click Reject",
+            "Verify reason field appears (dropdown or textarea)",
+            "Select/enter reason"
+        ],
+        "expected_result": "Reason selection/entry required before rejection"
+    },
+    {
+        "tc_id": "TC-ORDERS-045",
+        "module": "Orders",
+        "description": "Verify rejecting a PO with reason transitions to Rejected",
+        "preconditions": "Pending PO exists",
+        "steps": [
+            "Open pending PO",
+            "Click Reject",
+            "Enter reason",
+            "Confirm rejection",
+            "Verify success toast"
+        ],
+        "expected_result": "PO rejected with reason, status transitions to Rejected"
+    },
+    {
+        "tc_id": "TC-ORDERS-046",
+        "module": "Orders",
+        "description": "Verify auto-cancelled POs are visible with cancellation status",
+        "preconditions": "Cancelled POs exist",
+        "steps": [
+            "Filter by Cancelled status",
+            "Verify cancelled orders shown"
+        ],
+        "expected_result": "Auto-cancelled POs visible with Cancelled status"
+    },
+    {
+        "tc_id": "TC-ORDERS-047",
+        "module": "Orders",
+        "description": "Verify cancelled PO detail shows cancellation reason",
+        "preconditions": "Cancelled PO exists",
+        "steps": [
+            "Open cancelled PO",
+            "Look for cancellation reason"
+        ],
+        "expected_result": "Cancellation reason displayed (timeout, customer cancelled, etc.)"
+    },
+    {
+        "tc_id": "TC-ORDERS-048",
+        "module": "Orders",
+        "description": "Verify Pack button is visible for accepted POs",
+        "preconditions": "Accepted PO exists",
+        "steps": [
+            "Filter Accepted",
+            "Open first order",
+            "Verify Pack button visible"
+        ],
+        "expected_result": "Pack button visible for Accepted POs"
+    },
+    {
+        "tc_id": "TC-ORDERS-049",
+        "module": "Orders",
+        "description": "Verify packing an accepted PO transitions to Packed",
+        "preconditions": "Accepted PO exists",
+        "steps": [
+            "Open accepted PO",
+            "Click Pack",
+            "Confirm packing",
+            "Verify success toast"
+        ],
+        "expected_result": "PO packed, status transitions to Packed"
+    },
+    {
+        "tc_id": "TC-ORDERS-050",
+        "module": "Orders",
+        "description": "Verify label/shipping document is generated after packing",
+        "preconditions": "Packed PO exists",
+        "steps": [
+            "Open packed PO",
+            "Look for label/manifest/tracking document"
+        ],
+        "expected_result": "Label or shipping document available for packed PO"
+    },
+    {
+        "tc_id": "TC-ORDERS-051",
+        "module": "Orders",
+        "description": "Verify label download link is available for packed orders",
+        "preconditions": "Packed PO with label exists",
+        "steps": [
+            "Open packed PO",
+            "Find label download button/link",
+            "Verify it is clickable"
+        ],
+        "expected_result": "Label download link clickable without errors"
+    },
+    {
+        "tc_id": "TC-ORDERS-052",
+        "module": "Orders",
+        "description": "Verify Mark as Ready button visible for packed POs",
+        "preconditions": "Packed PO exists",
+        "steps": [
+            "Filter Packed",
+            "Open first order",
+            "Verify Ready button visible"
+        ],
+        "expected_result": "Mark as Ready button visible for Packed POs"
+    },
+    {
+        "tc_id": "TC-ORDERS-053",
+        "module": "Orders",
+        "description": "Verify ready proof photo upload when marking as Ready",
+        "preconditions": "Packed PO exists",
+        "steps": [
+            "Open packed PO",
+            "Click Ready button",
+            "Verify file upload for ready proof",
+            "Upload test image"
+        ],
+        "expected_result": "Ready proof upload field present and functional"
+    },
+    {
+        "tc_id": "TC-ORDERS-054",
+        "module": "Orders",
+        "description": "Verify marking packed PO as Ready transitions status",
+        "preconditions": "Packed PO exists",
+        "steps": [
+            "Open packed PO",
+            "Click Ready",
+            "Upload proof if required",
+            "Confirm",
+            "Verify success toast"
+        ],
+        "expected_result": "Status transitions from Packed to Ready"
+    },
+    {
+        "tc_id": "TC-ORDERS-055",
+        "module": "Orders",
+        "description": "Verify Picked Up button visible for ready POs",
+        "preconditions": "Ready PO exists",
+        "steps": [
+            "Filter Ready",
+            "Open first order",
+            "Verify Picked Up button visible"
+        ],
+        "expected_result": "Picked Up button visible for Ready POs"
+    },
+    {
+        "tc_id": "TC-ORDERS-056",
+        "module": "Orders",
+        "description": "Verify tax invoice upload during Picked Up action",
+        "preconditions": "Ready PO exists",
+        "steps": [
+            "Open ready PO",
+            "Click Picked Up",
+            "Verify tax invoice upload field",
+            "Upload test file"
+        ],
+        "expected_result": "Tax invoice upload field present and functional"
+    },
+    {
+        "tc_id": "TC-ORDERS-057",
+        "module": "Orders",
+        "description": "Verify e-way bill upload during Picked Up (orders > 50K)",
+        "preconditions": "Ready PO with value > 50K",
+        "steps": [
+            "Open ready PO",
+            "Click Picked Up",
+            "Verify e-way bill upload field"
+        ],
+        "expected_result": "E-way bill upload field present for high-value orders"
+    },
+    {
+        "tc_id": "TC-ORDERS-058",
+        "module": "Orders",
+        "description": "Verify proof of pickup photo upload during Picked Up",
+        "preconditions": "Ready PO exists",
+        "steps": [
+            "Open ready PO",
+            "Click Picked Up",
+            "Verify proof of pickup upload field",
+            "Upload test image"
+        ],
+        "expected_result": "Proof of pickup upload field present and functional"
+    },
+    {
+        "tc_id": "TC-ORDERS-059",
+        "module": "Orders",
+        "description": "Verify marking ready PO as Picked Up with required uploads",
+        "preconditions": "Ready PO exists",
+        "steps": [
+            "Open ready PO",
+            "Click Picked Up",
+            "Upload all required files",
+            "Confirm",
+            "Verify success toast"
+        ],
+        "expected_result": "Status transitions to Picked Up after all uploads"
+    },
+    {
+        "tc_id": "TC-ORDERS-060",
+        "module": "Orders",
+        "description": "Verify dispatched/picked-up order shows tracking details",
+        "preconditions": "Dispatched PO exists",
+        "steps": [
+            "Filter Dispatched",
+            "Open order",
+            "Look for tracking/waybill/courier info"
+        ],
+        "expected_result": "Tracking/dispatch details shown"
+    },
+    {
+        "tc_id": "TC-ORDERS-061",
+        "module": "Orders",
+        "description": "Verify PO progression: Sent \u2192 Accepted",
+        "preconditions": "Sent/pending PO exists",
+        "steps": [
+            "Open sent PO",
+            "Verify current status is Sent/Pending",
+            "Verify Accept button available"
+        ],
+        "expected_result": "Sent PO shows Accept option for progression"
+    },
+    {
+        "tc_id": "TC-ORDERS-062",
+        "module": "Orders",
+        "description": "Verify PO progression: Accepted \u2192 Packed",
+        "preconditions": "Accepted PO exists",
+        "steps": [
+            "Open accepted PO",
+            "Verify current status is Accepted",
+            "Verify Pack button available"
+        ],
+        "expected_result": "Accepted PO shows Pack option for progression"
+    },
+    {
+        "tc_id": "TC-ORDERS-063",
+        "module": "Orders",
+        "description": "Create PO via admin panel — full flow: login, select vendor, branch, delivery address, product, fill qty/rate, verify Save Changes",
+        "preconditions": "Admin user is logged in to admin panel. Seller M&M_Brand1 exists with products.",
+        "checkpoints": [
+            "Login to admin panel",
+            "Navigate to PO create form",
+            "Select vendor M&M_Brand1 via autocomplete",
+            "Select Agrim Branch MAHARASHTRA",
+            "Select Delivery Address from warehouse dropdown",
+            "Search and select product",
+            "Fill quantity and verify rate/tax auto-calculation",
+            "Verify Save Changes button state"
+        ],
+        "expected_result": "PO form is fully populated with vendor, branch, address, product, quantity, rate, tax. Save Changes button becomes enabled."
+    }
 ]

@@ -130,23 +130,14 @@ def _assert_submission_success(page, timeout=5000):
 # ── Fixtures ─────────────────────────────────────────────────
 
 @pytest.fixture
-def catalog_page(page, test_user, base_url, sequential_page):
-    """Log in and navigate to the Catalog page."""
-    if sequential_page is not None:
-        sequential_page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
-        sequential_page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
-            state="visible", timeout=20000
-        )
-        sequential_page.wait_for_timeout(1000)
-        return sequential_page
-
-    _login(page, test_user, base_url)
-    page.goto(base_url + "listing/catalog", wait_until="domcontentloaded")
-    page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
+def catalog_page(seller_page, seller_url):
+    """Navigate to the Catalog page on seller app."""
+    seller_page.goto(seller_url + "listing/catalog", wait_until="domcontentloaded")
+    seller_page.locator('input[placeholder*="Search"], input[type="search"]').first.wait_for(
         state="visible", timeout=20000
     )
-    page.wait_for_timeout(2000)
-    return page
+    seller_page.wait_for_timeout(1000)
+    return seller_page
 
 
 @pytest.fixture

@@ -2,50 +2,39 @@
   "environments": {
     "dev": {
       "name": "Development",
-      "base_url": "https://supplier-dev.agrim.app/",
-      "admin_url": "https://admin-dev.agrim.app/",
       "is_default": true
     },
     "staging": {
-      "name": "Staging",
-      "base_url": "https://supplier-staging.agrim.app/",
-      "admin_url": "https://admin-staging.agrim.app/"
+      "name": "Staging"
     }
   },
-  "admin_users": [
-    {
-      "id": "admin_1",
-      "email": "amit.dalal@agrim.app",
-      "password": "Amit#dalal@123",
-      "label": "Admin 1"
+  "platforms": {
+    "seller": {
+      "name": "Seller App",
+      "urls": {
+        "dev": "https://supplier-dev.agrim.app/",
+        "staging": "https://supplier-staging.agrim.app/"
+      },
+      "login_path": "login",
+      "users": [
+        { "email": "shruti_s@agrim.app", "password": "Agrim@123", "label": "Seller 1" },
+        { "email": "shruti_srivastav425@agrim.app", "password": "Agrim@123", "label": "Seller 2" },
+        { "email": "shruti_s@agrim.app", "password": "Agrim@123", "label": "Seller 3" },
+        { "email": "shruti_srivastav425@agrim.app", "password": "Agrim@123", "label": "Seller 4" }
+      ]
+    },
+    "admin": {
+      "name": "Admin Panel",
+      "urls": {
+        "dev": "https://admin-dev.agrim.app/",
+        "staging": "https://admin-staging.agrim.app/"
+      },
+      "login_path": "#/login",
+      "users": [
+        { "email": "amit.dalal@agrim.app", "password": "Amit#dalal@123", "label": "Admin 1" }
+      ]
     }
-  ],
-  "users": [
-    {
-      "id": "user_1",
-      "email": "shruti_s@agrim.app",
-      "password": "Agrim@123",
-      "label": "Seller 1"
-    },
-    {
-      "id": "user_2",
-      "email": "shruti_srivastav425@agrim.app",
-      "password": "Agrim@123",
-      "label": "Seller 2"
-    },
-    {
-      "id": "user_3",
-      "email": "shruti_s@agrim.app",
-      "password": "Agrim@123",
-      "label": "Seller 3"
-    },
-    {
-      "id": "user_4",
-      "email": "shruti_srivastav425@agrim.app",
-      "password": "Agrim@123",
-      "label": "Seller 4"
-    }
-  ],
+  },
   "execution": {
     "default_mode": "headless",
     "parallel_workers": 2,

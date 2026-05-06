@@ -17,7 +17,16 @@
         "h": "8",
         "mrp": "250",
         "your_price": "200",
-        "expiry_month": "12"
+        "expiry_month": "12",
+        "default": {
+            "packing": "100G",
+            "l": "15",
+            "b": "10",
+            "h": "8",
+            "mrp": "250",
+            "your_price": "200",
+            "expiry_month": "10"
+        }
     },
     "TC-CATALOG-010": {
         "brand": "Test Brand",

@@ -163,6 +163,8 @@ ipcMain.handle('run-tests', async (event, options) => {
     parallel: options.parallel,
     zoom: options.zoom || '',
     userIndex: options.userIndex ?? 0,
+    sellerUserIndex: options.sellerUserIndex ?? options.userIndex ?? 0,
+    adminUserIndex: options.adminUserIndex ?? 0,
     ats_root: __dirname,
   });
 
