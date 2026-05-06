@@ -388,6 +388,20 @@ def pytest_runtest_teardown(item, nextitem):
     except Exception:
         pass
 
+    # Clean up any leftover hash-named .webm files (e.g. from sequential_page
+    # session recording) so only TC-named videos appear in history
+    try:
+        video_dir = os.path.dirname(new_path)
+        if os.path.exists(video_dir):
+            for f in os.listdir(video_dir):
+                if f.endswith('.webm') and not re.match(r'TC[_-]', f):
+                    try:
+                        os.remove(os.path.join(video_dir, f))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
 
 # ── Test Data (supports variants) ──
 
