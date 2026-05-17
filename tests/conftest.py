@@ -566,7 +566,11 @@ def pytest_generate_tests(metafunc):
 
     tc_raw = data.get(tc_id, {})
     if _is_variants(tc_raw) and len(tc_raw) > 1:
-        variant_names = list(tc_raw.keys())
+        target_variant = os.environ.get("ATS_VARIANT")
+        if target_variant and target_variant in tc_raw:
+            variant_names = [target_variant]
+        else:
+            variant_names = list(tc_raw.keys())
         metafunc.parametrize("tc_data", variant_names, indirect=True, ids=variant_names)
 
 
