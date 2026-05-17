@@ -536,6 +536,12 @@ def generate_from_review(payload, ats_root):
         # Skip consecutive duplicate actions (e.g. double-clicking same element)
         if raw and raw == prev_raw and stype in ("click", "check"):
             continue
+        # Skip click steps that precede a set_input_files — clicking "Upload" opens
+        # the native file browser which blocks Playwright. set_input_files works directly.
+        if stype in ("click", "dblclick"):
+            step_idx = steps.index(step)
+            if step_idx + 1 < len(steps) and "set_input_files" in steps[step_idx + 1].get("rawLine", ""):
+                continue
         prev_raw = raw
 
         # ── Use raw strings for Tailwind CSS locators ──
