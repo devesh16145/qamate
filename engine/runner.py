@@ -364,8 +364,10 @@ def main():
                 log(f"Browser zoom: {zoom}%")
             log(f"Seller user: {seller_user_index}, Admin user: {admin_user_index}")
             # Run in a thread so stdin remains readable (for stop commands)
+            if variant:
+                log(f"Target variant: {variant}")
             t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index, exec_mode),
-                                 kwargs={"seller_user_index": seller_user_index, "admin_user_index": admin_user_index},
+                                 kwargs={"seller_user_index": seller_user_index, "admin_user_index": admin_user_index, "variant": variant},
                                  daemon=True)
             t.start()
 
