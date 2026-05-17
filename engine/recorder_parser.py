@@ -499,7 +499,12 @@ def generate_from_review(payload, ats_root):
     # Generate test lines
     test_lines = []
     prev_raw = ""
-    for step in steps:
+    skip_next = False
+    for i, step in enumerate(steps):
+        if skip_next:
+            skip_next = False
+            continue
+            
         sid = step["id"]
         stype = step.get("type", "other")
         raw = step.get("rawLine", "")
@@ -536,12 +541,6 @@ def generate_from_review(payload, ats_root):
         # Skip consecutive duplicate actions (e.g. double-clicking same element)
         if raw and raw == prev_raw and stype in ("click", "check"):
             continue
-        # Skip click steps that precede a set_input_files — clicking "Upload" opens
-        # the native file browser which blocks Playwright. set_input_files works directly.
-        if stype in ("click", "dblclick"):
-            step_idx = steps.index(step)
-            if step_idx + 1 < len(steps) and "set_input_files" in steps[step_idx + 1].get("rawLine", ""):
-                continue
         prev_raw = raw
 
         # ── Use raw strings for Tailwind CSS locators ──
@@ -607,20 +606,32 @@ def generate_from_review(payload, ats_root):
             test_lines.append(f"    {raw}")
             test_lines.append('    page.wait_for_load_state("networkidle")')
         else:
+            # Check if this is a click followed by a file upload
+            is_file_chooser_trigger = False
+            if stype in ("click", "dblclick") and i + 1 < len(steps):
+                next_step = steps[i + 1]
+                if "set_input_files" in next_step.get("rawLine", ""):
+                    is_file_chooser_trigger = True
+                    skip_next = True
+
             # For CSS-locator elements, scroll into view first (handles sticky footers)
             if 'locator(' in raw and stype in ("click", "fill", "check"):
                 locator_expr = raw.strip().split(".click(")[0].split(".fill(")[0].split(".check(")[0]
                 test_lines.append(f"    {locator_expr}.scroll_into_view_if_needed()")
 
-            # Replace hardcoded file paths in set_input_files with test fixture
-            if 'set_input_files(' in raw:
-                raw = re.sub(
-                    r'\.set_input_files\((["\']).*?\1\)',
-                    '.set_input_files(TEST_UPLOAD_IMAGE)',
-                    raw,
-                )
-
-            test_lines.append(f"    {raw}")
+            if is_file_chooser_trigger:
+                test_lines.append("    with page.expect_file_chooser() as fc_info:")
+                test_lines.append(f"        {raw}")
+                test_lines.append("    fc_info.value.set_files(TEST_UPLOAD_IMAGE)")
+            else:
+                # Replace hardcoded file paths in set_input_files with test fixture
+                if 'set_input_files(' in raw:
+                    raw = re.sub(
+                        r'\.set_input_files\((["\']).*?\1\)',
+                        '.set_input_files(TEST_UPLOAD_IMAGE)',
+                        raw,
+                    )
+                test_lines.append(f"    {raw}")
 
             # Smart waits: only where truly needed
             if stype in ("click", "dblclick", "check", "select"):

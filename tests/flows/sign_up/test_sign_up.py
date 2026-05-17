@@ -157,19 +157,32 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     # Step 57: Click Button "Setup My Profile Btn right"
     page.get_by_role("button", name="Setup My Profile Btn right").click()
     page.wait_for_timeout(500)
-    # Step 58: Upload PAN document
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
-    # Step 60: Upload signature
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
-    # Step 62: Upload brand logo
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
+    # Step 58: Click ")).first
+    page.locator(r"div").filter(has_text=re.compile(r"^Click to Upload PANMax file size 5MB$")).first.scroll_into_view_if_needed()
+    with page.expect_file_chooser() as fc_info:
+        page.locator(r"div").filter(has_text=re.compile(r"^Click to Upload PANMax file size 5MB$")).first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
+    # Step 60: Click Text "Max file size 5MB"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Max file size 5MB").first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
+    # Step 62: Click Text "Click to Upload Brand Logo"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Click to Upload Brand Logo").click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
     # Step 64: Click Textbox "Brand Name *"
     page.get_by_role("textbox", name="Brand Name *").click()
     page.wait_for_timeout(500)
     # Step 66: Enter "TEST AUTO" in Textbox "Brand Name *"
     page.get_by_role("textbox", name="Brand Name *").fill(tc_data.get("input_24", ""))
-    # Step 67: Upload GST Certificate
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
+    # Step 67: Click Text "Upload GST Certificate"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Upload GST Certificate").first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
     # Step 69: Double-click name")
     page.locator(r"#poc-name").dblclick()
     page.wait_for_timeout(500)
@@ -197,8 +210,11 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     # Step 76: Enter "2345678987" in 164096")
     page.locator(r"#poc-contact-164096").scroll_into_view_if_needed()
     page.locator(r"#poc-contact-164096").fill(tc_data.get("input_28", ""))
-    # Step 77: Upload GST Certificate
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
+    # Step 77: Click Text "Upload GST Certificate"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Upload GST Certificate").first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
     # Step 79: Click 164097")
     page.locator(r"#poc-name-164097").scroll_into_view_if_needed()
     page.locator(r"#poc-name-164097").click()
@@ -213,10 +229,17 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     # Step 82: Enter "3456787657" in 164097")
     page.locator(r"#poc-contact-164097").scroll_into_view_if_needed()
     page.locator(r"#poc-contact-164097").fill(tc_data.get("input_30", ""))
-    # Step 83: Upload GST Certificate
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
-    # Step 85: Upload GST Certificate
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
+    # Step 83: Click ")).first
+    page.locator(r"div").filter(has_text=re.compile(r"^Upload GST CertificateMax file size 5MB$")).first.scroll_into_view_if_needed()
+    with page.expect_file_chooser() as fc_info:
+        page.locator(r"div").filter(has_text=re.compile(r"^Upload GST CertificateMax file size 5MB$")).first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
+    # Step 85: Click Text "Upload GST Certificate"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Upload GST Certificate").click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
     # Step 87: Click 164098")
     page.locator(r"#poc-name-164098").scroll_into_view_if_needed()
     page.locator(r"#poc-name-164098").click()
@@ -303,10 +326,16 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     # Step 114: Click Button "Thursday, May 10th,"
     page.get_by_role("button", name="Thursday, May 10th,").click()
     page.wait_for_timeout(500)
-    # Step 115: Upload License
-    page.get_by_role("tabpanel", name="Compliance").set_input_files(TEST_UPLOAD_IMAGE)
-    # Step 117: Upload additional doc
-    page.get_by_role("tabpanel", name="Compliance").set_input_files(TEST_UPLOAD_IMAGE)
+    # Step 115: Click Text "Click to Upload License for"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Click to Upload License for").click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
+    # Step 117: Click Text "Max file size 5MB"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Max file size 5MB").click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
     # Step 119: Click YY")
     page.get_by_role("button", name="calendar DD/MM/YY").click()
     page.wait_for_timeout(500)
