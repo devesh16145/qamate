@@ -52,45 +52,47 @@ body {
    TOP BAR
    ============================================================ */
 .topbar {
-    height: 60px;
+    height: 48px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 16px;
+    padding: 0 10px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     z-index: 100;
     flex-shrink: 0;
+    overflow: hidden;
 }
 
 .topbar-left,
 .topbar-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
+    min-width: 0;
 }
 
 .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     flex-shrink: 0;
 }
 
 .brand-icon {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     background: var(--text);
     color: var(--surface);
-    border-radius: 6px;
+    border-radius: 5px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .brand-text {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.5px;
     color: var(--text);
@@ -99,16 +101,24 @@ body {
 
 .topbar-divider {
     width: 1px;
-    height: 24px;
+    height: 20px;
     background: var(--border);
-    margin: 0 4px;
+    margin: 0 2px;
     flex-shrink: 0;
 }
 
 .topbar-field {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 3px;
+}
+
+.topbar-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+    line-height: 1;
+    opacity: 0.7;
+    cursor: default;
 }
 
 .topbar-label {
@@ -124,13 +134,14 @@ body {
     background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 5px 8px;
-    border-radius: 6px;
+    padding: 3px 6px;
+    border-radius: 5px;
     font-size: 11px;
     font-family: var(--font);
     outline: none;
     cursor: pointer;
     transition: border-color 0.15s;
+    max-width: 100px;
 }
 
 .topbar-select:focus {
@@ -141,8 +152,11 @@ body {
 .progress-inline {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 120px;
+    gap: 5px;
+    min-width: 80px;
+    max-width: 140px;
+    flex: 1;
+    overflow: hidden;
 }
 
 .progress-track {
@@ -619,7 +633,8 @@ textarea:focus {
 .run-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 3px;
+    padding: 4px 8px !important;
 }
 
 .run-caret {
@@ -632,6 +647,8 @@ textarea:focus {
     color: var(--red) !important;
     border-color: var(--red) !important;
     background: transparent !important;
+    padding: 4px 8px !important;
+    font-size: 13px !important;
 }
 
 .stop-btn:disabled {

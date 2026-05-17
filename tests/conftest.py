@@ -81,6 +81,23 @@ class CheckpointRunner:
         _write_checkpoints(self.tc_id, self.checkpoints)
         return cp_entry["status"] == "PASS"
 
+    def mark_passed(self, name):
+        """Directly record a passed checkpoint."""
+        cp_entry = {"name": name, "status": "PASS", "error": None}
+        self.checkpoints.append(cp_entry)
+        print(f"[{self.tc_id}] OK {name}", flush=True)
+        _write_checkpoints(self.tc_id, self.checkpoints)
+
+    def mark_failed(self, name, error_msg="Assertion Failed"):
+        """Directly record a failed checkpoint and raise the error."""
+        cp_entry = {"name": name, "status": "FAIL", "error": error_msg}
+        self.checkpoints.append(cp_entry)
+        print(f"[{self.tc_id}] FAIL {name}: {error_msg}", flush=True)
+        if self._first_error is None:
+            self._first_error = AssertionError(error_msg)
+        _write_checkpoints(self.tc_id, self.checkpoints)
+        raise self._first_error
+
     def skip(self, name, reason="Skipped"):
         """Record a skipped checkpoint (e.g. optional feature not present)."""
         self.checkpoints.append({"name": name, "status": "SKIP", "error": reason})
@@ -157,30 +174,75 @@ def _do_platform_login(browser, ats_config, platform_name):
     login_path = platform.get("login_path", "login")
     full_url = url + login_path
 
+    print(f"[{platform_name.upper()} LOGIN] Starting login to {full_url}", flush=True)
+    print(f"[{platform_name.upper()} LOGIN] User: {user.get('email', 'N/A')}", flush=True)
+
+    if not url:
+        print(f"[{platform_name.upper()} LOGIN] ERROR: No URL configured for env '{env}'", flush=True)
+        return {"cookies": [], "origins": []}
+
     context = browser.new_context()
     page = context.new_page()
     page.set_default_timeout(30000)
     page.set_default_navigation_timeout(30000)
+
+    print(f"[{platform_name.upper()} LOGIN] Navigating to {full_url}...", flush=True)
     page.goto(full_url, wait_until="domcontentloaded")
-    page.wait_for_timeout(2000)
+    # SPA apps (React/Vue) need extra time to render after domcontentloaded
+    page.wait_for_timeout(5000)
+    print(f"[{platform_name.upper()} LOGIN] Page loaded. URL: {page.url}", flush=True)
 
     # Generic login: works for both seller app and admin panel
+    # Try multiple selectors in priority order
     email_field = page.locator(
-        'input[placeholder*="Email"], input[type="email"], input[name="username"]'
+        'input[name="username"], input[type="email"], input[placeholder*="Email"], input[placeholder*="email"]'
     ).first
     password_field = page.locator('input[type="password"]').first
     submit_btn = page.locator(
-        'button:has-text("Sign In"), button:has-text("Sign in"), button[type="submit"]'
+        'button[type="submit"], button:has-text("Sign In"), button:has-text("Sign in"), button:has-text("Log In"), button:has-text("Login")'
     ).first
 
-    email_field.wait_for(state="visible", timeout=15000)
+    # Wait for form with generous timeout (SPA may take time to render)
+    print(f"[{platform_name.upper()} LOGIN] Waiting for login form...", flush=True)
+    try:
+        email_field.wait_for(state="visible", timeout=20000)
+    except Exception as e:
+        print(f"[{platform_name.upper()} LOGIN] ERROR: Login form not found: {e}", flush=True)
+        print(f"[{platform_name.upper()} LOGIN] Page URL: {page.url}", flush=True)
+        context.close()
+        return {"cookies": [], "origins": []}
+
+    print(f"[{platform_name.upper()} LOGIN] Form found. Filling credentials...", flush=True)
     email_field.fill(user["email"])
     password_field.fill(user["password"])
     submit_btn.click()
-    page.wait_for_timeout(4000)
+    print(f"[{platform_name.upper()} LOGIN] Submit clicked. Waiting for redirect...", flush=True)
+
+    # Wait for post-login redirect (admin SPA needs 5-6s)
+    page.wait_for_timeout(6000)
     page.wait_for_load_state("domcontentloaded")
+    # Extra wait for hash-based SPA routing to complete
+    if "#" in login_path:
+        page.wait_for_timeout(3000)
+
+    # Verify login succeeded (URL should no longer contain login path)
+    current_url = page.url
+    login_indicator = login_path.replace("#", "").replace("/", "")
+    if login_indicator and login_indicator.lower() in current_url.lower():
+        print(f"[{platform_name.upper()} LOGIN] WARNING: Still on login page after submit: {current_url}", flush=True)
+        # Retry: wait longer and check again
+        page.wait_for_timeout(5000)
+        current_url = page.url
+        if login_indicator.lower() in current_url.lower():
+            print(f"[{platform_name.upper()} LOGIN] FAILED: Still on login page after retry: {current_url}", flush=True)
+        else:
+            print(f"[{platform_name.upper()} LOGIN] SUCCESS (after retry): {current_url}", flush=True)
+    else:
+        print(f"[{platform_name.upper()} LOGIN] SUCCESS: {current_url}", flush=True)
 
     state = context.storage_state()
+    cookie_count = len(state.get("cookies", []))
+    print(f"[{platform_name.upper()} LOGIN] Captured {cookie_count} cookies", flush=True)
     page.close()
     context.close()
     return state
@@ -188,9 +250,14 @@ def _do_platform_login(browser, ats_config, platform_name):
 
 def _apply_login_state(page, state, url):
     """Apply saved login state (cookies + localStorage) to a page."""
-    page.context.add_cookies(state.get("cookies", []))
+    cookies = state.get("cookies", [])
+    origins = state.get("origins", [])
+    print(f"[LOGIN STATE] Applying to {url}: {len(cookies)} cookies, {len(origins)} origins", flush=True)
+    if not cookies and not origins:
+        print(f"[LOGIN STATE] WARNING: Empty login state — page will NOT be logged in!", flush=True)
+    page.context.add_cookies(cookies)
     page.goto(url, wait_until="domcontentloaded")
-    for origin_data in state.get("origins", []):
+    for origin_data in origins:
         for item in origin_data.get("localStorage", []):
             try:
                 page.evaluate(
@@ -249,39 +316,31 @@ def admin_user(ats_config):
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args, results_dir):
-    """Extend playwright browser context with zoom-scaled viewport and video recording."""
-    base_w, base_h = 1280, 720
-    zoom_str = os.environ.get("ATS_ZOOM", "")
-    vp_w, vp_h = base_w, base_h
-    if zoom_str:
-        try:
-            zoom_pct = int(zoom_str)
-            if 1 <= zoom_pct <= 500 and zoom_pct != 100:
-                factor = zoom_pct / 100.0
-                vp_w = round(base_w / factor)
-                vp_h = round(base_h / factor)
-        except ValueError:
-            pass
-
+    """Extend playwright browser context with video recording and no forced viewport."""
     args = {
         **browser_context_args,
-        "viewport": {"width": vp_w, "height": vp_h},
+        "no_viewport": True,
     }
 
     # Always enable video — each test gets its own context with video
     video_dir = os.path.join(results_dir, "videos")
     os.makedirs(video_dir, exist_ok=True)
     args["record_video_dir"] = video_dir
-    args["record_video_size"] = {"width": base_w, "height": base_h}
+    args["record_video_size"] = {"width": 1920, "height": 1080}
     return args
 
 
 @pytest.fixture(scope="session")
 def browser_type_launch_args(browser_type_launch_args):
-    """Set browser launch args."""
+    """Launch real Chrome (not Chromium) maximized."""
     return {
         **browser_type_launch_args,
-        "args": ["--disable-gpu", "--no-sandbox"],
+        "channel": "chrome",
+        "args": [
+            "--disable-gpu",
+            "--no-sandbox",
+            "--start-maximized",
+        ],
     }
 
 
@@ -298,10 +357,14 @@ def seller_login_state(browser, ats_config):
 @pytest.fixture(scope="session")
 def admin_login_state(browser, ats_config):
     """Login to admin panel once, save state for reuse."""
+    print("[FIXTURE] admin_login_state invoked", flush=True)
     try:
-        return _do_platform_login(browser, ats_config, "admin")
+        state = _do_platform_login(browser, ats_config, "admin")
+        has_cookies = len(state.get("cookies", [])) > 0
+        print(f"[FIXTURE] admin_login_state result: cookies_present={has_cookies}", flush=True)
+        return state
     except Exception as e:
-        print(f"[WARNING] Admin login failed: {e}", flush=True)
+        print(f"[FIXTURE] admin_login_state EXCEPTION: {e}", flush=True)
         return {"cookies": [], "origins": []}
 
 
@@ -316,11 +379,14 @@ def seller_page(page, seller_login_state, seller_url):
 def admin_page(browser, browser_context_args, admin_login_state, admin_url, request):
     """Per-test page logged into admin panel. Own browser context so it can
     coexist with seller_page in the same test."""
+    has_cookies = len(admin_login_state.get("cookies", [])) > 0
+    print(f"[FIXTURE] admin_page: login_state_valid={has_cookies}, admin_url={admin_url}", flush=True)
     context = browser.new_context(**browser_context_args)
     page = context.new_page()
     page.set_default_timeout(30000)
     page.set_default_navigation_timeout(30000)
     _apply_login_state(page, admin_login_state, admin_url)
+    print(f"[FIXTURE] admin_page: ready. Current URL: {page.url}", flush=True)
     # Track video path so screenshot/video fixtures know about this context
     try:
         if page.video:
@@ -483,7 +549,7 @@ def _is_variants(data):
 def pytest_generate_tests(metafunc):
     """Parametrize tests that have multiple data variants in test_data.json."""
     tc_name = metafunc.definition.function.__name__
-    match = re.search(r'test_(TC_\w+?)_', tc_name)
+    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
     if not match:
         return
     tc_id = match.group(1).replace("_", "-")
@@ -509,7 +575,8 @@ def tc_data(request):
     """Load test data for the current TC. Supports variants and flat data."""
     tc_name = request.node.name.split("[")[0]
     tc_id = None
-    match = re.search(r'test_(TC_\w+?)_', tc_name)
+    # Use greedy match to capture full TC ID (e.g. TC_ORDERS_063, not just TC_ORDERS)
+    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
     if match:
         tc_id = match.group(1).replace("_", "-")
 

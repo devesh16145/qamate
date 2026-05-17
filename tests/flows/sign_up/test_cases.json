@@ -1,0 +1,1196 @@
+[
+    {
+        "tc_id": "TC-SIGNUP-001",
+        "description": "Signup",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/login\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/login",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/login",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"main\").get_by_text(\"Sign Up\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"main\").get_by_text(\"Sign Up\")",
+                "targetDescription": "Main \"main\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 3,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Mobile * Mobile *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Mobile * Mobile *\")",
+                "targetDescription": "Textbox \"Mobile * Mobile *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 4,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Mobile * Mobile *\").fill(\"9315838689\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Mobile * Mobile *\")",
+                "targetDescription": "Textbox \"Mobile * Mobile *\"",
+                "value": "9315838689",
+                "varName": "input_1"
+            },
+            {
+                "id": 5,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Email ID * Email ID *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Email ID * Email ID *\")",
+                "targetDescription": "Textbox \"Email ID * Email ID *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 6,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Email ID * Email ID *\").fill(\"Devesh.iiitd@gmail.com\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Email ID * Email ID *\")",
+                "targetDescription": "Textbox \"Email ID * Email ID *\"",
+                "value": "Devesh.iiitd@gmail.com",
+                "varName": "input_2"
+            },
+            {
+                "id": 7,
+                "rawLine": "page.get_by_role(\"button\", name=\"Send OTP for Verification\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Send OTP for Verification\")",
+                "targetDescription": "Button \"Send OTP for Verification\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 8,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").first.click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").first",
+                "targetDescription": "Textbox \"*\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 9,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").first.fill(\"1\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").first",
+                "targetDescription": "Textbox \"*\"",
+                "value": "1",
+                "varName": "input_3"
+            },
+            {
+                "id": 10,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").nth(1).fill(\"2\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").nth(1)",
+                "targetDescription": "Textbox \"*\"",
+                "value": "2",
+                "varName": "input_4"
+            },
+            {
+                "id": 11,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").nth(2).fill(\"3\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").nth(2)",
+                "targetDescription": "Textbox \"*\"",
+                "value": "3",
+                "varName": "input_5"
+            },
+            {
+                "id": 12,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").nth(3).fill(\"4\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").nth(3)",
+                "targetDescription": "Textbox \"*\"",
+                "value": "4",
+                "varName": "input_6"
+            },
+            {
+                "id": 13,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").nth(4).fill(\"5\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").nth(4)",
+                "targetDescription": "Textbox \"*\"",
+                "value": "5",
+                "varName": "input_7"
+            },
+            {
+                "id": 14,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"*\").nth(5).fill(\"6\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"*\").nth(5)",
+                "targetDescription": "Textbox \"*\"",
+                "value": "6",
+                "varName": "input_8"
+            },
+            {
+                "id": 15,
+                "rawLine": "page.locator(\".w-\\\\[42px\\\\].h-\\\\[48px\\\\].text-neutral-6.text-center.text-base.rounded-lg.border.border-gray-3.outline-none.focus\\\\:border-gray-2.placeholder\\\\:text-neutral-3.undefined\").first.click()",
+                "type": "click",
+                "target": "3.undefined\").first",
+                "targetDescription": "3.undefined\").first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 16,
+                "rawLine": "page.locator(\".w-\\\\[42px\\\\].h-\\\\[48px\\\\].text-neutral-6.text-center.text-base.rounded-lg.border.border-gray-3.outline-none.focus\\\\:border-gray-2.placeholder\\\\:text-neutral-3.undefined\").first.fill(\"1\")",
+                "type": "fill",
+                "target": "3.undefined\").first",
+                "targetDescription": "3.undefined\").first",
+                "value": "1",
+                "varName": "input_9"
+            },
+            {
+                "id": 17,
+                "rawLine": "page.locator(\"div:nth-child(3) > .relative > div > .flex.flex-col > .flex > input:nth-child(2)\").fill(\"2\")",
+                "type": "fill",
+                "target": "child(2)\")",
+                "targetDescription": "child(2)\")",
+                "value": "2",
+                "varName": "input_10"
+            },
+            {
+                "id": 18,
+                "rawLine": "page.locator(\"div:nth-child(3) > .relative > div > .flex.flex-col > .flex > input:nth-child(3)\").fill(\"3\")",
+                "type": "fill",
+                "target": "child(3)\")",
+                "targetDescription": "child(3)\")",
+                "value": "3",
+                "varName": "input_11"
+            },
+            {
+                "id": 19,
+                "rawLine": "page.locator(\"div:nth-child(3) > .relative > div > .flex.flex-col > .flex > input:nth-child(4)\").fill(\"4\")",
+                "type": "fill",
+                "target": "child(4)\")",
+                "targetDescription": "child(4)\")",
+                "value": "4",
+                "varName": "input_12"
+            },
+            {
+                "id": 20,
+                "rawLine": "page.locator(\"div:nth-child(3) > .relative > div > .flex.flex-col > .flex > input:nth-child(5)\").fill(\"5\")",
+                "type": "fill",
+                "target": "child(5)\")",
+                "targetDescription": "child(5)\")",
+                "value": "5",
+                "varName": "input_13"
+            },
+            {
+                "id": 21,
+                "rawLine": "page.locator(\"div:nth-child(3) > .relative > div > .flex.flex-col > .flex > input:nth-child(6)\").fill(\"6\")",
+                "type": "fill",
+                "target": "child(6)\")",
+                "targetDescription": "child(6)\")",
+                "value": "6",
+                "varName": "input_14"
+            },
+            {
+                "id": 22,
+                "rawLine": "page.get_by_role(\"button\", name=\"Confirm Otp\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Confirm Otp\")",
+                "targetDescription": "Button \"Confirm Otp\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 23,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Create Password *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Create Password *\")",
+                "targetDescription": "Textbox \"Create Password *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 24,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Create Password *\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Create Password *\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Create Password *\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 25,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Create Password *\").fill(\"T\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Create Password *\")",
+                "targetDescription": "Textbox \"Create Password *\"",
+                "value": "T",
+                "varName": "input_15"
+            },
+            {
+                "id": 26,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Create Password *\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Create Password *\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Create Password *\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 27,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Create Password *\").fill(\"Temp@123456\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Create Password *\")",
+                "targetDescription": "Textbox \"Create Password *\"",
+                "value": "Temp@123456",
+                "varName": "input_16"
+            },
+            {
+                "id": 28,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Password *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Password *\")",
+                "targetDescription": "Textbox \"Confirm Password *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 29,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Password *\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Password *\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Confirm Password *\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 30,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Password *\").fill(\"T\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Password *\")",
+                "targetDescription": "Textbox \"Confirm Password *\"",
+                "value": "T",
+                "varName": "input_17"
+            },
+            {
+                "id": 31,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Password *\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Password *\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Confirm Password *\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 32,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Password *\").fill(\"Temp@123456\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Password *\")",
+                "targetDescription": "Textbox \"Confirm Password *\"",
+                "value": "Temp@123456",
+                "varName": "input_18"
+            },
+            {
+                "id": 33,
+                "rawLine": "page.get_by_role(\"button\", name=\"Complete Sign Up\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Complete Sign Up\")",
+                "targetDescription": "Button \"Complete Sign Up\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 34,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"PAN * PAN *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"PAN * PAN *\")",
+                "targetDescription": "Textbox \"PAN * PAN *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 35,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"PAN * PAN *\").fill(\"AABCF7736N\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"PAN * PAN *\")",
+                "targetDescription": "Textbox \"PAN * PAN *\"",
+                "value": "AABCF7736N",
+                "varName": "input_19"
+            },
+            {
+                "id": 36,
+                "rawLine": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").first.click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").first",
+                "targetDescription": "Button \"Verify Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 37,
+                "rawLine": "page.get_by_role(\"checkbox\").first.click()",
+                "type": "click",
+                "target": "page.get_by_role(\"checkbox\").first",
+                "targetDescription": "Checkbox \"checkbox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 38,
+                "rawLine": "page.get_by_role(\"checkbox\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"checkbox\").nth(1)",
+                "targetDescription": "Checkbox \"checkbox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 39,
+                "rawLine": "page.get_by_role(\"checkbox\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"checkbox\").nth(2)",
+                "targetDescription": "Checkbox \"checkbox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 40,
+                "rawLine": "page.get_by_role(\"checkbox\").nth(3).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"checkbox\").nth(3)",
+                "targetDescription": "Checkbox \"checkbox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 41,
+                "rawLine": "page.get_by_role(\"button\", name=\"Make Head Branch\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Make Head Branch\").nth(1)",
+                "targetDescription": "Button \"Make Head Branch\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 42,
+                "rawLine": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").nth(1)",
+                "targetDescription": "Button \"Verify Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 43,
+                "rawLine": "page.get_by_role(\"main\").get_by_text(\"Use address registered on GST\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"main\").get_by_text(\"Use address registered on GST\")",
+                "targetDescription": "Main \"main\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 44,
+                "rawLine": "page.locator(\".flex.gap-2.items-center > .peer\").first.click()",
+                "type": "click",
+                "target": "center > .peer\").first",
+                "targetDescription": "center > .peer\").first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 45,
+                "rawLine": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").nth(2)",
+                "targetDescription": "Button \"Verify Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 46,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Account Number * Account\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Account Number * Account\")",
+                "targetDescription": "Textbox \"Account Number * Account\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 47,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Account Number * Account\").fill(\"000890289871772\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Account Number * Account\")",
+                "targetDescription": "Textbox \"Account Number * Account\"",
+                "value": "000890289871772",
+                "varName": "input_20"
+            },
+            {
+                "id": 48,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Account Number *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Account Number *\")",
+                "targetDescription": "Textbox \"Confirm Account Number *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 49,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Confirm Account Number *\").fill(\"000890289871772\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Confirm Account Number *\")",
+                "targetDescription": "Textbox \"Confirm Account Number *\"",
+                "value": "000890289871772",
+                "varName": "input_21"
+            },
+            {
+                "id": 50,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\")",
+                "targetDescription": "Textbox \"IFSC Code * IFSC Code *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 51,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\").fill(\"000890289871772\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\")",
+                "targetDescription": "Textbox \"IFSC Code * IFSC Code *\"",
+                "value": "000890289871772",
+                "varName": "input_22"
+            },
+            {
+                "id": 52,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\").dblclick()",
+                "type": "dblclick",
+                "target": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\")",
+                "targetDescription": "Textbox \"IFSC Code * IFSC Code *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 53,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\").fill(\"SCBL0036078\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"IFSC Code * IFSC Code *\")",
+                "targetDescription": "Textbox \"IFSC Code * IFSC Code *\"",
+                "value": "SCBL0036078",
+                "varName": "input_23"
+            },
+            {
+                "id": 54,
+                "rawLine": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").nth(3).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Verify Btn right icon\").nth(3)",
+                "targetDescription": "Button \"Verify Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 55,
+                "rawLine": "page.get_by_role(\"main\").locator(\"div\").filter(has_text=re.compile(r\"^Manufacturer$\")).click()",
+                "type": "click",
+                "target": "\"))",
+                "targetDescription": "\"))",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 56,
+                "rawLine": "page.get_by_role(\"button\", name=\"Create my Account Btn right\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Create my Account Btn right\")",
+                "targetDescription": "Button \"Create my Account Btn right\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 57,
+                "rawLine": "page.get_by_role(\"button\", name=\"Setup My Profile Btn right\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Setup My Profile Btn right\")",
+                "targetDescription": "Button \"Setup My Profile Btn right\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 58,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Click to Upload PANMax file size 5MB$\")).first.click()",
+                "type": "click",
+                "target": "\")).first",
+                "targetDescription": "\")).first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 59,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 60,
+                "rawLine": "page.get_by_text(\"Max file size 5MB\").first.click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Max file size 5MB\").first",
+                "targetDescription": "Text \"Max file size 5MB\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 61,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 62,
+                "rawLine": "page.get_by_text(\"Click to Upload Brand Logo\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Click to Upload Brand Logo\")",
+                "targetDescription": "Text \"Click to Upload Brand Logo\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 63,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 64,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Brand Name *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Brand Name *\")",
+                "targetDescription": "Textbox \"Brand Name *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 65,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Brand Name *\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Brand Name *\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Brand Name *\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 66,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Brand Name *\").fill(\"TEST AUTO\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Brand Name *\")",
+                "targetDescription": "Textbox \"Brand Name *\"",
+                "value": "TEST AUTO",
+                "varName": "input_24"
+            },
+            {
+                "id": 67,
+                "rawLine": "page.get_by_text(\"Upload GST Certificate\").first.click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Upload GST Certificate\").first",
+                "targetDescription": "Text \"Upload GST Certificate\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 68,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 69,
+                "rawLine": "page.locator(\"#poc-name\").dblclick()",
+                "type": "dblclick",
+                "target": "name\")",
+                "targetDescription": "name\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 70,
+                "rawLine": "page.locator(\"#poc-name\").fill(\"TEST1\")",
+                "type": "fill",
+                "target": "name\")",
+                "targetDescription": "name\")",
+                "value": "TEST1",
+                "varName": "input_25"
+            },
+            {
+                "id": 71,
+                "rawLine": "page.locator(\"#poc-contact\").click()",
+                "type": "click",
+                "target": "contact\")",
+                "targetDescription": "contact\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 72,
+                "rawLine": "page.locator(\"#poc-contact\").fill(\"6765654378\")",
+                "type": "fill",
+                "target": "contact\")",
+                "targetDescription": "contact\")",
+                "value": "6765654378",
+                "varName": "input_26"
+            },
+            {
+                "id": 73,
+                "rawLine": "page.locator(\"#poc-name-164096\").click()",
+                "type": "click",
+                "target": "164096\")",
+                "targetDescription": "164096\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 74,
+                "rawLine": "page.locator(\"#poc-name-164096\").fill(\"TEST2\")",
+                "type": "fill",
+                "target": "164096\")",
+                "targetDescription": "164096\")",
+                "value": "TEST2",
+                "varName": "input_27"
+            },
+            {
+                "id": 75,
+                "rawLine": "page.locator(\"#poc-contact-164096\").click()",
+                "type": "click",
+                "target": "164096\")",
+                "targetDescription": "164096\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 76,
+                "rawLine": "page.locator(\"#poc-contact-164096\").fill(\"2345678987\")",
+                "type": "fill",
+                "target": "164096\")",
+                "targetDescription": "164096\")",
+                "value": "2345678987",
+                "varName": "input_28"
+            },
+            {
+                "id": 77,
+                "rawLine": "page.get_by_text(\"Upload GST Certificate\").first.click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Upload GST Certificate\").first",
+                "targetDescription": "Text \"Upload GST Certificate\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 78,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 79,
+                "rawLine": "page.locator(\"#poc-name-164097\").click()",
+                "type": "click",
+                "target": "164097\")",
+                "targetDescription": "164097\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 80,
+                "rawLine": "page.locator(\"#poc-name-164097\").fill(\"TEST 3\")",
+                "type": "fill",
+                "target": "164097\")",
+                "targetDescription": "164097\")",
+                "value": "TEST 3",
+                "varName": "input_29"
+            },
+            {
+                "id": 81,
+                "rawLine": "page.locator(\"#poc-contact-164097\").click()",
+                "type": "click",
+                "target": "164097\")",
+                "targetDescription": "164097\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 82,
+                "rawLine": "page.locator(\"#poc-contact-164097\").fill(\"3456787657\")",
+                "type": "fill",
+                "target": "164097\")",
+                "targetDescription": "164097\")",
+                "value": "3456787657",
+                "varName": "input_30"
+            },
+            {
+                "id": 83,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Upload GST CertificateMax file size 5MB$\")).first.click()",
+                "type": "click",
+                "target": "\")).first",
+                "targetDescription": "\")).first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 84,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 85,
+                "rawLine": "page.get_by_text(\"Upload GST Certificate\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Upload GST Certificate\")",
+                "targetDescription": "Text \"Upload GST Certificate\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 86,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Basic Info\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 87,
+                "rawLine": "page.locator(\"#poc-name-164098\").click()",
+                "type": "click",
+                "target": "164098\")",
+                "targetDescription": "164098\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 88,
+                "rawLine": "page.locator(\"#poc-name-164098\").fill(\"\")",
+                "type": "fill",
+                "target": "164098\")",
+                "targetDescription": "164098\")",
+                "value": "",
+                "varName": "input_31"
+            },
+            {
+                "id": 89,
+                "rawLine": "page.get_by_role(\"button\", name=\"Save and Next Btn right icon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Save and Next Btn right icon\")",
+                "targetDescription": "Button \"Save and Next Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 90,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Warehouse Name *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Warehouse Name *\")",
+                "targetDescription": "Textbox \"Warehouse Name *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 91,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Warehouse Name *\").fill(\"WAR1\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Warehouse Name *\")",
+                "targetDescription": "Textbox \"Warehouse Name *\"",
+                "value": "WAR1",
+                "varName": "input_32"
+            },
+            {
+                "id": 92,
+                "rawLine": "page.get_by_role(\"combobox\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"combobox\")",
+                "targetDescription": "Combobox \"combobox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 93,
+                "rawLine": "page.locator(\"#radix-_r_22_\").click()",
+                "type": "click",
+                "target": "_r_22_\")",
+                "targetDescription": "_r_22_\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 94,
+                "rawLine": "page.get_by_role(\"checkbox\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"checkbox\").nth(2)",
+                "targetDescription": "Checkbox \"checkbox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 95,
+                "rawLine": "page.get_by_role(\"button\", name=\"Mon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Mon\")",
+                "targetDescription": "Button \"Mon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 96,
+                "rawLine": "page.get_by_role(\"button\", name=\"Tue\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Tue\")",
+                "targetDescription": "Button \"Tue\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 97,
+                "rawLine": "page.get_by_role(\"button\", name=\"Wed\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Wed\")",
+                "targetDescription": "Button \"Wed\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 98,
+                "rawLine": "page.get_by_role(\"button\", name=\"Thu\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Thu\")",
+                "targetDescription": "Button \"Thu\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 99,
+                "rawLine": "page.get_by_role(\"button\", name=\"Fri\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Fri\")",
+                "targetDescription": "Button \"Fri\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 100,
+                "rawLine": "page.get_by_role(\"button\", name=\"Sat\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Sat\")",
+                "targetDescription": "Button \"Sat\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 101,
+                "rawLine": "page.get_by_role(\"button\", name=\"Btn left icon Add Holiday\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Btn left icon Add Holiday\")",
+                "targetDescription": "Button \"Btn left icon Add Holiday\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 102,
+                "rawLine": "page.get_by_role(\"button\", name=\"Select Date\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Select Date\")",
+                "targetDescription": "Button \"Select Date\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 103,
+                "rawLine": "page.get_by_label(\"Choose the Month\").select_option(\"5\")",
+                "type": "select",
+                "target": "page.get_by_label(\"Choose the Month\")",
+                "targetDescription": "Field \"Choose the Month\"",
+                "value": "5",
+                "varName": ""
+            },
+            {
+                "id": 104,
+                "rawLine": "page.get_by_role(\"button\", name=\"Wednesday, June 10th,\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Wednesday, June 10th,\")",
+                "targetDescription": "Button \"Wednesday, June 10th,\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 105,
+                "rawLine": "page.locator(\".flex.touch-none\").click()",
+                "type": "click",
+                "target": "none\")",
+                "targetDescription": "none\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 106,
+                "rawLine": "page.locator(\".bg-border\").dblclick()",
+                "type": "dblclick",
+                "target": "border\")",
+                "targetDescription": "border\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 107,
+                "rawLine": "page.get_by_role(\"button\", name=\"Save and Next Btn right icon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Save and Next Btn right icon\")",
+                "targetDescription": "Button \"Save and Next Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 108,
+                "rawLine": "page.get_by_role(\"combobox\").filter(has_text=\"Select State\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"combobox\").filter(has_text=\"Select State\")",
+                "targetDescription": "Combobox \"combobox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 109,
+                "rawLine": "page.get_by_role(\"option\", name=\"Assam\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"option\", name=\"Assam\")",
+                "targetDescription": "Option \"Assam\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 110,
+                "rawLine": "page.get_by_role(\"combobox\").filter(has_text=\"Select docType\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"combobox\").filter(has_text=\"Select docType\")",
+                "targetDescription": "Combobox \"combobox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 111,
+                "rawLine": "page.get_by_text(\"Pesticides\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Pesticides\")",
+                "targetDescription": "Text \"Pesticides\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 112,
+                "rawLine": "page.get_by_role(\"button\", name=\"Expiry * Expiry *\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Expiry * Expiry *\")",
+                "targetDescription": "Button \"Expiry * Expiry *\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 113,
+                "rawLine": "page.get_by_label(\"Choose the Year\").select_option(\"2029\")",
+                "type": "select",
+                "target": "page.get_by_label(\"Choose the Year\")",
+                "targetDescription": "Field \"Choose the Year\"",
+                "value": "2029",
+                "varName": ""
+            },
+            {
+                "id": 114,
+                "rawLine": "page.get_by_role(\"button\", name=\"Thursday, May 10th,\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Thursday, May 10th,\")",
+                "targetDescription": "Button \"Thursday, May 10th,\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 115,
+                "rawLine": "page.get_by_text(\"Click to Upload License for\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Click to Upload License for\")",
+                "targetDescription": "Text \"Click to Upload License for\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 116,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Compliance\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Compliance\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 117,
+                "rawLine": "page.get_by_text(\"Max file size 5MB\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Max file size 5MB\")",
+                "targetDescription": "Text \"Max file size 5MB\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 118,
+                "rawLine": "page.get_by_role(\"tabpanel\", name=\"Compliance\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.get_by_role(\"tabpanel\", name=\"Compliance\").set_input_files(\"ChatGPT Image M",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 119,
+                "rawLine": "page.get_by_role(\"button\", name=\"calendar DD/MM/YY\").click()",
+                "type": "click",
+                "target": "YY\")",
+                "targetDescription": "YY\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 120,
+                "rawLine": "page.get_by_role(\"button\", name=\"Tuesday, May 12th,\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Tuesday, May 12th,\")",
+                "targetDescription": "Button \"Tuesday, May 12th,\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 121,
+                "rawLine": "page.get_by_role(\"button\", name=\"Save and Next Btn right icon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Save and Next Btn right icon\")",
+                "targetDescription": "Button \"Save and Next Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 122,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Credit Days\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Credit Days\")",
+                "targetDescription": "Textbox \"Credit Days\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 123,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Credit Days\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Credit Days\")",
+                "targetDescription": "Textbox \"Credit Days\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 124,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Credit Days\").fill(\"5\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Credit Days\")",
+                "targetDescription": "Textbox \"Credit Days\"",
+                "value": "5",
+                "varName": "input_33"
+            },
+            {
+                "id": 125,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Credit Limit to Agrim\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Credit Limit to Agrim\")",
+                "targetDescription": "Textbox \"Credit Limit to Agrim\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 126,
+                "rawLine": "page.get_by_role(\"button\", name=\"Submit Btn right icon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Submit Btn right icon\")",
+                "targetDescription": "Button \"Submit Btn right icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 127,
+                "rawLine": "page.get_by_role(\"button\", name=\"Setup My Profile Btn right\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Setup My Profile Btn right\")",
+                "targetDescription": "Button \"Setup My Profile Btn right\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 128,
+                "rawLine": "page.get_by_role(\"tab\", name=\"Operations\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"tab\", name=\"Operations\")",
+                "targetDescription": "Tab \"Operations\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 129,
+                "rawLine": "page.get_by_role(\"tab\", name=\"Compliance\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"tab\", name=\"Compliance\")",
+                "targetDescription": "Tab \"Compliance\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 130,
+                "rawLine": "page.get_by_text(\"Basic InfoOperationsComplianceBusiness Terms\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Basic InfoOperationsComplianceBusiness Terms\")",
+                "targetDescription": "Text \"Basic InfoOperationsComplianceBusiness Terms\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 131,
+                "rawLine": "page.get_by_role(\"tab\", name=\"Operations\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"tab\", name=\"Operations\")",
+                "targetDescription": "Tab \"Operations\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 132,
+                "rawLine": "page.get_by_role(\"tab\", name=\"Business Terms\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"tab\", name=\"Business Terms\")",
+                "targetDescription": "Tab \"Business Terms\"",
+                "value": "",
+                "varName": ""
+            }
+        ]
+    }
+]

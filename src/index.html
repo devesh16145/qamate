@@ -16,28 +16,27 @@
             <div class="topbar-left">
                 <div class="brand">
                     <div class="brand-icon">🧪</div>
-                    <span class="brand-text">AGRIM ATS</span>
+                    <span class="brand-text">ATS</span>
                 </div>
-                <div class="topbar-divider"></div>
-                <button id="run-btn" class="btn-primary run-btn">
-                    <span class="run-btn-label">▶ RUN</span>
+                <button id="run-btn" class="btn-primary run-btn" title="Run selected tests">
+                    <span class="run-btn-label">▶</span>
                     <span class="run-caret">▾</span>
                 </button>
-                <button id="stop-btn" class="btn stop-btn" disabled>⏹ STOP</button>
+                <button id="stop-btn" class="btn stop-btn" disabled title="Stop running tests">⏹</button>
                 <div class="topbar-divider"></div>
                 <div class="topbar-field">
-                    <span class="topbar-label">SELLER</span>
+                    <span class="topbar-icon" title="Seller account">👤</span>
                     <select id="user-select" class="topbar-select" title="Select seller account"></select>
                 </div>
                 <div class="topbar-field">
-                    <span class="topbar-label">ADMIN</span>
+                    <span class="topbar-icon" title="Admin account">🛡</span>
                     <select id="admin-user-select" class="topbar-select" title="Select admin account"></select>
                 </div>
                 <div class="topbar-field">
-                    <span class="topbar-label">MODE</span>
+                    <span class="topbar-icon" title="Execution mode">⚡</span>
                     <select id="exec-mode-select" class="topbar-select" title="Execution mode">
-                        <option value="sequential">Sequential</option>
-                        <option value="parallel">Parallel</option>
+                        <option value="sequential">Seq</option>
+                        <option value="parallel">Par</option>
                     </select>
                 </div>
                 <div class="topbar-divider"></div>
@@ -49,14 +48,9 @@
                 </div>
             </div>
             <div class="topbar-right">
-                <select id="env-select" class="topbar-select">
+                <select id="env-select" class="topbar-select" title="Environment">
                     <option value="dev">Dev</option>
                     <option value="staging">Staging</option>
-                </select>
-                <select id="browser-select" class="topbar-select">
-                    <option value="chromium">Chromium</option>
-                    <option value="firefox">Firefox</option>
-                    <option value="webkit">WebKit</option>
                 </select>
                 <select id="viewport-select" class="topbar-select" title="Browser zoom level">
                     <option value="100">100%</option>
@@ -259,6 +253,13 @@
                     <label>Module / Flow</label>
                     <select id="record-flow">
                         <!-- Populated dynamically -->
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label>Platform</label>
+                    <select id="record-platform">
+                        <option value="seller">Seller App</option>
+                        <option value="admin">Admin Panel</option>
                     </select>
                 </div>
                 <div class="setting-item">

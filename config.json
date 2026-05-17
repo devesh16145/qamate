@@ -17,10 +17,26 @@
       },
       "login_path": "login",
       "users": [
-        { "email": "shruti_s@agrim.app", "password": "Agrim@123", "label": "Seller 1" },
-        { "email": "shruti_srivastav425@agrim.app", "password": "Agrim@123", "label": "Seller 2" },
-        { "email": "shruti_s@agrim.app", "password": "Agrim@123", "label": "Seller 3" },
-        { "email": "shruti_srivastav425@agrim.app", "password": "Agrim@123", "label": "Seller 4" }
+        {
+          "email": "shruti_s@agrim.app",
+          "password": "Agrim@123",
+          "label": "Seller 1"
+        },
+        {
+          "email": "shruti_srivastav425@agrim.app",
+          "password": "Agrim@123",
+          "label": "Seller 2"
+        },
+        {
+          "email": "shruti_s@agrim.app",
+          "password": "Agrim@123",
+          "label": "Seller 3"
+        },
+        {
+          "email": "shruti_srivastav425@agrim.app",
+          "password": "Agrim@123",
+          "label": "Seller 4"
+        }
       ]
     },
     "admin": {
@@ -31,12 +47,16 @@
       },
       "login_path": "#/login",
       "users": [
-        { "email": "amit.dalal@agrim.app", "password": "Amit#dalal@123", "label": "Admin 1" }
+        {
+          "email": "amit.dalal@agrim.app",
+          "password": "Amit@12345",
+          "label": "Admin 1"
+        }
       ]
     }
   },
   "execution": {
-    "default_mode": "headless",
+    "default_mode": "headed",
     "parallel_workers": 2,
     "slow_motion_ms": 0,
     "browser": "chromium",
