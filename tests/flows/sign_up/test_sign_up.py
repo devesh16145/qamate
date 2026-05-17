@@ -93,27 +93,22 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     page.wait_for_timeout(500)
     # Step 35: Enter "AABCF7736N" in Textbox "PAN * PAN *"
     page.get_by_role("textbox", name="PAN * PAN *").fill(tc_data.get("input_19", ""))
-    # Step 36: Click Button "Verify Btn right icon"
+    # Step 36: Click Button "Verify Btn right icon" — PAN verification
     page.get_by_role("button", name="Verify Btn right icon").first.click()
-    page.wait_for_timeout(500)
-    # Step 37: Click Checkbox "checkbox"
-    page.get_by_role("checkbox").first.click(force=True)
-    page.wait_for_timeout(500)
-    # Step 38: Click Checkbox "checkbox"
-    page.get_by_role("checkbox").nth(1).click(force=True)
-    page.wait_for_timeout(500)
-    # Step 39: Click Checkbox "checkbox"
-    page.get_by_role("checkbox").nth(2).click(force=True)
-    page.wait_for_timeout(500)
-    # Step 40: Click Checkbox "checkbox"
-    page.get_by_role("checkbox").nth(3).click(force=True)
-    page.wait_for_timeout(500)
-    # Step 41: Click Button "Make Head Branch"
-    page.get_by_role("button", name="Make Head Branch").nth(1).click()
-    page.wait_for_timeout(500)
-    # Step 42: Click Button "Verify Btn right icon"
+    page.wait_for_load_state("networkidle")  # Wait for GST API response
+    # Select all GSTIN checkboxes (4 found during recording, adapts to any count)
+    _checkboxes = page.get_by_role("checkbox")
+    for _i in range(_checkboxes.count()):
+        _checkboxes.nth(_i).click(force=True)
+        page.wait_for_timeout(300)
+    # Click the last "Make Head Branch" button (adapts to any GSTIN count)
+    _head_btns = page.get_by_role("button", name="Make Head Branch")
+    if _head_btns.count() > 0:
+        _head_btns.last.click()
+        page.wait_for_timeout(500)
+    # Step 42: Click Button "Verify Btn right icon" — GST verification
     page.get_by_role("button", name="Verify Btn right icon").nth(1).click()
-    page.wait_for_timeout(500)
+    page.wait_for_load_state("networkidle")  # Wait for address API response
     # Step 43: Click Main "main"
     page.get_by_role("main").get_by_text("Use address registered on GST").click()
     page.wait_for_timeout(500)
