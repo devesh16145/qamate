@@ -128,6 +128,58 @@ def _step_comment(stype, desc, value=""):
         return desc[:60]
 
 
+def _detect_select_all_runs(steps):
+    """Pre-scan steps for 3+ consecutive checkbox clicks → collapse into a loop.
+
+    When a user clicks checkbox.first, checkbox.nth(1), checkbox.nth(2), ...
+    that's almost always "select all visible checkboxes".  Generating a loop
+    makes the test resilient to different element counts (e.g. different PAN
+    may return 1 GSTIN instead of 5).
+
+    Returns dict:  step_id → {"action": "loop_start", "base_locator": str, "count": int}
+                   step_id → {"action": "loop_skip"}
+    """
+    def _checkbox_base(step):
+        """If step is a checkbox click, return the base Playwright locator string."""
+        if step.get("type") not in ("click", "check"):
+            return None
+        raw = step.get("rawLine", "")
+        # Match:  page.get_by_role("checkbox")  or  page.get_by_role('checkbox')
+        m = re.search(r'(page\.\S*get_by_role\(["\']checkbox["\']\))', raw)
+        if m:
+            return m.group(1)
+        return None
+
+    runs = {}
+    i = 0
+    while i < len(steps):
+        base = _checkbox_base(steps[i])
+        if not base:
+            i += 1
+            continue
+
+        # Count consecutive checkbox clicks with the same base locator
+        j = i + 1
+        while j < len(steps):
+            if _checkbox_base(steps[j]) != base:
+                break
+            j += 1
+
+        run_length = j - i
+        if run_length >= 3:
+            runs[steps[i]["id"]] = {
+                "action": "loop_start",
+                "base_locator": base,
+                "count": run_length,
+            }
+            for k in range(i + 1, j):
+                runs[steps[k]["id"]] = {"action": "loop_skip"}
+            i = j
+        else:
+            i += 1
+
+    return runs
+
 # ── Parse codegen output into structured steps ──
 
 def parse_steps(ats_root):
@@ -441,6 +493,9 @@ def generate_from_review(payload, ats_root):
         sid = a.get("afterStep", 0)
         assertions_by_step.setdefault(sid, []).append(a)
 
+    # ── Pre-detect "select all" patterns (3+ consecutive checkbox clicks → loop) ──
+    select_all_runs = _detect_select_all_runs(steps)
+
     # Generate test lines
     test_lines = []
     prev_raw = ""
@@ -449,6 +504,21 @@ def generate_from_review(payload, ats_root):
         stype = step.get("type", "other")
         raw = step.get("rawLine", "")
         desc = step.get("targetDescription", "")
+
+        # ── Handle "select all" collapsed runs ──
+        run_info = select_all_runs.get(sid)
+        if run_info and run_info["action"] == "loop_skip":
+            continue  # This step is handled by the loop generated at the run start
+
+        if run_info and run_info["action"] == "loop_start":
+            base = run_info["base_locator"]
+            count = run_info["count"]
+            test_lines.append(f"    # Select all checkboxes ({count} found during recording, adapts to any count)")
+            test_lines.append(f"    _checkboxes = {base}")
+            test_lines.append(f"    for _i in range(_checkboxes.count()):")
+            test_lines.append(f"        _checkboxes.nth(_i).click(force=True)")
+            test_lines.append(f"        page.wait_for_timeout(300)")
+            continue
 
         # ── Filter junk actions recorded by accident ──
         # Media keys (volume, play/pause)
