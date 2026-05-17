@@ -1,22 +1,13 @@
 {
-    "TC-ORDERS-006": {
-        "search_po": "PO"
-    },
-    "TC-ORDERS-007": {
-        "search_sku": "urea"
-    },
-    "TC-ORDERS-045": {
-        "reject_reason": "Out of stock - supply exhausted for requested SKUs"
-    },
-    "TC-ORDERS-063": {
-        "admin_email": "amit.dalal@agrim.app",
-        "admin_password": "Amit#dalal@123",
-        "vendor_search": "M&M",
-        "vendor_name": "M&M_Brand1",
-        "branch_name": "MAHARASHTRA",
-        "warehouse_name": "AKOLA WH",
-        "product_search_term": "test",
-        "quantity": "10",
-        "unit_price": "50"
+    "TC-ORDERS-001": {
+        "default": {
+            "input_1": "amit.dalal@agrim.app",
+            "input_2": "A",
+            "input_3": "Amit@12345",
+            "input_4": "m",
+            "input_5": "testing",
+            "input_6": "12",
+            "input_7": "10"
+        }
     }
 }

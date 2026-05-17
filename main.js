@@ -311,12 +311,26 @@ ipcMain.handle('get-run-checkpoints', async (event, runId) => {
 // ──────────────────────────────────────
 // IPC: Record Test (Enhanced — returns structured steps for review)
 // ──────────────────────────────────────
-ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) => {
+ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, platform }) => {
   return new Promise((resolve, reject) => {
     try {
       const configPath = path.join(__dirname, 'config.json');
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      const baseUrl = config.environments[env]?.base_url || 'https://supplier-dev.agrim.app/';
+      
+      let baseUrl = 'https://supplier-dev.agrim.app/';
+      let loginPath = 'login';
+      
+      if (platform && config.platforms && config.platforms[platform]) {
+          baseUrl = config.platforms[platform].urls[env] || baseUrl;
+          loginPath = config.platforms[platform].login_path || loginPath;
+      } else if (config.environments[env]?.base_url) {
+          baseUrl = config.environments[env].base_url;
+      }
+      
+      if (!baseUrl.endsWith('/')) baseUrl += '/';
+      if (loginPath.startsWith('/')) loginPath = loginPath.substring(1);
+      
+      const startUrl = baseUrl + loginPath;
 
       const tempFile = path.join(__dirname, 'temp_recording.py');
 
@@ -326,8 +340,9 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env }) 
       const codegenProcess = spawn(VENV_PYTHON, [
         '-m', 'playwright', 'codegen',
         '--target', 'python-pytest',
+        '--channel', 'chrome',
         '-o', tempFile,
-        baseUrl
+        startUrl
       ], {
         cwd: __dirname,
         env: { ...process.env },
@@ -564,6 +579,12 @@ ipcMain.handle('save-tc-data', async (event, { flowId, tcId, data, variant }) =>
       // Save specific variant
       if (!allData[tcId] || typeof allData[tcId] !== 'object' || Array.isArray(allData[tcId])) {
         allData[tcId] = {};
+      } else {
+        Object.keys(allData[tcId]).forEach(k => {
+          if (typeof allData[tcId][k] !== 'object') {
+            delete allData[tcId][k];
+          }
+        });
       }
       allData[tcId][variant] = data;
     } else {

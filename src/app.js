@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const progressText = document.getElementById('progress-text');
     const logConsole = document.getElementById('log-console');
     const envSelect = document.getElementById('env-select');
-    const browserSelect = document.getElementById('browser-select');
+    const browserSelect = document.getElementById('browser-select'); // may be null if removed from topbar
     const zoomSelect = document.getElementById('viewport-select');
     const userSelect = document.getElementById('user-select');
     const adminUserSelect = document.getElementById('admin-user-select');
@@ -155,10 +155,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const flowId = btn.dataset.module;
                     const tcId = btn.dataset.tcId;
                     const desc = btn.dataset.description;
-                    document.getElementById('record-flow').value = flowId;
+                    
+                    const flowSelect = document.getElementById('record-flow');
+                    flowSelect.innerHTML = allFlows.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
+                    flowSelect.value = flowId;
+                    
                     document.getElementById('record-tc-id').value = tcId;
                     document.getElementById('record-desc').value = desc;
-                    recordModal.classList.remove('hidden');
+                    document.getElementById('record-modal').classList.remove('hidden');
                 });
             });
             // Edit Test button listeners — open review modal with existing assertions/criteria
@@ -423,7 +427,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function updateUIFromConfig() {
         if (config.execution) {
-            browserSelect.value = config.execution.browser || 'chromium';
+            if (browserSelect) browserSelect.value = config.execution.browser || 'chromium';
             document.getElementById('mode-status').textContent = `Mode: ${config.execution.default_mode || 'headless'}`;
             document.getElementById('parallel-status').textContent = `Parallel: ${config.execution.parallel_workers || 1} workers`;
         }
@@ -794,6 +798,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     startRecordBtn.addEventListener('click', async () => {
         const flowId = document.getElementById('record-flow').value;
+        const platform = document.getElementById('record-platform').value;
         const tcId = document.getElementById('record-tc-id').value.trim();
         const desc = document.getElementById('record-desc').value.trim();
 
@@ -813,7 +818,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         startRecordBtn.disabled = true;
         try {
             const res = await window.ats.recordTest({
-                flowId, tcId, description: desc, env: envSelect.value
+                flowId, tcId, description: desc, env: envSelect.value, platform
             });
             progressCleanup(); // remove listener
 

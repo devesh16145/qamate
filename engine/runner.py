@@ -144,6 +144,14 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
         re.IGNORECASE,
     )
 
+    # Buffer to capture error details between FAILURES header and next test/summary
+    error_buffer = []
+    capturing_error = False
+    current_error_tc = None
+
+    # Store error details per TC
+    error_details = {}
+
     for raw_line in process.stdout:
         line = raw_line.rstrip()
         if not line:
@@ -151,6 +159,28 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
 
         # Always forward to GUI log
         log(line)
+
+        # Detect start of a failure block: "_______ test_TC_SIGNUP_001[chromium] _______"
+        failure_header = re.search(r'_{3,}\s+test_(TC_\w+)', line)
+        if failure_header:
+            # Save previous error if any
+            if current_error_tc and error_buffer:
+                error_details[current_error_tc] = "\n".join(error_buffer)
+            current_error_tc = failure_header.group(1).replace("_", "-")
+            error_buffer = []
+            capturing_error = True
+            continue
+
+        if capturing_error:
+            # Stop capturing at the next test result or summary section
+            if "PASSED" in line or "FAILED" in line or "short test summary" in line or "=====" in line:
+                if current_error_tc and error_buffer:
+                    error_details[current_error_tc] = "\n".join(error_buffer)
+                capturing_error = False
+                current_error_tc = None
+                error_buffer = []
+            else:
+                error_buffer.append(line)
 
         # Parse for test results
         if " PASSED" in line:
@@ -166,7 +196,25 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
             tc_id = extract_tc_id(line)
             if tc_id:
                 cps = _read_checkpoints(results_dir, tc_id)
-                emit({"event": "tc_result", "tc_id": tc_id, "status": "FAIL", "duration": 0, "checkpoints": cps})
+                # Find trace and screenshot artifacts for this test
+                artifacts = _find_test_artifacts(ats_root, tc_id)
+                error_msg = error_details.get(tc_id, "")
+                # Extract the core error message (last E line)
+                short_error = ""
+                for err_line in error_msg.split("\n"):
+                    if err_line.strip().startswith("E "):
+                        short_error = err_line.strip()[2:].strip()
+                emit({
+                    "event": "tc_result",
+                    "tc_id": tc_id,
+                    "status": "FAIL",
+                    "duration": 0,
+                    "checkpoints": cps,
+                    "error_message": short_error,
+                    "error_details": error_msg,
+                    "trace_path": artifacts.get("trace"),
+                    "screenshot_path": artifacts.get("screenshot"),
+                })
             emit({"event": "progress", "passed": passed, "failed": failed, "skipped": skipped, "total": total})
 
         elif " SKIPPED" in line:
@@ -212,7 +260,7 @@ def extract_tc_id(line):
       tests/flows/catalog/test_catalog.py::test_TC_CATALOG_001_page_loads[chromium] PASSED
     Returns: TC-CATALOG-001
     """
-    match = re.search(r'test_(TC_\w+?)_', line)
+    match = re.search(r'(TC_[A-Z]+_\d+)', line)
     if match:
         # Convert TC_CATALOG_001 back to TC-CATALOG-001
         return match.group(1).replace("_", "-")
@@ -232,6 +280,40 @@ def _read_checkpoints(results_dir, tc_id):
         except Exception:
             pass
     return []
+
+
+def _find_test_artifacts(ats_root, tc_id):
+    """Find trace.zip and screenshot.png for a failed test in test-results/.
+
+    pytest-playwright saves artifacts in directories like:
+      test-results/test-TC-SIGNUP-001-chromium/trace.zip
+      test-results/test-TC-SIGNUP-001-chromium/test-failed-1.png
+    """
+    artifacts = {}
+    test_results_dir = os.path.join(ats_root, "test-results")
+    if not os.path.exists(test_results_dir):
+        return artifacts
+
+    # TC-SIGNUP-001 -> TC-SIGNUP-001 (search in folder names)
+    underscored = tc_id.replace("-", "_")
+    for entry in os.listdir(test_results_dir):
+        entry_path = os.path.join(test_results_dir, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        # Match folder name containing the TC ID (underscored or hyphenated)
+        if underscored.lower() in entry.lower() or tc_id.lower() in entry.lower():
+            # Look for trace
+            trace_path = os.path.join(entry_path, "trace.zip")
+            if os.path.exists(trace_path):
+                artifacts["trace"] = trace_path
+            # Look for screenshots (test-failed-1.png pattern)
+            for f in os.listdir(entry_path):
+                if f.endswith(".png"):
+                    artifacts["screenshot"] = os.path.join(entry_path, f)
+                    break
+            break
+
+    return artifacts
 
 
 def main():

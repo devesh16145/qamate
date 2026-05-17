@@ -405,6 +405,7 @@ def generate_from_review(payload, ats_root):
             "description": description,
             "preconditions": preconditions,
             "expected_result": expected_result,
+            "steps": steps,
             "assertions": assertions,
             "criteria": criteria,
         }
@@ -442,13 +443,38 @@ def generate_from_review(payload, ats_root):
 
     # Generate test lines
     test_lines = []
+    prev_raw = ""
     for step in steps:
         sid = step["id"]
         stype = step.get("type", "other")
         raw = step.get("rawLine", "")
         desc = step.get("targetDescription", "")
 
-        # Replace hardcoded values with tc_data references
+        # ── Filter junk actions recorded by accident ──
+        # Media keys (volume, play/pause)
+        if stype == "press" and step.get("value") in [
+            "AudioVolumeMute", "AudioVolumeDown", "AudioVolumeUp",
+            "MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious",
+        ]:
+            continue
+        # CapsLock presses — redundant since fill() already has correct cased text
+        if stype == "press" and step.get("value") == "CapsLock":
+            continue
+        # Undo (Ctrl+Z) — mistakes during recording, not intentional test steps
+        if stype == "press" and step.get("value") == "ControlOrMeta+z":
+            continue
+        # Skip consecutive duplicate actions (e.g. double-clicking same element)
+        if raw and raw == prev_raw and stype in ("click", "check"):
+            continue
+        prev_raw = raw
+
+        # ── Use raw strings for Tailwind CSS locators ──
+        if 'locator("' in raw:
+            raw = raw.replace('locator("', 'locator(r"')
+        elif "locator('" in raw:
+            raw = raw.replace("locator('", "locator(r'")
+
+        # ── Replace hardcoded values with tc_data references ──
         if stype in ("fill", "type") and step.get("varName"):
             var_name = step["varName"]
             if stype == "fill":
@@ -464,30 +490,58 @@ def generate_from_review(payload, ats_root):
                     raw,
                 )
 
-        # Navigate URLs: replace base_url if applicable
+        # ── Navigate URLs: replace base_url if applicable ──
         if stype == "navigate":
             raw_url_match = re.search(r'\.goto\((["\'])(.*?)\1\)', raw)
             if raw_url_match:
+                quote = raw_url_match.group(1)
                 full_url = raw_url_match.group(2)
                 path_match = re.search(r'https?://[^/]+(/.*)', full_url)
                 if path_match:
                     path = path_match.group(1)
-                    raw = raw.replace(full_url, f'base_url + "{path}"')
+                    if "admin" in full_url:
+                        raw = raw.replace(f'{quote}{full_url}{quote}', f'admin_url + "{path}"')
+                    else:
+                        raw = raw.replace(f'{quote}{full_url}{quote}', f'base_url + "{path}"')
 
-        # Comment
+        # ── Selective force=True — only for elements with known overlay patterns ──
+        if stype in ("click", "check", "dblclick"):
+            target = step.get("target", "")
+            # Force only for checkboxes and Tailwind styled overlays (.peer class)
+            needs_force = (
+                'checkbox' in target.lower()
+                or '.peer' in target
+                or 'role="checkbox"' in target
+                or '.check(' in raw
+            )
+            if needs_force:
+                raw = raw.replace('.click()', '.click(force=True)')
+                raw = raw.replace('.check()', '.check(force=True)')
+                raw = raw.replace('.dblclick()', '.dblclick(force=True)')
+
+        # ── Comment ──
         test_lines.append(f"    # Step {sid}: {_step_comment(stype, desc, step.get('value', ''))}")
 
-        # Generate code for scroll steps
+        # ── Generate code ──
         if stype == "scroll":
             px = step.get("value", "500")
             test_lines.append(f"    page.mouse.wheel(0, {px})")
-            test_lines.append("    page.wait_for_timeout(1500)")
+            test_lines.append("    page.wait_for_timeout(500)")
+        elif stype == "navigate":
+            test_lines.append(f"    {raw}")
+            test_lines.append('    page.wait_for_load_state("networkidle")')
         else:
+            # For CSS-locator elements, scroll into view first (handles sticky footers)
+            if 'locator(' in raw and stype in ("click", "fill", "check"):
+                locator_expr = raw.strip().split(".click(")[0].split(".fill(")[0].split(".check(")[0]
+                test_lines.append(f"    {locator_expr}.scroll_into_view_if_needed()")
+
             test_lines.append(f"    {raw}")
 
-            # Stability wait after interactive actions
-            if stype in ("fill", "type", "click", "select", "dblclick", "check", "press"):
-                test_lines.append("    page.wait_for_timeout(1000)")
+            # Smart waits: only where truly needed
+            if stype in ("click", "dblclick", "check", "select"):
+                test_lines.append("    page.wait_for_timeout(500)")
+            # fill/type/press: no wait — typing doesn't cause page loads
 
         # Per-step assertions
         for a in assertions_by_step.get(sid, []):
@@ -496,6 +550,11 @@ def generate_from_review(payload, ats_root):
             test_lines.append(f"    # Verify: {a_desc}")
             for a_line in a_code.split('\n'):
                 test_lines.append(f"    {a_line}")
+
+    # Final wait before ending the test
+    test_lines.append("")
+    test_lines.append("    # ── Final wait before closing ──")
+    test_lines.append("    page.wait_for_timeout(2000)")
 
     # Success/Failure criteria at the end
     if criteria:
@@ -513,15 +572,18 @@ def generate_from_review(payload, ats_root):
     func_name = f"test_{underscored_id}"
 
     func_code = f'\n\n@pytest.mark.tc("{tc_id}")\n'
-    func_code += f'def {func_name}(page: Page, tc_data, base_url):\n'
+    func_code += f'def {func_name}(page: Page, tc_data, base_url, admin_url, checkpoints):\n'
     docstring = f'    """{description}'
     if preconditions:
         docstring += f'\n\n    Preconditions: {preconditions}'
     if expected_result:
         docstring += f'\n\n    Expected Result: {expected_result}'
     docstring += '\n    """'
-    func_code += docstring + '\n'
-    func_code += "\n".join(test_lines) + "\n"
+    
+    full_func = func_code + docstring + "\n" + "\n".join(test_lines)
+    
+    # Register that the main flow passed
+    full_func += "\n    checkpoints.mark_passed(\"Flow executed successfully\")\n"
 
     # Write to test file
     test_py = os.path.join(flow_dir, f"test_{flow_id}.py")
@@ -536,17 +598,17 @@ def generate_from_review(payload, ats_root):
     if f"def {func_name}" in existing:
         # Replace existing function using a robust pattern
         pattern = (
-            r'(\\n\\n@pytest\\.mark\\.tc\\("' + re.escape(tc_id) +
-            r'"\\)\\ndef ' + re.escape(func_name) +
-            r'\(.*?)(?=\\n\\n@pytest\\.mark|\\Z)'
+            r'(\n\n@pytest\.mark\.tc\("' + re.escape(tc_id) +
+            r'"\)\ndef ' + re.escape(func_name) +
+            r'\(.*?)(?=\n\n@pytest\.mark|\Z)'
         )
-        new_func = func_code.rstrip()
+        new_func = full_func.rstrip()
         existing = re.sub(pattern, new_func, existing, flags=re.DOTALL)
         with open(test_py, "w", encoding="utf-8") as f:
             f.write(existing)
     else:
         with open(test_py, "a", encoding="utf-8") as f:
-            f.write(func_code)
+            f.write(full_func)
 
     # Save test data
     data_file = os.path.join(flow_dir, "test_data.json")
@@ -571,7 +633,7 @@ def generate_from_review(payload, ats_root):
             except Exception:
                 pass
 
-    tc_entry = {"tc_id": tc_id, "description": description}
+    tc_entry = {"tc_id": tc_id, "description": description, "steps": steps}
     if preconditions:
         tc_entry["preconditions"] = preconditions
     if expected_result:
