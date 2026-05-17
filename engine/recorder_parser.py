@@ -606,6 +606,14 @@ def generate_from_review(payload, ats_root):
                 locator_expr = raw.strip().split(".click(")[0].split(".fill(")[0].split(".check(")[0]
                 test_lines.append(f"    {locator_expr}.scroll_into_view_if_needed()")
 
+            # Replace hardcoded file paths in set_input_files with test fixture
+            if 'set_input_files(' in raw:
+                raw = re.sub(
+                    r'\.set_input_files\((["\']).*?\1\)',
+                    '.set_input_files(TEST_UPLOAD_IMAGE)',
+                    raw,
+                )
+
             test_lines.append(f"    {raw}")
 
             # Smart waits: only where truly needed
@@ -660,7 +668,9 @@ def generate_from_review(payload, ats_root):
     if not os.path.exists(test_py):
         with open(test_py, "w", encoding="utf-8") as f:
             f.write(f'"""{flow_id.replace("_", " ").title()} flow."""\n\n')
-            f.write("import re\nimport pytest\nfrom playwright.sync_api import expect, Page\n\n")
+            f.write("import re\nimport os\nimport pytest\nfrom playwright.sync_api import expect, Page\n\n")
+            f.write('# Default test image for all file uploads\n')
+            f.write('TEST_UPLOAD_IMAGE = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures", "test_upload.png")\n\n')
 
     with open(test_py, "r", encoding="utf-8") as f:
         existing = f.read()

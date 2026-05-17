@@ -5,8 +5,12 @@ Record a flow in the app, review steps, add assertions, and save.
 """
 
 import re
+import os
 import pytest
 from playwright.sync_api import expect, Page
+
+# Default test image for all file uploads
+TEST_UPLOAD_IMAGE = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures", "test_upload.png")
 
 
 @pytest.mark.tc("TC-SIGNUP-001")
@@ -158,17 +162,17 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     page.locator(r"div").filter(has_text=re.compile(r"^Click to Upload PANMax file size 5MB$")).first.click()
     page.wait_for_timeout(500)
     # Step 59: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 60: Click Text "Max file size 5MB"
     page.get_by_text("Max file size 5MB").first.click()
     page.wait_for_timeout(500)
     # Step 61: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 62: Click Text "Click to Upload Brand Logo"
     page.get_by_text("Click to Upload Brand Logo").click()
     page.wait_for_timeout(500)
     # Step 63: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 64: Click Textbox "Brand Name *"
     page.get_by_role("textbox", name="Brand Name *").click()
     page.wait_for_timeout(500)
@@ -178,7 +182,7 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     page.get_by_text("Upload GST Certificate").first.click()
     page.wait_for_timeout(500)
     # Step 68: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 69: Double-click name")
     page.locator(r"#poc-name").dblclick()
     page.wait_for_timeout(500)
@@ -210,7 +214,7 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     page.get_by_text("Upload GST Certificate").first.click()
     page.wait_for_timeout(500)
     # Step 78: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 79: Click 164097")
     page.locator(r"#poc-name-164097").scroll_into_view_if_needed()
     page.locator(r"#poc-name-164097").click()
@@ -230,12 +234,12 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     page.locator(r"div").filter(has_text=re.compile(r"^Upload GST CertificateMax file size 5MB$")).first.click()
     page.wait_for_timeout(500)
     # Step 84: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 85: Click Text "Upload GST Certificate"
     page.get_by_text("Upload GST Certificate").click()
     page.wait_for_timeout(500)
     # Step 86: page.get_by_role("tabpanel", name="Basic Info").set_input_fi
-    page.get_by_role("tabpanel", name="Basic Info").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Basic Info").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 87: Click 164098")
     page.locator(r"#poc-name-164098").scroll_into_view_if_needed()
     page.locator(r"#poc-name-164098").click()
@@ -326,12 +330,12 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     page.get_by_text("Click to Upload License for").click()
     page.wait_for_timeout(500)
     # Step 116: page.get_by_role("tabpanel", name="Compliance").set_input_fi
-    page.get_by_role("tabpanel", name="Compliance").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Compliance").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 117: Click Text "Max file size 5MB"
     page.get_by_text("Max file size 5MB").click()
     page.wait_for_timeout(500)
     # Step 118: page.get_by_role("tabpanel", name="Compliance").set_input_fi
-    page.get_by_role("tabpanel", name="Compliance").set_input_files("ChatGPT Image May 14, 2026, 02_31_36 PM.png")
+    page.get_by_role("tabpanel", name="Compliance").set_input_files(TEST_UPLOAD_IMAGE)
     # Step 119: Click YY")
     page.get_by_role("button", name="calendar DD/MM/YY").click()
     page.wait_for_timeout(500)
