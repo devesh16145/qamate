@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tdVariantSelect = document.getElementById('td-variant-select');
     const tdVariantAdd = document.getElementById('td-variant-add');
     const tdVariantDup = document.getElementById('td-variant-dup');
+    const tdVariantRen = document.getElementById('td-variant-ren');
     const tdVariantDel = document.getElementById('td-variant-del');
     let activeVariantFlow = null;
     let activeVariantTcId = null;
@@ -506,6 +507,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             userIndex: parseInt(userSelect.value) || 0,
             sellerUserIndex: parseInt(userSelect.value) || 0,
             adminUserIndex: parseInt(adminUserSelect.value) || 0,
+            variant: selectedTCs.length === 1 ? activeVariantName : null,
         };
 
         try {
@@ -1403,41 +1405,95 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadVariantData(e.target.value);
     });
 
+    // Helper to prompt for variant name inline
+    function promptVariantName(placeholder, callback) {
+        tdStatus.innerHTML = '';
+        const wrapper = document.createElement('span');
+        wrapper.innerHTML = `Name: <input id="td-variant-name-input" type="text" placeholder="${placeholder}" style="background:#FAFAFA;border:2px solid #1A1D23;color:#1A1D23;padding:2px 6px;border-radius:8px;font-size:11px;width:100px;outline:none;"> <button style="background:#16a34a;border:2px solid #1A1D23;color:white;padding:2px 8px;border-radius:8px;font-size:10px;cursor:pointer;">OK</button> <button style="background:#FAFAFA;border:2px solid #1A1D23;color:#4A4D55;padding:2px 8px;border-radius:8px;font-size:10px;cursor:pointer;">Cancel</button>`;
+        tdStatus.appendChild(wrapper);
+        const nameInput = document.getElementById('td-variant-name-input');
+        nameInput.focus();
+
+        const okBtn = wrapper.querySelector('button:first-of-type');
+        const cancelBtn = wrapper.querySelector('button:last-of-type');
+
+        const submit = () => {
+            const name = nameInput.value.trim();
+            if (name) {
+                tdStatus.innerHTML = '';
+                callback(name);
+            }
+        };
+
+        okBtn.onclick = submit;
+        nameInput.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+        cancelBtn.onclick = () => { tdStatus.innerHTML = ''; };
+    }
+
     // New variant
     tdVariantAdd.addEventListener('click', async () => {
         if (!activeVariantFlow || !activeVariantTcId) return;
-        const name = prompt('Variant name (e.g. negative, empty-fields, invalid-mrp):');
-        if (!name || !name.trim()) return;
-        const res = await window.ats.addTcVariant({
-            flowId: activeVariantFlow, tcId: activeVariantTcId,
-            variantName: name.trim(), copyFrom: activeVariantName
+        promptVariantName('new variant', async (name) => {
+            const res = await window.ats.addTcVariant({
+                flowId: activeVariantFlow, tcId: activeVariantTcId,
+                variantName: name, copyFrom: activeVariantName
+            });
+            if (res.success) {
+                activeVariants = res.variants;
+                showVariantBar(Object.keys(activeVariants));
+                tdVariantSelect.value = name;
+                loadVariantData(name);
+                addLog(`Variant "${name}" created for ${activeVariantTcId}`, 'system');
+            } else {
+                setTdStatus('Failed: ' + (res.error || 'Unknown'), 'error');
+            }
         });
-        if (res.success) {
-            activeVariants = res.variants;
-            showVariantBar(Object.keys(activeVariants));
-            tdVariantSelect.value = name.trim();
-            loadVariantData(name.trim());
-            addLog(`Variant "${name.trim()}" created for ${activeVariantTcId}`, 'system');
-        } else {
-            alert('Failed: ' + (res.error || 'Unknown'));
-        }
     });
 
     // Duplicate variant
     tdVariantDup.addEventListener('click', async () => {
         if (!activeVariantFlow || !activeVariantTcId || !activeVariantName) return;
-        const name = activeVariantName + '-copy';
-        const res = await window.ats.addTcVariant({
-            flowId: activeVariantFlow, tcId: activeVariantTcId,
-            variantName: name, copyFrom: activeVariantName
+        promptVariantName(activeVariantName + '-copy', async (name) => {
+            const res = await window.ats.addTcVariant({
+                flowId: activeVariantFlow, tcId: activeVariantTcId,
+                variantName: name, copyFrom: activeVariantName
+            });
+            if (res.success) {
+                activeVariants = res.variants;
+                showVariantBar(Object.keys(activeVariants));
+                tdVariantSelect.value = name;
+                loadVariantData(name);
+                addLog(`Variant "${name}" duplicated from "${activeVariantName}"`, 'system');
+            } else {
+                setTdStatus('Failed: ' + (res.error || 'Unknown'), 'error');
+            }
         });
-        if (res.success) {
-            activeVariants = res.variants;
-            showVariantBar(Object.keys(activeVariants));
-            tdVariantSelect.value = name;
-            loadVariantData(name);
-            addLog(`Variant "${name}" duplicated from "${activeVariantName}"`, 'system');
-        }
+    });
+
+    // Rename variant
+    tdVariantRen.addEventListener('click', async () => {
+        if (!activeVariantFlow || !activeVariantTcId || !activeVariantName) return;
+        promptVariantName(activeVariantName, async (newName) => {
+            if (newName === activeVariantName) return;
+            // Add new variant copied from old, then delete old
+            const addRes = await window.ats.addTcVariant({
+                flowId: activeVariantFlow, tcId: activeVariantTcId,
+                variantName: newName, copyFrom: activeVariantName
+            });
+            if (addRes.success) {
+                await window.ats.deleteTcVariant({
+                    flowId: activeVariantFlow, tcId: activeVariantTcId, variantName: activeVariantName
+                });
+                activeVariants = addRes.variants;
+                delete activeVariants[activeVariantName];
+                showVariantBar(Object.keys(activeVariants));
+                tdVariantSelect.value = newName;
+                loadVariantData(newName);
+                addLog(`Variant renamed to "${newName}"`, 'system');
+            } else {
+                setTdStatus('Failed: ' + (addRes.error || 'Unknown'), 'error');
+            }
+        });
     });
 
     // Delete variant

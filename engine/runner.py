@@ -32,7 +32,7 @@ def log(message):
 
 
 def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec_mode="sequential",
-              seller_user_index=None, admin_user_index=None):
+              seller_user_index=None, admin_user_index=None, variant=None):
     """Execute selected test cases via pytest subprocess."""
     start_time = time.time()
 
@@ -112,6 +112,10 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
 
     # Execution mode (sequential / parallel)
     test_env["ATS_EXEC_MODE"] = exec_mode
+
+    # Target variant (if single TC and single variant selected)
+    if variant:
+        test_env["ATS_VARIANT"] = variant
 
     # ── Run pytest ──
     try:
@@ -347,6 +351,7 @@ def main():
             user_index = data.get("userIndex", 0)
             seller_user_index = data.get("sellerUserIndex", user_index)
             admin_user_index = data.get("adminUserIndex", 0)
+            variant = data.get("variant", None)
             exec_mode = data.get("execMode", "sequential")
 
             if not tc_ids:

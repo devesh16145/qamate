@@ -165,6 +165,7 @@ ipcMain.handle('run-tests', async (event, options) => {
     userIndex: options.userIndex ?? 0,
     sellerUserIndex: options.sellerUserIndex ?? options.userIndex ?? 0,
     adminUserIndex: options.adminUserIndex ?? 0,
+    variant: options.variant,
     ats_root: __dirname,
   });
 
