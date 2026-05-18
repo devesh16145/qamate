@@ -256,6 +256,132 @@ def _check_no_page_errors(page, context_label=""):
 
 ---
 
+## 12. Tailwind Checkbox Selection — Target `.peer`, NOT `[role=checkbox]`
+
+The Agrim app's checkbox UI uses Tailwind's `peer` pattern: a `<input type=checkbox>` with `display:none` (or 0×0 dimensions) plus a sibling `.peer` div that React's `onChange` actually listens to.
+
+**`page.get_by_role("checkbox").click(force=True)` bypasses React's onChange**: Playwright clicks the hidden input via DevTools protocol, but the visible `.peer` overlay never receives the click. The React component doesn't know the box was checked → downstream form state (e.g. "GST selected → mark as head → enable Verify") never propagates.
+
+```python
+# WRONG — bypasses React's onChange handler
+page.get_by_role("checkbox").first.click(force=True)
+
+# CORRECT — clicks the visible overlay React listens to
+page.locator('.flex.gap-2.items-center > .peer').first.click(force=True)
+```
+
+How to identify the right selector: open Chrome DevTools, inspect the visible checkbox, find the parent `<label>` or `<div>` that has the click handler bound. Usually it's `.peer` plus a wrapper class.
+
+**Symptom of getting this wrong:** the click "succeeds" in Playwright but a downstream Verify/Submit button stays `disabled` even after the supposedly-selected state should have enabled it. If that happens, you targeted the hidden input — switch to `.peer`.
+
+---
+
+## 13. Server-Generated Numeric IDs — Use Positional Locators
+
+Recording-time IDs like `#poc-name-164096`, `#poc-contact-164097`, `#license-id-200145` are DB row IDs assigned per signup/PAN. They change every run — clicking those exact IDs at replay time fails.
+
+**Recorder auto-rewrite (in `recorder_parser._rewrite_dynamic_ids`):** any `#prefix-<digits>` locator where the suffix has **3+ digits** is rewritten to `[id^="prefix"].nth(N)` where N is the positional index in the recording. Same `full_id` always maps to the same `.nth(N)` so click+fill on the same field don't drift. Static unique IDs like `#submit-button` are NOT rewritten.
+
+```python
+# Recording captures (brittle — IDs change every run):
+page.locator('#poc-name-164096').fill("TEST_POC_1")
+page.locator('#poc-contact-164096').fill("9999999999")
+
+# Auto-rewritten to (portable across runs):
+page.locator('[id^="poc-name"]').nth(1).fill("TEST_POC_1")
+page.locator('[id^="poc-contact"]').nth(1).fill("9999999999")
+```
+
+If you're hand-editing a test and see hardcoded numeric-suffix IDs, rewrite them yourself.
+
+---
+
+## 14. Dynamic Select-All Loop — `for _i in range(locator.count())`
+
+When the recording captures multiple consecutive `.first/.nth(N)` clicks on the same bare-positional locator (e.g. selecting all GSTINs after PAN verify), `recorder_parser._detect_select_all_runs` collapses them into a count-driven loop that adapts to live page count. **Works for any N: 0, 1, 2, ..., M.**
+
+```python
+# Recording-time (hardcoded for 4-GST PAN):
+page.get_by_role("checkbox").first.click()
+page.get_by_role("checkbox").nth(1).click()
+page.get_by_role("checkbox").nth(2).click()
+page.get_by_role("checkbox").nth(3).click()
+
+# Auto-collapsed at codegen time:
+_checkboxes = page.get_by_role("checkbox")
+for _i in range(_checkboxes.count()):
+    _checkboxes.nth(_i).click(force=True)
+    page.wait_for_timeout(300)
+```
+
+**Detection rule:** any run of consecutive bare-positional `page.get_by_role("checkbox")` clicks (1+ in a row) collapses into a loop. Named checkboxes (`get_by_role("checkbox", name="Terms")`) are NOT collapsed — they target a specific named element.
+
+**Combine with §12 for Tailwind UI:** if `[role=checkbox]` doesn't propagate state to React, swap the base locator to `.peer` overlays:
+```python
+_overlays = page.locator('.flex.gap-2.items-center > .peer')
+for _i in range(_overlays.count()):
+    _overlays.nth(_i).click(force=True)
+    page.wait_for_timeout(300)
+```
+
+---
+
+## 15. `.nth(N)` with Count Guard — Adaptive Positional Button Clicks
+
+Recordings often capture `.nth(N)` clicks for buttons that only render in multi-row scenarios (e.g. "Make Head Branch" — one button per GST row, only shown when 2+ GSTs exist). With 0 or 1 rows in a different test scenario, `.nth(N)` doesn't exist → 10s timeout per attempt.
+
+**Pattern: count-guard + `.last` fallback:**
+```python
+# Recording (brittle — assumes 4 GSTs):
+page.get_by_role("button", name="Make Head Branch").nth(1).click()
+
+# Manual edit (adapts to any non-zero count, no-op if zero):
+_head_btns = page.get_by_role("button", name="Make Head Branch")
+if _head_btns.count() > 0:
+    _head_btns.last.click()
+    page.wait_for_timeout(500)
+# else: implicit no-op (e.g. 1 GST → head is auto-assigned at the row level)
+```
+
+**Important caveat (Agrim signup with 1 GST):** the "Make Head Branch" button doesn't render with 1 GST, but **the GST still needs to be marked as head** for the downstream Verify button to enable. That happens via §12 — clicking the `.peer` overlay on the GST row, not the hidden checkbox. The count-guard correctly skips the button, but you must select the row via the proper overlay or downstream Verify stays disabled.
+
+---
+
+## 16. Signup — OTP Auto-Advance Boxes
+
+OTP digit inputs use long Tailwind class chains like:
+```
+.w-\[42px\].h-\[48px\].text-neutral-6.text-center.text-base.rounded-lg.border...placeholder\:text-neutral-3.undefined
+```
+
+The first OTP digit input has accessibility name `*`; subsequent digits are addressed via `.nth(N)` of the same role+name, or via CSS `:nth-child(N)` locators when recorded.
+
+```python
+page.get_by_role("textbox", name="*").first.fill("1")
+page.get_by_role("textbox", name="*").nth(1).fill("2")
+page.get_by_role("textbox", name="*").nth(2).fill("3")
+# ... up to .nth(5)
+```
+
+**Don't inject heavy work between consecutive OTP `.fill()` calls.** A `page.evaluate(...)`, a `repr(Locator)`, or anything that forces a layout reflow / protocol roundtrip can break React's auto-advance — the next `.fill()` then targets a stale element and times out at 30s.
+
+This is *the* reason the coverage analyzer's pytest plugin (`engine/dom_inspector_plugin.py`) snapshots **after** each action and gates DOM evaluation on URL change — keeping the React commit cycle untouched.
+
+---
+
+## 17. Coverage Analyzer — Observing Tests Without Disturbing Them
+
+The Coverage Modal (right-click a TC → Analyze Coverage) runs the generated `test_<flow>.py` via pytest with `engine/dom_inspector_plugin.py` attached. The plugin monkey-patches `Locator.click/fill/check/...` to record `{action, url, selector}` *after* each call. DOM inventory is evaluated only when the URL changes.
+
+Output: `agrim-ats/results/_coverage/<TC-ID>_latest.json` — fixed-path file overwritten each run, containing a `navigation_map` of every unique page visited with its interactive-element inventory.
+
+**Rules if you extend the plugin:**
+- **Never call `repr(Locator)` in the wrapper.** It walks into `repr(Frame)` → `frame.url` → CDP protocol roundtrip (30–100ms each). That stall breaks timing-sensitive flows like OTP auto-advance and GST head-selection. Use `getattr(self, "_selector", "")` instead.
+- **Delegate first, observe second.** `result = _orig(self, *args, **kwargs)` must run *before* any recording — observation must never delay or reflow before a click fires.
+- **DOM `evaluate` only on URL change.** Forcing a synchronous layout reflow mid-React-commit can corrupt state propagation.
+
+---
+
 ## Quick Reference — Element → Locator Pattern
 
 | Element | Locator |
@@ -270,3 +396,8 @@ def _check_no_page_errors(page, context_label=""):
 | Submit button | `dialog.locator('button:has-text("Request Product")')` |
 | Scroll | `page.mouse.wheel(0, 500)` |
 | Force click | `element.click(force=True)` |
+| Tailwind checkbox (visible) | `page.locator('.flex.gap-2.items-center > .peer').first.click(force=True)` |
+| Dynamic-suffix field | `page.locator('[id^="poc-name"]').nth(N)` |
+| Select-all positional clicks | `for _i in range(_loc.count()): _loc.nth(_i).click(force=True)` |
+| Adaptive positional button | `_btns = page.get_by_role("button", name="X"); _btns.last.click() if _btns.count() > 0 else None` |
+| OTP digit N (Agrim signup) | `page.get_by_role("textbox", name="*").nth(N).fill("digit")` |
