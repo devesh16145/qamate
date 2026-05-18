@@ -449,6 +449,68 @@ ipcMain.handle('save-recording-review', async (event, payload) => {
   });
 });
 
+// ──────────────────────────────────────
+// IPC: Analyze Coverage (replay TC + DOM snapshots → suggestions)
+// ──────────────────────────────────────
+ipcMain.handle('analyze-coverage', async (event, { flowId, tcId, headed, stopTerminal, variant }) => {
+  return new Promise((resolve) => {
+    try {
+      const INSPECTOR_SCRIPT = path.join(__dirname, 'engine', 'dom_inspector.py');
+      const args = [INSPECTOR_SCRIPT, 'analyze', flowId, tcId];
+      if (headed) args.push('--headed');
+      if (stopTerminal) args.push('--stop-terminal');
+      if (variant) args.push('--variant', variant);
+
+      const proc = spawn(VENV_PYTHON, args, {
+        cwd: __dirname,
+        env: { ...process.env, ATS_ROOT: __dirname },
+      });
+
+      let stderrBuf = '';
+      let resultEvent = null;
+
+      proc.stdout.on('data', (chunk) => {
+        const lines = chunk.toString().split('\n');
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.event === 'log') {
+              event.sender.send('analyze-coverage-progress', { message: evt.message });
+            } else if (evt.event === 'result') {
+              resultEvent = evt;
+            } else if (evt.status === 'error') {
+              resultEvent = evt;
+            }
+          } catch (e) {
+            // Non-JSON line — forward as log
+            event.sender.send('analyze-coverage-progress', { message: line });
+          }
+        }
+      });
+
+      proc.stderr.on('data', (d) => { stderrBuf += d.toString(); });
+
+      proc.on('close', (code) => {
+        if (resultEvent) {
+          resolve(resultEvent);
+        } else if (code !== 0) {
+          resolve({ status: 'error', message: `Inspector exited with code ${code}: ${stderrBuf.slice(-400)}` });
+        } else {
+          resolve({ status: 'error', message: 'Inspector finished without emitting a result event' });
+        }
+      });
+
+      proc.on('error', (err) => {
+        resolve({ status: 'error', message: 'Failed to start inspector: ' + err.message });
+      });
+    } catch (err) {
+      resolve({ status: 'error', message: err.message });
+    }
+  });
+});
+
 ipcMain.handle('get-user-stories', async (event, { flowId }) => {
   try {
     const usFile = path.join(__dirname, 'tests', 'flows', flowId, `${flowId}_user_stories.json`);

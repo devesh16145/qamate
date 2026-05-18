@@ -36,6 +36,13 @@ contextBridge.exposeInMainWorld('ats', {
   getTcMeta: (options) => ipcRenderer.invoke('get-tc-meta', options),
   saveTcMeta: (options) => ipcRenderer.invoke('save-tc-meta', options),
   deleteTest: (options) => ipcRenderer.invoke('delete-test', options),
+  // Coverage analyzer
+  analyzeCoverage: (options) => ipcRenderer.invoke('analyze-coverage', options),
+  onAnalyzeProgress: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on('analyze-coverage-progress', handler);
+    return () => ipcRenderer.removeListener('analyze-coverage-progress', handler);
+  },
   // Jira
   saveJiraConfig: (cfg) => ipcRenderer.invoke('save-jira-config', cfg),
   testJiraConnection: () => ipcRenderer.invoke('test-jira-connection'),
