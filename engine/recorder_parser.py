@@ -128,23 +128,113 @@ def _step_comment(stype, desc, value=""):
         return desc[:60]
 
 
-def _detect_select_all_runs(steps):
-    """Pre-scan steps for 3+ consecutive checkbox clicks → collapse into a loop.
+def _rewrite_dynamic_ids(steps):
+    """Rewrite hardcoded server-generated IDs to positional locators.
 
-    When a user clicks checkbox.first, checkbox.nth(1), checkbox.nth(2), ...
-    that's almost always "select all visible checkboxes".  Generating a loop
-    makes the test resilient to different element counts (e.g. different PAN
-    may return 1 GSTIN instead of 5).
+    Recordings often capture IDs like `#poc-name-164096` where the numeric
+    suffix is a DB row id that changes every test run. A recording with N
+    such rows (one per GST/POC/license etc.) hardcodes N specific IDs that
+    won't exist next run.
+
+    Rule: an ID `#prefix(-digits)?` is "dynamic" if it has 3+ trailing digits.
+    For each prefix used in the recording, if ANY occurrence has a dynamic
+    suffix OR the prefix appears 2+ times, rewrite every occurrence (in
+    recording order) to `page.locator('[id^="prefix"]').nth(N)` where N is
+    the positional index.
+
+    This makes the generated test target rows by position rather than DB id,
+    so it works regardless of what ids the backend assigns next time.
+
+    Static single-use IDs (e.g. a unique `#submit-btn`) are NOT rewritten.
+    """
+    ID_LOCATOR_RE = re.compile(r'page\.locator\((r?)(["\'])#([\w-]+)\2\)')
+    DYNAMIC_SUFFIX_RE = re.compile(r'^(.+?)-(\d{3,})$')
+
+    # Pass 1: find every #<id> locator usage across all steps
+    occurrences = []
+    for idx, step in enumerate(steps):
+        raw = step.get("rawLine", "")
+        for m in ID_LOCATOR_RE.finditer(raw):
+            full_id = m.group(3)
+            ds = DYNAMIC_SUFFIX_RE.match(full_id)
+            prefix = ds.group(1) if ds else full_id
+            occurrences.append({
+                "step_idx": idx,
+                "match_str": m.group(0),
+                "prefix": prefix,
+                "full_id": full_id,
+                "has_dynamic": ds is not None,
+            })
+
+    if not occurrences:
+        return steps
+
+    # Decide which prefixes warrant rewriting:
+    #   - any occurrence has dynamic numeric suffix, OR
+    #   - there are 2+ distinct full ids sharing the prefix
+    prefix_dynamic = {}
+    prefix_unique_ids = {}
+    for occ in occurrences:
+        p = occ["prefix"]
+        prefix_dynamic[p] = prefix_dynamic.get(p, False) or occ["has_dynamic"]
+        prefix_unique_ids.setdefault(p, set()).add(occ["full_id"])
+    targets = {p for p in prefix_unique_ids
+               if prefix_dynamic[p] or len(prefix_unique_ids[p]) >= 2}
+
+    if not targets:
+        return steps
+
+    # Pass 2: stable positional index per unique full id (by first-appearance
+    # order in the recording). Same full id → same nth() across all uses.
+    id_to_index = {}        # prefix -> {full_id: index}
+    next_index = {}         # prefix -> next index to assign
+    new_steps = [dict(s) for s in steps]
+    for occ in occurrences:
+        prefix = occ["prefix"]
+        if prefix not in targets:
+            continue
+        bucket = id_to_index.setdefault(prefix, {})
+        if occ["full_id"] not in bucket:
+            bucket[occ["full_id"]] = next_index.get(prefix, 0)
+            next_index[prefix] = next_index.get(prefix, 0) + 1
+        idx_pos = bucket[occ["full_id"]]
+
+        old = occ["match_str"]
+        new = f'page.locator(\'[id^="{prefix}"]\').nth({idx_pos})'
+
+        sidx = occ["step_idx"]
+        if old in new_steps[sidx].get("rawLine", ""):
+            new_steps[sidx]["rawLine"] = new_steps[sidx]["rawLine"].replace(old, new)
+        if new_steps[sidx].get("target") and old in new_steps[sidx]["target"]:
+            new_steps[sidx]["target"] = new_steps[sidx]["target"].replace(old, new)
+
+    return new_steps
+
+
+def _detect_select_all_runs(steps):
+    """Pre-scan steps for ANY consecutive bare-positional checkbox clicks
+    → collapse into a dynamic loop.
+
+    Whenever the recording uses `page.get_by_role("checkbox")` with positional
+    qualifiers (`.first`, `.nth(N)`) — i.e. NOT a named checkbox like
+    get_by_role("checkbox", name="Terms") — it's almost always "select all
+    visible checkboxes". The live count is unknown at test time (e.g. one
+    PAN may return 1 GSTIN, another may return 5, another 0) so we always
+    generate a loop driven by `locator.count()` at runtime.
 
     Returns dict:  step_id → {"action": "loop_start", "base_locator": str, "count": int}
                    step_id → {"action": "loop_skip"}
     """
     def _checkbox_base(step):
-        """If step is a checkbox click, return the base Playwright locator string."""
+        """If step is a positional (un-named) checkbox click, return the
+        base Playwright locator string."""
         if step.get("type") not in ("click", "check"):
             return None
         raw = step.get("rawLine", "")
-        # Match:  page.get_by_role("checkbox")  or  page.get_by_role('checkbox')
+        # Match the bare-positional form only:
+        #   page.get_by_role("checkbox") — followed by .first/.nth(...)/etc.
+        # Named form like page.get_by_role("checkbox", name="Terms") is NOT
+        # matched because the closing paren follows the name argument.
         m = re.search(r'(page\.\S*get_by_role\(["\']checkbox["\']\))', raw)
         if m:
             return m.group(1)
@@ -158,7 +248,7 @@ def _detect_select_all_runs(steps):
             i += 1
             continue
 
-        # Count consecutive checkbox clicks with the same base locator
+        # Count consecutive positional checkbox clicks with the same base
         j = i + 1
         while j < len(steps):
             if _checkbox_base(steps[j]) != base:
@@ -166,7 +256,10 @@ def _detect_select_all_runs(steps):
             j += 1
 
         run_length = j - i
-        if run_length >= 3:
+        # Collapse ANY run of bare positional checkbox clicks (>=1) — even a
+        # single recorded click is treated as "select all", because positional
+        # checkbox locators are inherently dynamic.
+        if run_length >= 1:
             runs[steps[i]["id"]] = {
                 "action": "loop_start",
                 "base_locator": base,
@@ -481,6 +574,11 @@ def generate_from_review(payload, ats_root):
             "editMode": True,
         }
 
+    # ── Rewrite hardcoded server-generated IDs (#poc-name-164096 etc.) into
+    # positional locators ([id^="poc-name"].nth(N)) so the test is portable
+    # across runs where backend assigns different DB row ids.
+    steps = _rewrite_dynamic_ids(steps)
+
     # Build data dict from steps
     data_dict = {}
     for step in steps:
@@ -493,7 +591,7 @@ def generate_from_review(payload, ats_root):
         sid = a.get("afterStep", 0)
         assertions_by_step.setdefault(sid, []).append(a)
 
-    # ── Pre-detect "select all" patterns (3+ consecutive checkbox clicks → loop) ──
+    # ── Pre-detect select-all positional checkbox runs → dynamic loops ──
     select_all_runs = _detect_select_all_runs(steps)
 
     # Generate test lines

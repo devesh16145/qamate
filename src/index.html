@@ -475,6 +475,56 @@
         </div>
     </div>
 
+    <!-- Coverage Analysis Modal -->
+    <div id="coverage-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 880px;">
+            <div class="modal-header">
+                <h2 id="coverage-modal-title">Coverage Analysis</h2>
+                <button class="close-modal" data-close="coverage-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="coverage-status" style="display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); margin-bottom:14px;">
+                    <span id="coverage-status-icon" style="font-size:16px;">&#x1F50D;</span>
+                    <span id="coverage-status-text" style="font-size:13px; color:var(--text-2);">Ready to analyze.</span>
+                </div>
+                <div id="coverage-options" style="display:flex; gap:14px; padding:10px 0; margin-bottom:10px; font-size:12px; align-items:center; flex-wrap:wrap;">
+                    <label id="coverage-variant-wrap" style="display:none; align-items:center; gap:6px;">
+                        <span style="color:var(--text-2); font-weight:600;">Variant:</span>
+                        <select id="coverage-variant-select" style="padding:4px 8px; font-size:12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); color:var(--text); min-width:140px;"></select>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" id="coverage-headed"> Show browser (headed)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" id="coverage-stop-terminal" checked> Skip final action (safer for destructive flows)
+                    </label>
+                </div>
+                <details id="coverage-log-wrap" style="margin-bottom:12px;">
+                    <summary style="cursor:pointer; font-size:12px; color:var(--text-3); padding:4px 0;">Show live log</summary>
+                    <div id="coverage-log" style="font-family:var(--font-mono,monospace); font-size:11px; padding:8px 12px; background:#000; color:#0f0; border-radius:var(--radius); max-height:140px; overflow-y:auto; margin-top:6px;"></div>
+                </details>
+                <div id="coverage-summary" style="display:none; flex-wrap:wrap; gap:8px; margin-bottom:14px;"></div>
+                <div id="coverage-artifact" style="display:none; padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); margin-bottom:14px; font-size:11px;">
+                    <div style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px; font-weight:700; margin-bottom:3px;">Captured data (point Claude at this file to author new test cases)</div>
+                    <code id="coverage-artifact-path" style="font-size:11px; color:var(--text); word-break:break-all;"></code>
+                    <div style="display:flex; gap:8px; margin-top:6px;">
+                        <button id="coverage-artifact-copy" class="btn" style="font-size:10px; padding:3px 8px;">Copy path</button>
+                        <button id="coverage-artifact-open" class="btn" style="font-size:10px; padding:3px 8px;">Open folder</button>
+                    </div>
+                </div>
+                <div id="coverage-navmap" style="display:flex; flex-direction:column; gap:8px;">
+                    <div style="color:var(--text-3); font-size:13px; text-align:center; padding:30px 0;">
+                        Click <strong>Analyze</strong> to run the test and capture the navigation map.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="coverage-analyze-btn" class="btn-primary">Analyze</button>
+                <button id="coverage-close-btn" class="btn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

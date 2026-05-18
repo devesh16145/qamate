@@ -107,6 +107,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                     <div class="tc-dropdown-item config-data-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">Test Data</div>
                                     <div class="tc-dropdown-item edit-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">Edit Steps</div>
                                     <div class="tc-dropdown-item re-record-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">Re-record</div>
+                                    <div class="tc-dropdown-item analyze-coverage-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}" data-description="${tc.description || ''}">Analyze Coverage</div>
                                     <div class="tc-dropdown-item jira-story-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">Jira Story</div>
                                     <div class="tc-dropdown-item delete-tc-btn" data-tc-id="${tc.tc_id}" data-module="${flow.id}">Delete</div>
                                 </div>
@@ -166,6 +167,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                     document.getElementById('record-modal').classList.remove('hidden');
                 });
             });
+            // Analyze Coverage button listeners — replay TC, snapshot DOM, suggest more tests
+            moduleEl.querySelectorAll('.analyze-coverage-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    openCoverageModal(btn.dataset.module, btn.dataset.tcId, btn.dataset.description || '');
+                });
+            });
+
             // Edit Test button listeners — open review modal with existing assertions/criteria
             moduleEl.querySelectorAll('.edit-tc-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -473,8 +481,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Run Tests ──
     runBtn.addEventListener('click', async () => {
-        const selectedTCs = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
-            .map(cb => cb.dataset.tcId);
+        const selectedTCs = Array.from(flowTree.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(cb => cb.dataset.tcId)
+            .filter(Boolean);
 
         if (selectedTCs.length === 0) {
             addLog('⚠ Please select at least one test case.', 'warn');
@@ -1822,6 +1831,333 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Close dropdown menus when clicking outside
     document.addEventListener('click', () => {
         document.querySelectorAll('.tc-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
+    });
+
+    // ── Coverage Analysis Modal ──
+    const coverageModal = document.getElementById('coverage-modal');
+    const coverageStatusText = document.getElementById('coverage-status-text');
+    const coverageStatusIcon = document.getElementById('coverage-status-icon');
+    const coverageLog = document.getElementById('coverage-log');
+    const coverageSummary = document.getElementById('coverage-summary');
+    const coverageList = document.getElementById('coverage-suggestions-list');
+    const coverageAnalyzeBtn = document.getElementById('coverage-analyze-btn');
+    const coverageHeaded = document.getElementById('coverage-headed');
+    const coverageStopTerminal = document.getElementById('coverage-stop-terminal');
+    const coverageVariantWrap = document.getElementById('coverage-variant-wrap');
+    const coverageVariantSelect = document.getElementById('coverage-variant-select');
+    const coverageNavmap = document.getElementById('coverage-navmap');
+    const coverageLogWrap = document.getElementById('coverage-log-wrap');
+    const coverageArtifactBox = document.getElementById('coverage-artifact');
+    const coverageArtifactPath = document.getElementById('coverage-artifact-path');
+
+    let coverageContext = { flowId: '', tcId: '', desc: '' };
+    let coverageProgressUnsub = null;
+
+    const PRIORITY_COLORS = {
+        high: { bg: '#fde8e8', border: '#e53e3e', label: 'HIGH' },
+        medium: { bg: '#fef5e7', border: '#dd6b20', label: 'MED' },
+        low: { bg: '#edf2f7', border: '#718096', label: 'LOW' },
+    };
+
+    const SUGGESTION_ICONS = {
+        tab_coverage: '&#x1F516;',
+        negative_flow: '&#x1F6AB;',
+        destructive_flow: '&#x26A0;&#xFE0F;',
+        alternate_action: '&#x1F501;',
+        validation: '&#x2728;',
+        input_coverage: '&#x270F;&#xFE0F;',
+        checkbox_coverage: '&#x2611;&#xFE0F;',
+        dropdown_variants: '&#x1F4CB;',
+    };
+
+    async function openCoverageModal(flowId, tcId, desc) {
+        coverageContext = { flowId, tcId, desc };
+        document.getElementById('coverage-modal-title').textContent = `Coverage Analysis — ${tcId}`;
+        coverageStatusIcon.innerHTML = '&#x1F50D;';
+        coverageStatusText.textContent = 'Ready. Click Analyze to run the test and capture the navigation map.';
+        coverageLog.innerHTML = '';
+        coverageLogWrap.removeAttribute('open');
+        coverageSummary.style.display = 'none';
+        coverageSummary.innerHTML = '';
+        coverageArtifactBox.style.display = 'none';
+        coverageArtifactPath.textContent = '';
+        coverageNavmap.innerHTML = `<div style="color:var(--text-3); font-size:13px; text-align:center; padding:30px 0;">
+            Click <strong>Analyze</strong> to run the test and capture the navigation map.</div>`;
+        if (coverageList) {
+            coverageList.style.display = 'none';
+            coverageList.innerHTML = '';
+        }
+        coverageAnalyzeBtn.disabled = false;
+        coverageAnalyzeBtn.textContent = 'Analyze';
+        coverageModal.classList.remove('hidden');
+
+        // Populate variant dropdown (hidden if TC has no variants)
+        coverageVariantWrap.style.display = 'none';
+        coverageVariantSelect.innerHTML = '';
+        try {
+            const td = await window.ats.getTcData({ flowId, tcId });
+            if (td && td.isVariant && td.variants && Object.keys(td.variants).length > 0) {
+                const names = Object.keys(td.variants);
+                coverageVariantSelect.innerHTML = names
+                    .map(n => `<option value="${n}">${n}</option>`)
+                    .join('');
+                coverageVariantWrap.style.display = 'inline-flex';
+            }
+        } catch (e) { /* TC has no test data — fine */ }
+    }
+
+    function appendCoverageLog(msg) {
+        const line = document.createElement('div');
+        line.textContent = msg;
+        coverageLog.appendChild(line);
+        coverageLog.scrollTop = coverageLog.scrollHeight;
+    }
+
+    function _escHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+    }
+
+    function _shortenUrl(u) {
+        if (!u) return '(unknown)';
+        try {
+            const url = new URL(u);
+            return url.hostname.replace(/^www\./, '') + (url.pathname === '/' ? '' : url.pathname);
+        } catch (e) {
+            return u.length > 60 ? u.slice(0, 60) + '…' : u;
+        }
+    }
+
+    function renderNavigationMap(navMap, gapsByPage) {
+        if (!navMap || !navMap.pages || navMap.pages.length === 0) {
+            coverageNavmap.innerHTML = `<div style="color:var(--text-3); font-size:13px; text-align:center; padding:24px 0;">No pages were captured. Did the test fail to start?</div>`;
+            return;
+        }
+        const pageCards = navMap.pages.map((p, idx) => {
+            const elCount = (p.elements || []).length;
+            const actCount = (p.actions_on_page || []).length;
+            const pageGaps = (gapsByPage || {})[p.url] || {};
+            const gapCount = Object.values(pageGaps).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
+
+            // Build a compact element inventory grouped by tag/role
+            const byCat = { tabs: [], buttons: [], links: [], inputs: [], other: [] };
+            for (const el of (p.elements || [])) {
+                const label = (el.aria_label || el.text || el.placeholder || el.name || el.id || '').trim();
+                if (!label) continue;
+                if (el.role === 'tab') byCat.tabs.push(label);
+                else if (el.tag === 'button' || el.role === 'button') byCat.buttons.push(label);
+                else if (el.tag === 'a') byCat.links.push(label);
+                else if (el.tag === 'input' || el.tag === 'textarea') byCat.inputs.push(label);
+                else byCat.other.push(label);
+            }
+            const _chips = (arr, color) => arr.slice(0, 14).map(t => `<span style="display:inline-block; padding:2px 7px; margin:2px; border:1px solid var(--border); border-radius:10px; background:${color}; font-size:10.5px; color:var(--text-2);">${_escHtml(t)}</span>`).join('') + (arr.length > 14 ? `<span style="font-size:10.5px; color:var(--text-3);"> +${arr.length - 14} more</span>` : '');
+
+            // Transitions out
+            const tOut = (p.transitions_out || []).slice(0, 5).map(t => `<div style="font-size:11px; color:var(--text-3); margin-top:2px;">→ <code style="font-size:11px;">${_escHtml(_shortenUrl(t.to_url))}</code> via ${_escHtml(t.via_action.slice(0, 60))}</div>`).join('');
+
+            return `<details ${idx === 0 ? 'open' : ''} class="navmap-page" style="border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-1); padding:0; overflow:hidden;">
+                <summary style="padding:10px 12px; cursor:pointer; display:flex; gap:10px; align-items:center; background:var(--surface-2);">
+                    <span style="font-weight:700; color:var(--text); font-size:13px;">${idx + 1}. ${_escHtml(p.title || _shortenUrl(p.url))}</span>
+                    <code style="font-size:11px; color:var(--text-3);">${_escHtml(_shortenUrl(p.url))}</code>
+                    <span style="margin-left:auto; display:flex; gap:6px;">
+                        <span style="font-size:10px; color:var(--text-3);">${actCount} action${actCount !== 1 ? 's' : ''}</span>
+                        <span style="font-size:10px; color:var(--text-3);">·</span>
+                        <span style="font-size:10px; color:var(--text-3);">${elCount} elements</span>
+                        ${gapCount ? `<span style="font-size:10px; padding:1px 6px; background:#fef5e7; color:#dd6b20; border-radius:8px; font-weight:600;">${gapCount} gap${gapCount !== 1 ? 's' : ''}</span>` : ''}
+                    </span>
+                </summary>
+                <div style="padding:10px 12px; border-top:1px solid var(--border);">
+                    ${byCat.tabs.length ? `<div style="margin-bottom:8px;"><span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px; font-weight:700; display:block; margin-bottom:3px;">Tabs (${byCat.tabs.length})</span>${_chips(byCat.tabs, 'var(--surface-2)')}</div>` : ''}
+                    ${byCat.buttons.length ? `<div style="margin-bottom:8px;"><span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px; font-weight:700; display:block; margin-bottom:3px;">Buttons (${byCat.buttons.length})</span>${_chips(byCat.buttons, 'var(--surface-2)')}</div>` : ''}
+                    ${byCat.inputs.length ? `<div style="margin-bottom:8px;"><span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px; font-weight:700; display:block; margin-bottom:3px;">Inputs (${byCat.inputs.length})</span>${_chips(byCat.inputs, 'var(--surface-2)')}</div>` : ''}
+                    ${byCat.links.length ? `<div style="margin-bottom:8px;"><span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px; font-weight:700; display:block; margin-bottom:3px;">Links (${byCat.links.length})</span>${_chips(byCat.links, 'var(--surface-2)')}</div>` : ''}
+                    ${tOut ? `<div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);"><span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px; font-weight:700; display:block; margin-bottom:3px;">Transitions out</span>${tOut}</div>` : ''}
+                </div>
+            </details>`;
+        }).join('');
+
+        coverageNavmap.innerHTML = pageCards;
+    }
+
+    function renderSuggestionsList(suggestions) {
+        if (!suggestions || suggestions.length === 0) {
+            coverageList.innerHTML = `<div style="color:var(--text-3); font-size:13px; text-align:center; padding:30px 0;">&#x2705; No coverage gaps detected.</div>`;
+            return;
+        }
+        const PRI = {
+            high: { bg: '#fde8e8', fg: '#e53e3e', label: 'HIGH' },
+            medium: { bg: '#fef5e7', fg: '#dd6b20', label: 'MED' },
+            low: { bg: '#edf2f7', fg: '#718096', label: 'LOW' },
+        };
+        coverageList.innerHTML = suggestions.map(s => {
+            const p = PRI[s.priority] || PRI.low;
+            return `<div style="border:1px solid var(--border); border-left:3px solid ${p.fg}; border-radius:var(--radius); background:var(--surface-1); padding:10px 12px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:3px;">
+                    <span style="font-size:9px; font-weight:700; padding:2px 6px; border-radius:3px; background:${p.bg}; color:${p.fg};">${p.label}</span>
+                    <span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px;">${_escHtml(s.type.replace(/_/g, ' '))}</span>
+                    ${s.page_url ? `<code style="font-size:10px; color:var(--text-3); margin-left:auto;">${_escHtml(_shortenUrl(s.page_url))}</code>` : ''}
+                </div>
+                <div style="font-size:13px; font-weight:600; color:var(--text); margin-bottom:2px;">${_escHtml(s.title)}</div>
+                <div style="font-size:12px; color:var(--text-2);">${_escHtml(s.description)}</div>
+            </div>`;
+        }).join('');
+    }
+
+    function switchCoverageTab(tab) {
+        document.querySelectorAll('.coverage-tab-btn').forEach(btn => {
+            const active = btn.dataset.tab === tab;
+            btn.style.borderBottom = active ? '2px solid var(--accent,#0066cc)' : '2px solid transparent';
+            btn.style.color = active ? 'var(--text)' : 'var(--text-2)';
+            btn.classList.toggle('active', active);
+        });
+        coverageNavmap.style.display = (tab === 'navmap') ? 'flex' : 'none';
+        coverageList.style.display = (tab === 'suggestions') ? 'flex' : 'none';
+    }
+
+    function renderCoverageSummary(gapsSummary) {
+        coverageSummary.style.display = 'flex';
+        const labels = {
+            unused_tabs: 'Unused tabs',
+            negative_action_buttons: 'Cancel/back buttons',
+            destructive_buttons: 'Destructive actions',
+            alternate_actions: 'Alt actions',
+            unfilled_required_inputs: 'Required empty inputs',
+            unfilled_inputs: 'Optional empty inputs',
+            unused_dropdown_options: 'Dropdowns w/ options',
+            checkboxes_skipped: 'Untoggled checkboxes',
+        };
+        const chips = [];
+        for (const [key, count] of Object.entries(gapsSummary || {})) {
+            if (!count) continue;
+            const label = labels[key] || key;
+            chips.push(`<div style="padding:5px 10px; border:1px solid var(--border); border-radius:14px; background:var(--surface-2); font-size:11px; color:var(--text-2);">
+                <strong style="color:var(--text);">${count}</strong> ${label}
+            </div>`);
+        }
+        coverageSummary.innerHTML = chips.length
+            ? chips.join('')
+            : `<div style="font-size:12px; color:var(--text-3);">No coverage gaps detected.</div>`;
+    }
+
+    function renderCoverageSuggestions(suggestions) {
+        if (!suggestions || suggestions.length === 0) {
+            coverageList.innerHTML = `<div style="color:var(--text-3); font-size:13px; text-align:center; padding:30px 0;">
+                &#x2705; No coverage gaps found. This recording exercises everything visible on the page.</div>`;
+            return;
+        }
+        coverageList.innerHTML = suggestions.map((s, i) => {
+            const pri = PRIORITY_COLORS[s.priority] || PRIORITY_COLORS.low;
+            const icon = SUGGESTION_ICONS[s.type] || '&#x2728;';
+            let extra = '';
+            if (s.type === 'dropdown_variants' && Array.isArray(s.options)) {
+                const opts = s.options.map(o => `<span style="display:inline-block; padding:2px 8px; margin:2px; border:1px solid var(--border); border-radius:10px; background:var(--surface-1); font-size:11px;">${o.label}</span>`).join('');
+                extra = `<div style="margin-top:6px;">${opts}</div>`;
+            }
+            return `<div class="coverage-suggestion" data-idx="${i}" style="display:flex; gap:12px; padding:10px 12px; border-left:3px solid ${pri.border}; border:1px solid var(--border); border-left:3px solid ${pri.border}; border-radius:var(--radius); background:var(--surface-1);">
+                <div style="font-size:20px; line-height:1;">${icon}</div>
+                <div style="flex:1;">
+                    <div style="display:flex; gap:8px; align-items:center; margin-bottom:4px;">
+                        <span style="font-size:9px; font-weight:700; padding:2px 6px; border-radius:3px; background:${pri.bg}; color:${pri.border};">${pri.label}</span>
+                        <span style="font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.5px;">${s.type.replace(/_/g, ' ')}</span>
+                        <span style="font-size:10px; color:var(--text-3);">step ${s.step_id}</span>
+                    </div>
+                    <div style="font-size:13px; font-weight:600; color:var(--text); margin-bottom:3px;">${s.title}</div>
+                    <div style="font-size:12px; color:var(--text-2); line-height:1.4;">${s.description}</div>
+                    ${extra}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    async function runCoverageAnalysis() {
+        if (!coverageContext.tcId) return;
+
+        coverageAnalyzeBtn.disabled = true;
+        coverageAnalyzeBtn.textContent = 'Analyzing…';
+        coverageStatusIcon.innerHTML = '&#x23F3;';
+        const variantLabel = (coverageVariantWrap.style.display !== 'none')
+            ? ` [variant: ${coverageVariantSelect.value}]` : '';
+        coverageStatusText.textContent = `Replaying ${coverageContext.tcId}${variantLabel} — this can take 1–3 minutes…`;
+        coverageLog.style.display = 'block';
+        coverageLog.innerHTML = '';
+        coverageSummary.style.display = 'none';
+        coverageNavmap.innerHTML = '';
+
+        // Subscribe to streaming progress
+        if (coverageProgressUnsub) coverageProgressUnsub();
+        coverageProgressUnsub = window.ats.onAnalyzeProgress((data) => {
+            if (data && data.message) appendCoverageLog(data.message);
+        });
+
+        const selectedVariant = (coverageVariantWrap.style.display !== 'none')
+            ? coverageVariantSelect.value
+            : null;
+
+        try {
+            const res = await window.ats.analyzeCoverage({
+                flowId: coverageContext.flowId,
+                tcId: coverageContext.tcId,
+                headed: coverageHeaded.checked,
+                stopTerminal: coverageStopTerminal.checked,
+                variant: selectedVariant,
+            });
+
+            if (res.status !== 'success') {
+                coverageStatusIcon.innerHTML = '&#x274C;';
+                coverageStatusText.textContent = `Analysis failed: ${res.message || 'Unknown error'}`;
+                addLog(`Coverage analysis failed: ${res.message || 'Unknown error'}`, 'fail');
+            } else {
+                const navMap = res.navigation_map || { pages: [], transitions: [] };
+                const pageCount = (navMap.pages || []).length;
+                const transitionCount = (navMap.transitions || []).length;
+                const driver = res.driver || 'replay';
+                const artifactFile = res.artifact_file || res.snapshot_file || '';
+
+                coverageStatusIcon.innerHTML = pageCount ? '&#x2728;' : '&#x2705;';
+                coverageStatusText.textContent = `Captured ${pageCount} unique page(s), ${transitionCount} transition(s) across ${res.snapshots_count || 0} actions. [driver: ${driver}]`;
+
+                coverageSummary.style.display = 'flex';
+                coverageSummary.innerHTML = [
+                    `<div style="padding:5px 10px; border:1px solid var(--border); border-radius:14px; background:var(--surface-2); font-size:11px;"><strong>${pageCount}</strong> pages</div>`,
+                    `<div style="padding:5px 10px; border:1px solid var(--border); border-radius:14px; background:var(--surface-2); font-size:11px;"><strong>${transitionCount}</strong> transitions</div>`,
+                    `<div style="padding:5px 10px; border:1px solid var(--border); border-radius:14px; background:var(--surface-2); font-size:11px;"><strong>${res.snapshots_count || 0}</strong> actions</div>`,
+                ].join('');
+
+                if (artifactFile) {
+                    coverageArtifactBox.style.display = 'block';
+                    coverageArtifactPath.textContent = artifactFile;
+                    coverageArtifactBox.dataset.path = artifactFile;
+                }
+
+                renderNavigationMap(navMap, {});
+                addLog(`Coverage: ${coverageContext.tcId} → ${pageCount} pages captured. Data at ${artifactFile}`, 'system');
+            }
+        } catch (e) {
+            coverageStatusIcon.innerHTML = '&#x274C;';
+            coverageStatusText.textContent = 'Analysis crashed: ' + e.message;
+            addLog(`Coverage crash: ${e.message}`, 'fail');
+        } finally {
+            if (coverageProgressUnsub) { coverageProgressUnsub(); coverageProgressUnsub = null; }
+            coverageAnalyzeBtn.disabled = false;
+            coverageAnalyzeBtn.textContent = 'Analyze Again';
+        }
+    }
+
+    coverageAnalyzeBtn.addEventListener('click', runCoverageAnalysis);
+    document.getElementById('coverage-close-btn').addEventListener('click', () => coverageModal.classList.add('hidden'));
+    document.querySelector('[data-close="coverage-modal"]')?.addEventListener('click', () => coverageModal.classList.add('hidden'));
+
+    document.getElementById('coverage-artifact-copy')?.addEventListener('click', () => {
+        const p = coverageArtifactBox.dataset.path || '';
+        if (p) {
+            navigator.clipboard.writeText(p).then(() => addLog(`Copied: ${p}`, 'system'));
+        }
+    });
+    document.getElementById('coverage-artifact-open')?.addEventListener('click', () => {
+        const p = coverageArtifactBox.dataset.path || '';
+        if (p) {
+            const folder = p.replace(/[\\\/][^\\\/]+$/, '');
+            window.ats.openFolder(folder);
+        }
     });
 
     // Kick off
