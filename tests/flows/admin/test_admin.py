@@ -127,7 +127,7 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     """Explore orders
     """
     # Step 1: Navigate to Navigate to https://admin-dev.agrim.app/#/login
-    page.goto(admin_url + "/#/login")
+    page.goto(admin_url + "#/login")
     page.wait_for_load_state("networkidle")
     # Step 2: Enter "amit.dalal@agrim.app" in Textbox "Username"
     page.get_by_role("textbox", name="Username").fill(tc_data.get("input_1", ""))
