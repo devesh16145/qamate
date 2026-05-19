@@ -1,1 +1,854 @@
-[]
+[
+    {
+        "tc_id": "TC-ADMIN-EXPLORE-ORDERS",
+        "description": "Explore orders",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://admin-dev.agrim.app/#/login\")",
+                "type": "navigate",
+                "target": "https://admin-dev.agrim.app/#/login",
+                "targetDescription": "Navigate to https://admin-dev.agrim.app/#/login",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Username\").fill(\"amit.dalal@agrim.app\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Username\")",
+                "targetDescription": "Textbox \"Username\"",
+                "value": "amit.dalal@agrim.app",
+                "varName": "input_1"
+            },
+            {
+                "id": 3,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Password\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Password\")",
+                "targetDescription": "Textbox \"Password\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 4,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Password\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Password\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Password\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 5,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Password\").fill(\"A\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Password\")",
+                "targetDescription": "Textbox \"Password\"",
+                "value": "A",
+                "varName": "input_2"
+            },
+            {
+                "id": 6,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Password\").press(\"CapsLock\")",
+                "type": "press",
+                "target": "page.get_by_role(\"textbox\", name=\"Password\")",
+                "targetDescription": "Press \"CapsLock\" on Textbox \"Password\"",
+                "value": "CapsLock",
+                "varName": ""
+            },
+            {
+                "id": 7,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Password\").fill(\"Amit@12345\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Password\")",
+                "targetDescription": "Textbox \"Password\"",
+                "value": "Amit@12345",
+                "varName": "input_3"
+            },
+            {
+                "id": 8,
+                "rawLine": "page.get_by_role(\"button\", name=\"Sign in\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Sign in\")",
+                "targetDescription": "Button \"Sign in\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 9,
+                "rawLine": "page.get_by_role(\"button\", name=\"user icon Purchase orders\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"user icon Purchase orders\")",
+                "targetDescription": "Button \"user icon Purchase orders\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 10,
+                "rawLine": "page.get_by_role(\"menuitem\", name=\"All Orders\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"menuitem\", name=\"All Orders\")",
+                "targetDescription": "Menuitem \"All Orders\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 11,
+                "rawLine": "page.locator(\".align-items-center > div > div:nth-child(3) > img\").click()",
+                "type": "click",
+                "target": "child(3) > img\")",
+                "targetDescription": "child(3) > img\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 12,
+                "rawLine": "page.locator(\".MuiFormControl-root\").first.click()",
+                "type": "click",
+                "target": "root\").first",
+                "targetDescription": "root\").first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 13,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Search\").first.fill(\"m&\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Search\").first",
+                "targetDescription": "Textbox \"Search\"",
+                "value": "m&",
+                "varName": "input_4"
+            },
+            {
+                "id": 14,
+                "rawLine": "page.get_by_role(\"menuitem\", name=\"M&M_Brand1\").dblclick()",
+                "type": "dblclick",
+                "target": "M_Brand1\")",
+                "targetDescription": "M_Brand1\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 15,
+                "rawLine": "page.locator(\".align-items-center > div:nth-child(3) > div\").first.click()",
+                "type": "click",
+                "target": "child(3) > div\").first",
+                "targetDescription": "child(3) > div\").first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 16,
+                "rawLine": "page.get_by_role(\"menuitem\", name=\"ODISHA\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"menuitem\", name=\"ODISHA\")",
+                "targetDescription": "Menuitem \"ODISHA\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 17,
+                "rawLine": "page.locator(\".jss7 > .d-flex > div > div:nth-child(2) > div\").first.click()",
+                "type": "click",
+                "target": "child(2) > div\").first",
+                "targetDescription": "child(2) > div\").first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 18,
+                "rawLine": "page.get_by_text(\"CUTTACK WH\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"CUTTACK WH\")",
+                "targetDescription": "Text \"CUTTACK WH\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 19,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Load Type$\")).nth(1).click()",
+                "type": "click",
+                "target": "\")).nth(1)",
+                "targetDescription": "\")).nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 20,
+                "rawLine": "page.get_by_text(\"Full Load\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Full Load\")",
+                "targetDescription": "Text \"Full Load\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 21,
+                "rawLine": "page.get_by_role(\"img\", name=\"Filled Checkbox\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"img\", name=\"Filled Checkbox\")",
+                "targetDescription": "Img \"Filled Checkbox\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 22,
+                "rawLine": "page.get_by_text(\"PO Type\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"PO Type\").nth(1)",
+                "targetDescription": "Text \"PO Type\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 23,
+                "rawLine": "page.get_by_role(\"menuitem\", name=\"Inventory Purchase\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"menuitem\", name=\"Inventory Purchase\")",
+                "targetDescription": "Menuitem \"Inventory Purchase\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 24,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Type of Inventory Purchase$\")).nth(1).click()",
+                "type": "click",
+                "target": "\")).nth(1)",
+                "targetDescription": "\")).nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 25,
+                "rawLine": "page.get_by_role(\"menuitem\", name=\"Business Purchase\", exact=True).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"menuitem\", name=\"Business Purchase\", exact=True)",
+                "targetDescription": "Menuitem \"Business Purchase\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 26,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Search\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Search\").nth(1)",
+                "targetDescription": "Textbox \"Search\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 27,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Search\").nth(1).fill(\"test\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Search\").nth(1)",
+                "targetDescription": "Textbox \"Search\"",
+                "value": "test",
+                "varName": "input_5"
+            },
+            {
+                "id": 28,
+                "rawLine": "page.get_by_text(\"Testing Brand Saloniiiiii (HY\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Testing Brand Saloniiiiii (HY\")",
+                "targetDescription": "Text \"Testing Brand Saloniiiiii (HY\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 29,
+                "rawLine": "page.locator(\"input[name=\\\"quantity\\\"]\").click()",
+                "type": "click",
+                "target": "\"]\")",
+                "targetDescription": "\"]\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 30,
+                "rawLine": "page.locator(\"input[name=\\\"quantity\\\"]\").fill(\"7\")",
+                "type": "fill",
+                "target": "\"]\")",
+                "targetDescription": "\"]\")",
+                "value": "7",
+                "varName": "input_6"
+            },
+            {
+                "id": 31,
+                "rawLine": "page.get_by_text(\"Add New Row\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Add New Row\")",
+                "targetDescription": "Text \"Add New Row\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 32,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Search\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"textbox\", name=\"Search\").nth(2)",
+                "targetDescription": "Textbox \"Search\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 33,
+                "rawLine": "page.get_by_role(\"textbox\", name=\"Search\").nth(2).fill(\"test\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"textbox\", name=\"Search\").nth(2)",
+                "targetDescription": "Textbox \"Search\"",
+                "value": "test",
+                "varName": "input_7"
+            },
+            {
+                "id": 34,
+                "rawLine": "page.get_by_text(\"Testing Ajay Seeds 100 Micron\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Testing Ajay Seeds 100 Micron\")",
+                "targetDescription": "Text \"Testing Ajay Seeds 100 Micron\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 35,
+                "rawLine": "page.get_by_placeholder(\"#\").nth(1).click()",
+                "type": "click",
+                "target": "\").nth(1)",
+                "targetDescription": "\").nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 36,
+                "rawLine": "page.get_by_placeholder(\"#\").nth(1).fill(\"8\")",
+                "type": "fill",
+                "target": "\").nth(1)",
+                "targetDescription": "\").nth(1)",
+                "value": "8",
+                "varName": "input_8"
+            },
+            {
+                "id": 37,
+                "rawLine": "page.get_by_role(\"spinbutton\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"spinbutton\").nth(2)",
+                "targetDescription": "Spinbutton \"spinbutton\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 38,
+                "rawLine": "page.get_by_role(\"spinbutton\").nth(2).fill(\"8\")",
+                "type": "fill",
+                "target": "page.get_by_role(\"spinbutton\").nth(2)",
+                "targetDescription": "Spinbutton \"spinbutton\"",
+                "value": "8",
+                "varName": "input_9"
+            },
+            {
+                "id": 39,
+                "rawLine": "page.get_by_text(\"Save Changes\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Save Changes\")",
+                "targetDescription": "Text \"Save Changes\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 40,
+                "rawLine": "page.get_by_role(\"cell\").nth(5).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"cell\").nth(5)",
+                "targetDescription": "Cell \"cell\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 41,
+                "rawLine": "page.get_by_role(\"img\", name=\"edit icon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"img\", name=\"edit icon\")",
+                "targetDescription": "Img \"edit icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 42,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^ODISHA$\")).first.click()",
+                "type": "click",
+                "target": "\")).first",
+                "targetDescription": "\")).first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 43,
+                "rawLine": "page.locator(\".MuiBackdrop-root.MuiBackdrop-invisible\").click()",
+                "type": "click",
+                "target": "invisible\")",
+                "targetDescription": "invisible\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 44,
+                "rawLine": "page.get_by_text(\"Update\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Update\")",
+                "targetDescription": "Text \"Update\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 45,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Update$\")).first.click()",
+                "type": "click",
+                "target": "\")).first",
+                "targetDescription": "\")).first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 46,
+                "rawLine": "page.get_by_text(\"Tracking\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Tracking\")",
+                "targetDescription": "Text \"Tracking\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 47,
+                "rawLine": "page.get_by_text(\"Documents & Proof\").click()",
+                "type": "click",
+                "target": "Proof\")",
+                "targetDescription": "Proof\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 48,
+                "rawLine": "page.get_by_text(\"Addresses\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Addresses\")",
+                "targetDescription": "Text \"Addresses\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 49,
+                "rawLine": "page.get_by_text(\"Return\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Return\")",
+                "targetDescription": "Text \"Return\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 50,
+                "rawLine": "page.get_by_text(\"Shipment\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Shipment\")",
+                "targetDescription": "Text \"Shipment\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 51,
+                "rawLine": "page.get_by_text(\"Payment\", exact=True).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Payment\", exact=True)",
+                "targetDescription": "Text \"Payment\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 52,
+                "rawLine": "page.get_by_text(\"Overview\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Overview\")",
+                "targetDescription": "Text \"Overview\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 53,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Accept$\")).first.click()",
+                "type": "click",
+                "target": "\")).first",
+                "targetDescription": "\")).first",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 54,
+                "rawLine": "page.get_by_text(\"XYZ_WH\", exact=True).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"XYZ_WH\", exact=True)",
+                "targetDescription": "Text \"XYZ_WH\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 55,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^XYZ_WH$\")).nth(4).click()",
+                "type": "click",
+                "target": "\")).nth(4)",
+                "targetDescription": "\")).nth(4)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 56,
+                "rawLine": "page.locator(\".MuiBackdrop-root.MuiBackdrop-invisible\").click()",
+                "type": "click",
+                "target": "invisible\")",
+                "targetDescription": "invisible\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 57,
+                "rawLine": "page.locator(\"div\").filter(has_text=\"Confirm\").nth(4).click()",
+                "type": "click",
+                "target": "page.locator(\"div\").filter(has_text=\"Confirm\").nth(4)",
+                "targetDescription": "div",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 58,
+                "rawLine": "page.get_by_text(\"Pack at XYZ_WH\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Pack at XYZ_WH\")",
+                "targetDescription": "Text \"Pack at XYZ_WH\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 59,
+                "rawLine": "page.get_by_text(\"Ready\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Ready\").nth(2)",
+                "targetDescription": "Text \"Ready\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 60,
+                "rawLine": "page.get_by_text(\"Documents & Proof\").click()",
+                "type": "click",
+                "target": "Proof\")",
+                "targetDescription": "Proof\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 61,
+                "rawLine": "page.get_by_text(\"Click to Upload Document\").first.click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Click to Upload Document\").first",
+                "targetDescription": "Text \"Click to Upload Document\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 62,
+                "rawLine": "page.locator(\"body\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.locator(\"body\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.pn",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 63,
+                "rawLine": "page.get_by_text(\"Ready\").nth(2).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Ready\").nth(2)",
+                "targetDescription": "Text \"Ready\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 64,
+                "rawLine": "page.get_by_text(\"Picked Up\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Picked Up\").nth(1)",
+                "targetDescription": "Text \"Picked Up\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 65,
+                "rawLine": "with page.expect_download() as download_info:",
+                "type": "other",
+                "target": "",
+                "targetDescription": "with page.expect_download() as download_info:",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 66,
+                "rawLine": "page.get_by_role(\"button\", name=\"Generate & Download PoP\").click()",
+                "type": "click",
+                "target": "Download PoP\")",
+                "targetDescription": "Download PoP\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 67,
+                "rawLine": "download = download_info.value",
+                "type": "other",
+                "target": "",
+                "targetDescription": "download = download_info.value",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 68,
+                "rawLine": "page.get_by_text(\"Picked Up\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Picked Up\").nth(1)",
+                "targetDescription": "Text \"Picked Up\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 69,
+                "rawLine": "page.get_by_role(\"button\", name=\"Close\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Close\")",
+                "targetDescription": "Button \"Close\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 70,
+                "rawLine": "page.get_by_text(\"File size should not exceed\").first.click()",
+                "type": "click",
+                "target": "page.get_by_text(\"File size should not exceed\").first",
+                "targetDescription": "Text \"File size should not exceed\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 71,
+                "rawLine": "page.locator(\"body\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.png\")",
+                "type": "other",
+                "target": "",
+                "targetDescription": "page.locator(\"body\").set_input_files(\"ChatGPT Image May 14, 2026, 02_31_36 PM.pn",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 72,
+                "rawLine": "page.get_by_text(\"Accept\").nth(5).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Accept\").nth(5)",
+                "targetDescription": "Text \"Accept\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 73,
+                "rawLine": "page.get_by_text(\"Reject\", exact=True).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Reject\", exact=True)",
+                "targetDescription": "Text \"Reject\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 74,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Reason$\")).nth(1).click()",
+                "type": "click",
+                "target": "\")).nth(1)",
+                "targetDescription": "\")).nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 75,
+                "rawLine": "page.locator(\".MuiBackdrop-root.MuiBackdrop-invisible\").click()",
+                "type": "click",
+                "target": "invisible\")",
+                "targetDescription": "invisible\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 76,
+                "rawLine": "page.locator(\".MuiBackdrop-root.MuiBackdrop-invisible\").click()",
+                "type": "click",
+                "target": "invisible\")",
+                "targetDescription": "invisible\")",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 77,
+                "rawLine": "page.get_by_text(\"Shipment\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Shipment\")",
+                "targetDescription": "Text \"Shipment\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 78,
+                "rawLine": "page.get_by_text(\"Shipments will reflect here\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Shipments will reflect here\")",
+                "targetDescription": "Text \"Shipments will reflect here\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 79,
+                "rawLine": "page.get_by_text(\"Payment\", exact=True).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Payment\", exact=True)",
+                "targetDescription": "Text \"Payment\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 80,
+                "rawLine": "page.get_by_text(\"Debit Note\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Debit Note\")",
+                "targetDescription": "Text \"Debit Note\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 81,
+                "rawLine": "page.get_by_text(\"Return\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Return\")",
+                "targetDescription": "Text \"Return\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 82,
+                "rawLine": "page.get_by_text(\"Shipment\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Shipment\")",
+                "targetDescription": "Text \"Shipment\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 83,
+                "rawLine": "page.get_by_role(\"img\", name=\"edit icon\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"img\", name=\"edit icon\")",
+                "targetDescription": "Img \"edit icon\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 84,
+                "rawLine": "page.get_by_role(\"img\", name=\"Edit\").first.click()",
+                "type": "click",
+                "target": "page.get_by_role(\"img\", name=\"Edit\").first",
+                "targetDescription": "Img \"Edit\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 85,
+                "rawLine": "page.get_by_role(\"img\", name=\"Edit\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"img\", name=\"Edit\").nth(1)",
+                "targetDescription": "Img \"Edit\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 86,
+                "rawLine": "page.get_by_role(\"img\", name=\"Edit\").nth(1).click()",
+                "type": "click",
+                "target": "page.get_by_role(\"img\", name=\"Edit\").nth(1)",
+                "targetDescription": "Img \"Edit\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 87,
+                "rawLine": "page.get_by_role(\"img\", name=\"Edit\").nth(1).dblclick()",
+                "type": "dblclick",
+                "target": "page.get_by_role(\"img\", name=\"Edit\").nth(1)",
+                "targetDescription": "Img \"Edit\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 88,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Update$\")).nth(1).click()",
+                "type": "click",
+                "target": "\")).nth(1)",
+                "targetDescription": "\")).nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 89,
+                "rawLine": "page.get_by_role(\"cell\", name=\"May 2026 19:30\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"cell\", name=\"May 2026 19:30\")",
+                "targetDescription": "Cell \"May 2026 19:30\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 90,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Cancel$\")).nth(1).click()",
+                "type": "click",
+                "target": "\")).nth(1)",
+                "targetDescription": "\")).nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 91,
+                "rawLine": "page.locator(\"div\").filter(has_text=re.compile(r\"^Reason$\")).nth(1).click()",
+                "type": "click",
+                "target": "\")).nth(1)",
+                "targetDescription": "\")).nth(1)",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 92,
+                "rawLine": "page.get_by_text(\"Incorrect Purchase Price\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Incorrect Purchase Price\")",
+                "targetDescription": "Text \"Incorrect Purchase Price\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 93,
+                "rawLine": "page.get_by_text(\"Confirm\", exact=True).click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Confirm\", exact=True)",
+                "targetDescription": "Text \"Confirm\"",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 94,
+                "rawLine": "page.get_by_text(\"Overview\").click()",
+                "type": "click",
+                "target": "page.get_by_text(\"Overview\")",
+                "targetDescription": "Text \"Overview\"",
+                "value": "",
+                "varName": ""
+            }
+        ]
+    }
+]

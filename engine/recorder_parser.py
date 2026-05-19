@@ -597,12 +597,12 @@ def generate_from_review(payload, ats_root):
     # Generate test lines
     test_lines = []
     prev_raw = ""
-    skip_next = False
+    skip_count = 0           # how many subsequent steps to skip (consumed by a multi-line emit)
     for i, step in enumerate(steps):
-        if skip_next:
-            skip_next = False
+        if skip_count > 0:
+            skip_count -= 1
             continue
-            
+
         sid = step["id"]
         stype = step.get("type", "other")
         raw = step.get("rawLine", "")
@@ -621,6 +621,39 @@ def generate_from_review(payload, ats_root):
             test_lines.append(f"    for _i in range(_checkboxes.count()):")
             test_lines.append(f"        _checkboxes.nth(_i).click(force=True)")
             test_lines.append(f"        page.wait_for_timeout(300)")
+            continue
+
+        # ── Handle Playwright `with page.expect_<X>(...) [as <var>]:` blocks ──
+        # Codegen emits 3 lines for downloads (and similar context managers):
+        #     with page.expect_download() as download_info:
+        #         <trigger action>
+        #     download = download_info.value
+        # parse_steps strips indentation so we get 3 separate steps. Re-group
+        # them here with the correct nesting; if we don't, the bare `with`
+        # line ends up with no body and the file is an IndentationError.
+        with_match = re.match(
+            r'with\s+page\.expect_\w+\([^)]*\)\s*(?:as\s+(\w+)\s*)?:', raw
+        )
+        if with_match:
+            info_var = with_match.group(1)  # may be None for `with page.expect_X():` without `as`
+            test_lines.append(f"    # Step {sid}: {raw}")
+            test_lines.append(f"    {raw}")
+            steps_consumed = 0
+            # Inner trigger step (the action that fires the event)
+            if i + 1 < len(steps):
+                inner_raw = steps[i + 1].get("rawLine", "")
+                test_lines.append(f"        {inner_raw}")
+                test_lines.append(f"        page.wait_for_timeout(500)")
+                steps_consumed += 1
+                # Consumer step (e.g. `download = download_info.value`) — only
+                # consume if it actually references our `as` variable so we
+                # don't accidentally swallow an unrelated next action.
+                if info_var and i + 2 < len(steps):
+                    cons_raw = steps[i + 2].get("rawLine", "")
+                    if info_var in cons_raw and (cons_raw.lstrip().startswith(info_var) or ".value" in cons_raw):
+                        test_lines.append(f"    {cons_raw}")
+                        steps_consumed += 1
+            skip_count = steps_consumed
             continue
 
         # ── Filter junk actions recorded by accident ──
@@ -710,7 +743,7 @@ def generate_from_review(payload, ats_root):
                 next_step = steps[i + 1]
                 if "set_input_files" in next_step.get("rawLine", ""):
                     is_file_chooser_trigger = True
-                    skip_next = True
+                    skip_count = 1
 
             # For CSS-locator elements, scroll into view first (handles sticky footers)
             if 'locator(' in raw and stype in ("click", "fill", "check"):
