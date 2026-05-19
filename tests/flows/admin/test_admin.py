@@ -200,39 +200,57 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     # Step 26: Click Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(1).click()
     page.wait_for_timeout(500)
-    # Step 27: Enter "test" in Textbox "Search"
+    # Step 27: Enter "test" in Textbox "Search" (product search for row 1)
     page.get_by_role("textbox", name="Search").nth(1).fill(tc_data.get("input_5", ""))
-    # Step 28: Click Text "Testing Brand Saloniiiiii (HY"
-    page.get_by_text("Testing Brand Saloniiiiii (HY").click()
+    page.wait_for_timeout(1500)  # wait for product autocomplete API
+    # Step 28: Select product via keyboard (li.click() doesn't fully wire
+    # listing_id on the row — see PO_CREATION_FLOW_DISCOVERY.md). Keyboard
+    # ArrowDown+Enter triggers the proper internal state update.
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(300)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+    # Step 29: Click quantity input
+    qty = page.locator(r"input[name=\"quantity\"]").first
+    qty.scroll_into_view_if_needed()
+    qty.click()
     page.wait_for_timeout(500)
-    # Step 29: Click "]")
-    page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
-    page.locator(r"input[name=\"quantity\"]").click()
+    # Step 30: Enter quantity — press_sequentially fires real keydown/input
+    # events so React's onChange handler runs and total auto-calculates.
+    # Plain fill() sets DOM value only and total stays disabled.
+    qty.press_sequentially(tc_data.get("input_6", ""), delay=80)
+    page.keyboard.press("Tab")  # blur triggers React validation
     page.wait_for_timeout(500)
-    # Step 30: Enter "7" in "]")
-    page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
-    page.locator(r"input[name=\"quantity\"]").fill(tc_data.get("input_6", ""))
     # Step 31: Click Text "Add New Row"
     page.get_by_text("Add New Row").click()
     page.wait_for_timeout(500)
     # Step 32: Click Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(2).click()
     page.wait_for_timeout(500)
-    # Step 33: Enter "test" in Textbox "Search"
+    # Step 33: Enter "test" in Textbox "Search" (product search for row 2)
     page.get_by_role("textbox", name="Search").nth(2).fill(tc_data.get("input_7", ""))
-    # Step 34: Click Text "Testing Ajay Seeds 100 Micron"
-    page.get_by_text("Testing Ajay Seeds 100 Micron").click()
+    page.wait_for_timeout(1500)
+    # Step 34: Select product via keyboard (see Step 28 note)
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(300)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+    # Step 35: Click quantity field for row 2 (placeholder "#" pattern)
+    qty2 = page.get_by_placeholder("#").nth(1)
+    qty2.click()
     page.wait_for_timeout(500)
-    # Step 35: Click ").nth(1)
-    page.get_by_placeholder("#").nth(1).click()
+    # Step 36: Enter row-2 quantity via press_sequentially
+    qty2.press_sequentially(tc_data.get("input_8", ""), delay=80)
+    page.keyboard.press("Tab")
     page.wait_for_timeout(500)
-    # Step 36: Enter "8" in ").nth(1)
-    page.get_by_placeholder("#").nth(1).fill(tc_data.get("input_8", ""))
-    # Step 37: Click Spinbutton "spinbutton"
-    page.get_by_role("spinbutton").nth(2).click()
+    # Step 37: Click rate (spinbutton) field for row 2
+    rate2 = page.get_by_role("spinbutton").nth(2)
+    rate2.click()
     page.wait_for_timeout(500)
-    # Step 38: Enter "8" in Spinbutton "spinbutton"
-    page.get_by_role("spinbutton").nth(2).fill(tc_data.get("input_9", ""))
+    # Step 38: Enter rate via press_sequentially (same React onChange trap)
+    rate2.press_sequentially(tc_data.get("input_9", ""), delay=80)
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(500)
     # Step 39: Click Text "Save Changes"
     page.get_by_text("Save Changes").click()
     page.wait_for_timeout(500)
