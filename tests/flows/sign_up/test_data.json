@@ -68,5 +68,23 @@
             "input_32": "WAR1",
             "input_33": "5"
         }
+    },
+    "TC-SIGNUP-002": {
+        "business_name": "Test Business AUTO",
+        "primary_contact_name": "Devesh",
+        "primary_contact_phone": "9999999999"
+    },
+    "TC-SIGNUP-003": {
+        "warehouse_name": "WAR1",
+        "holiday_year": "2029"
+    },
+    "TC-SIGNUP-004": {
+        "state": "Assam",
+        "license_type": "Pesticides",
+        "expiry_year": "2029"
+    },
+    "TC-SIGNUP-005": {
+        "credit_days": "30",
+        "credit_limit": "100000"
     }
 }

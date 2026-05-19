@@ -168,7 +168,13 @@ def _apply_patches():
                     try:
                         page = self.page if _is_locator else self
                         if _is_locator:
-                            loc_str = getattr(self, "_selector", "") or ""
+                            # Playwright Locator stores its selector on the
+                            # private _impl_obj — Locator._selector is not
+                            # exposed publicly. _impl_obj._selector is a plain
+                            # string attribute, no protocol call.
+                            impl = getattr(self, "_impl_obj", None)
+                            loc_str = (getattr(impl, "_selector", "") if impl
+                                       else getattr(self, "_selector", "")) or ""
                         else:
                             loc_str = args[0] if args else ""
                         _record_minimal(page, _action, str(loc_str))
