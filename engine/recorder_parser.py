@@ -211,6 +211,59 @@ def _rewrite_dynamic_ids(steps):
     return new_steps
 
 
+# ── MUI / admin-panel-specific brittleness detectors ──────────────────────
+#
+# Captured at recording time but known to break at runtime:
+#   1. .click() on a get_by_text autocomplete suggestion sets display text
+#      only — doesn't fire the React onChange that wires internal state
+#      (e.g. listing_id on a PO line item). Keyboard ArrowDown+Enter works.
+#   2. .fill() on MUI number inputs sets the DOM value only — React's
+#      onChange never fires → no validation, no auto-calc, downstream Save
+#      stays disabled. press_sequentially + Tab simulates real typing and
+#      blur, which triggers the handler chain.
+# Both are documented in PO_CREATION_FLOW_DISCOVERY.md and observed in
+# TC-ADMIN-EXPLORE-ORDERS.
+
+# Regex: allow optional backslash before the quote so the indicator matches
+# both raw codegen text (which uses non-raw Python strings with `\"` escapes)
+# and our own r-string form. Covers `input[name="quantity"]`,
+# `input[name=\"quantity\"]`, `placeholder="#"`, `placeholder=\"#\"`,
+# `get_by_placeholder("#")`, `get_by_role("spinbutton"`, etc.
+_MUI_NUMERIC_RE = re.compile(
+    r'input\[name=\\?"(?:quantity|unit_price|tax_rate|master_packing|total)\\?"\]'
+    r'|placeholder=\\?"#\\?"'
+    r"""|get_by_placeholder\(["']#["']\)"""
+    r"""|get_by_role\(["']spinbutton["']"""
+)
+
+
+def _is_mui_numeric_input_fill(step):
+    """True if this step is a .fill() on a number input that needs
+    press_sequentially instead. See PO_CREATION_FLOW_DISCOVERY.md."""
+    if step.get("type") != "fill":
+        return False
+    raw = step.get("rawLine", "")
+    target = step.get("target") or ""
+    return bool(_MUI_NUMERIC_RE.search(raw + " " + target))
+
+
+def _is_search_autocomplete_pair(step, next_step):
+    """True if this step is a fill on a Search textbox immediately followed
+    by a click on a get_by_text element — the classic MUI autocomplete
+    select. We replace the next click with ArrowDown+Enter at codegen time."""
+    if step.get("type") != "fill":
+        return False
+    raw = step.get("rawLine", "")
+    target = step.get("target") or ""
+    has_search = ('"Search"' in raw or "'Search'" in raw
+                  or '"Search"' in target or "'Search'" in target)
+    if not has_search:
+        return False
+    if not next_step or next_step.get("type") != "click":
+        return False
+    return "get_by_text(" in next_step.get("rawLine", "")
+
+
 def _detect_select_all_runs(steps):
     """Pre-scan steps for ANY consecutive bare-positional checkbox clicks
     → collapse into a dynamic loop.
@@ -751,6 +804,21 @@ def generate_from_review(payload, ats_root):
                     is_file_chooser_trigger = True
                     skip_count = 1
 
+            # ── MUI auto-fixes (admin panel quirks) ──
+            # 1) Search fill + autocomplete click → emit ArrowDown+Enter and
+            #    drop the next click step.
+            is_search_autocomplete = (
+                not is_file_chooser_trigger
+                and i + 1 < len(steps)
+                and _is_search_autocomplete_pair(step, steps[i + 1])
+            )
+            # 2) Fill on MUI number input → use press_sequentially + Tab so
+            #    React's onChange fires.
+            is_mui_numeric_fill = (
+                not is_file_chooser_trigger
+                and _is_mui_numeric_input_fill(step)
+            )
+
             # For CSS-locator elements, scroll into view first (handles sticky footers)
             if 'locator(' in raw and stype in ("click", "fill", "check"):
                 locator_expr = raw.strip().split(".click(")[0].split(".fill(")[0].split(".check(")[0]
@@ -768,7 +836,27 @@ def generate_from_review(payload, ats_root):
                         '.set_input_files(TEST_UPLOAD_IMAGE)',
                         raw,
                     )
+                # MUI numeric fill rewrite: .fill(VAL) → .press_sequentially(VAL, delay=80)
+                # The value may itself be a function call like tc_data.get("input_5", "")
+                # so we need balanced-paren matching for the .fill argument.
+                if is_mui_numeric_fill:
+                    raw = re.sub(
+                        r'\.fill\(((?:[^()]|\([^()]*\))*)\)',
+                        r'.press_sequentially(\1, delay=80)',
+                        raw,
+                        count=1,
+                    )
                 test_lines.append(f"    {raw}")
+                if is_mui_numeric_fill:
+                    test_lines.append('    page.keyboard.press("Tab")')
+                    test_lines.append("    page.wait_for_timeout(500)")
+                if is_search_autocomplete:
+                    test_lines.append('    page.wait_for_timeout(1500)  # wait for MUI autocomplete results')
+                    test_lines.append('    page.keyboard.press("ArrowDown")')
+                    test_lines.append('    page.wait_for_timeout(300)')
+                    test_lines.append('    page.keyboard.press("Enter")')
+                    test_lines.append('    page.wait_for_timeout(800)')
+                    skip_count = 1  # consume the get_by_text click step
 
             # Smart waits: only where truly needed
             if stype in ("click", "dblclick", "check", "select"):
