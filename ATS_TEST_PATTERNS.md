@@ -369,7 +369,56 @@ This is *the* reason the coverage analyzer's pytest plugin (`engine/dom_inspecto
 
 ---
 
-## 17. Coverage Analyzer — Observing Tests Without Disturbing Them
+## 17. MUI Autocomplete — keyboard select, NOT li.click() (Admin Panel)
+
+The Agrim Admin Panel uses MUI portal-rendered `<li>` elements inside `.MuiMenu-root` for autocomplete suggestions (vendor search, product search, etc.). Clicking the `<li>` with Playwright **sets the display text but does not fully wire the React state** — e.g. `listing_id` stays empty, the row is invalid, downstream Verify/Save buttons stay disabled.
+
+**Use keyboard select instead:**
+
+```python
+# WRONG — display text set, internal state not wired
+page.get_by_role("textbox", name="Search").fill("Testing Brand")
+page.get_by_text("Testing Brand Saloniiiiii (HY").click()
+
+# CORRECT — fills the row's listing_id and fires onChange
+page.get_by_role("textbox", name="Search").fill("Testing Brand")
+page.wait_for_timeout(1500)            # wait for autocomplete API
+page.keyboard.press("ArrowDown")
+page.wait_for_timeout(300)
+page.keyboard.press("Enter")
+page.wait_for_timeout(800)
+```
+
+**Auto-applied by recorder_parser** (`_is_search_autocomplete_pair`): when a recording shows a `.fill()` on a "Search"-labelled textbox followed by a `.click()` on a `get_by_text(...)`, the generator drops the click and emits the keyboard select sequence above.
+
+---
+
+## 18. MUI Number Inputs — press_sequentially, NOT fill() (Admin Panel)
+
+MUI number inputs in the admin PO form (quantity, unit price, tax rate, master_packing) are React controlled inputs whose `onChange` listens to keydown/input events. `.fill()` sets the DOM value but does NOT fire onChange → form state stays stale, totals never auto-calculate, **Save Changes stays disabled forever**.
+
+```python
+# WRONG — DOM value set, React onChange never fires
+page.locator('input[name="quantity"]').fill("7")
+
+# CORRECT — real keystrokes + blur triggers React onChange + validation
+qty = page.locator('input[name="quantity"]')
+qty.click()
+qty.press_sequentially("7", delay=80)
+page.keyboard.press("Tab")               # blur fires validation API
+page.wait_for_timeout(500)
+```
+
+**Selectors that trigger the auto-fix:**
+- `input[name="quantity"]`, `"unit_price"`, `"tax_rate"`, `"master_packing"`, `"total"`
+- `placeholder="#"` (rate inputs in MUI table cells use this)
+- `get_by_placeholder("#")`, `get_by_role("spinbutton")`
+
+**Auto-applied by recorder_parser** (`_is_mui_numeric_input_fill`): any `.fill()` whose locator matches one of these is rewritten to `.press_sequentially(VALUE, delay=80)` plus a `Tab` press. Regex handles both raw (`name="quantity"`) and backslash-escaped (`name=\"quantity\"`) forms.
+
+---
+
+## 19. Coverage Analyzer — Observing Tests Without Disturbing Them
 
 The Coverage Modal (right-click a TC → Analyze Coverage) runs the generated `test_<flow>.py` via pytest with `engine/dom_inspector_plugin.py` attached. The plugin monkey-patches `Locator.click/fill/check/...` to record `{action, url, selector}` *after* each call. DOM inventory is evaluated only when the URL changes.
 
@@ -401,3 +450,5 @@ Output: `agrim-ats/results/_coverage/<TC-ID>_latest.json` — fixed-path file ov
 | Select-all positional clicks | `for _i in range(_loc.count()): _loc.nth(_i).click(force=True)` |
 | Adaptive positional button | `_btns = page.get_by_role("button", name="X"); _btns.last.click() if _btns.count() > 0 else None` |
 | OTP digit N (Agrim signup) | `page.get_by_role("textbox", name="*").nth(N).fill("digit")` |
+| MUI autocomplete select | `fill(query); keyboard.press("ArrowDown"); keyboard.press("Enter")` |
+| MUI number input (admin PO) | `loc.press_sequentially(value, delay=80); keyboard.press("Tab")` |
