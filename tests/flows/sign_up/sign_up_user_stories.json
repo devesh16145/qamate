@@ -1,0 +1,92 @@
+{
+    "TC-SIGNUP-002": {
+        "user_story": {
+            "summary": "Profile Setup — Basic Info tab review",
+            "role": "Seller",
+            "want": "to see and manage my business identity fields on the Basic Info tab of /profile",
+            "benefit": "I can confirm my display name and primary contact details before going live",
+            "acceptance_criteria": [
+                "Basic Info tab is reachable from /profile",
+                "Business / brand display-name field is visible",
+                "Primary contact (POC) input fields are present",
+                "Save / Save and Next button is available",
+                "No error toasts surface while viewing the tab"
+            ]
+        },
+        "test_steps": [
+            {"step": 1, "action": "Navigate to /profile", "expected": "/profile page loads with profile tab strip visible"},
+            {"step": 2, "action": "Click Basic Info tab", "expected": "Basic Info content renders"},
+            {"step": 3, "action": "Verify business name field", "expected": "A business / brand name input is present"},
+            {"step": 4, "action": "Verify primary contact (POC) input", "expected": "At least one POC name input present"},
+            {"step": 5, "action": "Verify Save button", "expected": "Save / Save and Next button is visible"},
+            {"step": 6, "action": "Verify no error toasts", "expected": "No error / alert toasts on the page"}
+        ]
+    },
+    "TC-SIGNUP-003": {
+        "user_story": {
+            "summary": "Profile Setup — Operations tab review",
+            "role": "Seller",
+            "want": "to configure my warehouse operating hours, working days, and holidays under the Operations tab",
+            "benefit": "Buyers know when my warehouse can fulfil orders and I can plan around closures",
+            "acceptance_criteria": [
+                "Operations tab is reachable from /profile",
+                "Warehouse Name input is present",
+                "Weekday toggles (Mon..Sat) are present",
+                "Add Holiday control is present",
+                "Save / Save and Next button is available"
+            ]
+        },
+        "test_steps": [
+            {"step": 1, "action": "Navigate to /profile", "expected": "/profile loads with tabs"},
+            {"step": 2, "action": "Click Operations tab", "expected": "Operations content renders"},
+            {"step": 3, "action": "Verify Warehouse Name input", "expected": "Warehouse Name input field visible"},
+            {"step": 4, "action": "Verify weekday toggles", "expected": "Mon, Tue, Wed, Thu, Fri, Sat buttons visible"},
+            {"step": 5, "action": "Verify Add Holiday control", "expected": "Add Holiday button or control visible"},
+            {"step": 6, "action": "Verify Save button", "expected": "Save / Save and Next button visible"}
+        ]
+    },
+    "TC-SIGNUP-004": {
+        "user_story": {
+            "summary": "Profile Setup — Compliance tab review",
+            "role": "Seller",
+            "want": "to upload my regulatory licenses with state, document type, and expiry date on the Compliance tab",
+            "benefit": "I can sell regulated categories (pesticides, fertilizers, etc.) without compliance gaps",
+            "acceptance_criteria": [
+                "Compliance tab is reachable from /profile",
+                "State selector is present",
+                "Document type / category selector is present",
+                "Expiry date control is present",
+                "License upload area is present"
+            ]
+        },
+        "test_steps": [
+            {"step": 1, "action": "Navigate to /profile", "expected": "/profile loads"},
+            {"step": 2, "action": "Click Compliance tab", "expected": "Compliance content renders"},
+            {"step": 3, "action": "Verify state selector", "expected": "A state selector is visible"},
+            {"step": 4, "action": "Verify document type selector", "expected": "Document type selector visible"},
+            {"step": 5, "action": "Verify expiry date control", "expected": "Expiry date trigger is visible"},
+            {"step": 6, "action": "Verify license upload area", "expected": "License upload input/area visible"}
+        ]
+    },
+    "TC-SIGNUP-005": {
+        "user_story": {
+            "summary": "Profile Setup — Business Terms tab review",
+            "role": "Seller",
+            "want": "to configure my credit terms (days and limit) with Agrim on the Business Terms tab",
+            "benefit": "Agrim's finance and ordering teams have the correct commercial terms on file",
+            "acceptance_criteria": [
+                "Business Terms tab is reachable from /profile",
+                "Credit Days input is present",
+                "Credit Limit to Agrim input is present",
+                "Submit / Save button is available"
+            ]
+        },
+        "test_steps": [
+            {"step": 1, "action": "Navigate to /profile", "expected": "/profile loads"},
+            {"step": 2, "action": "Click Business Terms tab", "expected": "Business Terms content renders"},
+            {"step": 3, "action": "Verify Credit Days input", "expected": "Credit Days input visible"},
+            {"step": 4, "action": "Verify Credit Limit input", "expected": "Credit Limit to Agrim input visible"},
+            {"step": 5, "action": "Verify Submit button", "expected": "Submit / Save button visible"}
+        ]
+    }
+}

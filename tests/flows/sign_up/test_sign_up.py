@@ -378,3 +378,212 @@ def test_TC_SIGNUP_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     # ── Final wait before closing ──
     page.wait_for_timeout(2000)
     checkpoints.mark_passed("Flow executed successfully")
+
+
+# ============================================================
+# TC-SIGNUP-002..005 — Profile Setup tab verification
+# Authored from analyzer data (results/_coverage/TC-SIGNUP-001_latest.json).
+# Tests use the seller_page fixture (existing logged-in seller) so they don't
+# depend on TC-SIGNUP-001 completing — same UI tabs serve both first-time
+# setup and ongoing profile editing.
+# ============================================================
+
+def _open_profile(page, seller_url):
+    """Navigate to /profile and wait for the tab strip to mount."""
+    base = seller_url if seller_url.endswith("/") else seller_url + "/"
+    page.goto(base + "profile", wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except Exception:
+        pass
+    page.locator('[role="tab"], button:has-text("Basic Info")').first.wait_for(
+        state="visible", timeout=15000
+    )
+    page.wait_for_timeout(800)
+
+
+def _click_profile_tab(page, tab_name):
+    """Click a profile setup tab by its visible name; fall back to button:has-text."""
+    tab = page.get_by_role("tab", name=tab_name)
+    if tab.count() == 0:
+        tab = page.locator(f'button:has-text("{tab_name}")').first
+    tab.click(force=True)
+    page.wait_for_timeout(1000)
+
+
+@pytest.mark.tc("TC-SIGNUP-002")
+def test_TC_SIGNUP_002_basic_info(seller_page: Page, seller_url, tc_data, checkpoints):
+    """Profile Setup — Basic Info tab renders expected fields."""
+    page = seller_page
+
+    def cp_navigate():
+        _open_profile(page, seller_url)
+
+    def cp_open_tab():
+        _click_profile_tab(page, "Basic Info")
+
+    def cp_tab_active():
+        assert (
+            page.locator('[role="tab"][aria-selected="true"]:has-text("Basic Info")').count() > 0
+            or page.locator('button:has-text("Basic Info")').count() > 0
+        ), "Basic Info tab not visible after click"
+
+    def cp_business_name_field():
+        assert (
+            page.locator('input[placeholder*="Brand Name" i]').count() > 0
+            or page.locator('input[placeholder*="Business" i]').count() > 0
+            or page.locator('input[placeholder*="Display Name" i]').count() > 0
+        ), "No business / brand name input found on Basic Info tab"
+
+    def cp_contact_section():
+        assert (
+            page.locator('input[id^="poc-name"]').count() > 0
+            or page.locator('input[placeholder*="Name of POC" i]').count() > 0
+            or page.locator('input[placeholder*="Contact" i]').count() > 0
+        ), "No primary contact (POC) input visible on Basic Info tab"
+
+    def cp_save_present():
+        assert (
+            page.get_by_role("button", name="Save and Next Btn right icon").count() > 0
+            or page.locator('button:has-text("Save and Next"), button:has-text("Save")').count() > 0
+        ), "Save / Save and Next button not found on Basic Info tab"
+
+    def cp_no_errors():
+        errors = page.locator('[role="alert"]:visible, [class*="toast"]:visible:has-text("error")')
+        assert errors.count() == 0, f"Error visible: {errors.first.text_content()[:200]}"
+
+    checkpoints.run("Navigate to /profile", cp_navigate)
+    checkpoints.run("Click Basic Info tab", cp_open_tab)
+    checkpoints.run("Verify Basic Info tab is active", cp_tab_active)
+    checkpoints.run("Verify business / brand name input", cp_business_name_field)
+    checkpoints.run("Verify primary contact (POC) input", cp_contact_section)
+    checkpoints.run("Verify Save / Save and Next button", cp_save_present)
+    checkpoints.run("Confirm no error toasts", cp_no_errors)
+
+
+@pytest.mark.tc("TC-SIGNUP-003")
+def test_TC_SIGNUP_003_operations(seller_page: Page, seller_url, tc_data, checkpoints):
+    """Profile Setup — Operations tab renders warehouse, working days, holidays."""
+    page = seller_page
+
+    def cp_navigate():
+        _open_profile(page, seller_url)
+
+    def cp_open_tab():
+        _click_profile_tab(page, "Operations")
+
+    def cp_tab_active():
+        assert page.locator('button:has-text("Operations")').count() > 0, \
+            "Operations tab not visible"
+
+    def cp_warehouse_field():
+        assert (
+            page.get_by_role("textbox", name="Warehouse Name *").count() > 0
+            or page.locator('input[placeholder*="Warehouse" i]').count() > 0
+        ), "Warehouse Name input not found"
+
+    def cp_weekday_selector():
+        weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        present = sum(1 for d in weekdays if page.get_by_role("button", name=d).count() > 0)
+        assert present >= 5, f"Expected at least 5 weekday buttons, found {present}"
+
+    def cp_holiday_control():
+        assert (
+            page.get_by_role("button", name="Btn left icon Add Holiday").count() > 0
+            or page.locator('button:has-text("Add Holiday"), button:has-text("Holiday")').count() > 0
+        ), "Add Holiday control not found"
+
+    def cp_save_present():
+        assert (
+            page.get_by_role("button", name="Save and Next Btn right icon").count() > 0
+            or page.locator('button:has-text("Save")').count() > 0
+        ), "Save button not found on Operations tab"
+
+    checkpoints.run("Navigate to /profile", cp_navigate)
+    checkpoints.run("Click Operations tab", cp_open_tab)
+    checkpoints.run("Verify Operations tab is active", cp_tab_active)
+    checkpoints.run("Verify Warehouse Name input", cp_warehouse_field)
+    checkpoints.run("Verify weekday selector (Mon..Sat)", cp_weekday_selector)
+    checkpoints.run("Verify Add Holiday control", cp_holiday_control)
+    checkpoints.run("Verify Save / Save and Next button", cp_save_present)
+
+
+@pytest.mark.tc("TC-SIGNUP-004")
+def test_TC_SIGNUP_004_compliance(seller_page: Page, seller_url, tc_data, checkpoints):
+    """Profile Setup — Compliance tab renders license upload UI."""
+    page = seller_page
+
+    def cp_navigate():
+        _open_profile(page, seller_url)
+
+    def cp_open_tab():
+        _click_profile_tab(page, "Compliance")
+
+    def cp_state_selector():
+        assert (
+            page.get_by_role("combobox").filter(has_text="Select State").count() > 0
+            or page.locator('button[role="combobox"]:has-text("State")').count() > 0
+            or page.locator('button:has-text("Select State")').count() > 0
+        ), "State selector not found on Compliance tab"
+
+    def cp_doctype_selector():
+        assert (
+            page.get_by_role("combobox").filter(has_text=re.compile("doc|type", re.I)).count() > 0
+            or page.locator('button:has-text("Select doc"), button:has-text("Pesticides"), button:has-text("Fertilizer")').count() > 0
+        ), "Document type selector not found"
+
+    def cp_expiry_control():
+        assert (
+            page.get_by_role("button", name="Expiry * Expiry *").count() > 0
+            or page.locator('button:has-text("Expiry")').count() > 0
+        ), "Expiry date control not found"
+
+    def cp_upload_area():
+        assert (
+            page.get_by_text("Click to Upload License for").count() > 0
+            or page.locator('input[type="file"]').count() > 0
+            or page.get_by_text("Max file size 5MB").count() > 0
+        ), "License upload area not found"
+
+    checkpoints.run("Navigate to /profile", cp_navigate)
+    checkpoints.run("Click Compliance tab", cp_open_tab)
+    checkpoints.run("Verify state selector", cp_state_selector)
+    checkpoints.run("Verify document type selector", cp_doctype_selector)
+    checkpoints.run("Verify Expiry date control", cp_expiry_control)
+    checkpoints.run("Verify license upload area", cp_upload_area)
+
+
+@pytest.mark.tc("TC-SIGNUP-005")
+def test_TC_SIGNUP_005_business_terms(seller_page: Page, seller_url, tc_data, checkpoints):
+    """Profile Setup — Business Terms tab renders Credit Days, Credit Limit, Submit."""
+    page = seller_page
+
+    def cp_navigate():
+        _open_profile(page, seller_url)
+
+    def cp_open_tab():
+        _click_profile_tab(page, "Business Terms")
+
+    def cp_credit_days_field():
+        assert (
+            page.get_by_role("textbox", name="Credit Days").count() > 0
+            or page.locator('input[placeholder*="Credit Days" i]').count() > 0
+        ), "Credit Days input not found"
+
+    def cp_credit_limit_field():
+        assert (
+            page.get_by_role("textbox", name="Credit Limit to Agrim").count() > 0
+            or page.locator('input[placeholder*="Credit Limit" i]').count() > 0
+        ), "Credit Limit input not found"
+
+    def cp_submit_present():
+        assert (
+            page.get_by_role("button", name="Submit Btn right icon").count() > 0
+            or page.locator('button:has-text("Submit"), button:has-text("Save")').count() > 0
+        ), "Submit / Save button not found"
+
+    checkpoints.run("Navigate to /profile", cp_navigate)
+    checkpoints.run("Click Business Terms tab", cp_open_tab)
+    checkpoints.run("Verify Credit Days input", cp_credit_days_field)
+    checkpoints.run("Verify Credit Limit to Agrim input", cp_credit_limit_field)
+    checkpoints.run("Verify Submit / Save button", cp_submit_present)

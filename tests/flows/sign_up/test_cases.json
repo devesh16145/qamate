@@ -1192,5 +1192,68 @@
                 "varName": ""
             }
         ]
+    },
+    {
+        "tc_id": "TC-SIGNUP-002",
+        "module": "Profile Setup",
+        "description": "Basic Info tab renders business name, primary contact, and Save action on /profile",
+        "preconditions": "Seller is logged in (any existing seller account) and lands on /profile",
+        "checkpoints": [
+            "Navigate to /profile",
+            "Click Basic Info tab",
+            "Verify Basic Info tab is active",
+            "Verify business / brand name input is present",
+            "Verify primary contact (POC) input is present",
+            "Verify Save / Save and Next button is present",
+            "Confirm no error toasts on the page"
+        ],
+        "expected_result": "Basic Info tab loads with all expected fields and Save button visible"
+    },
+    {
+        "tc_id": "TC-SIGNUP-003",
+        "module": "Profile Setup",
+        "description": "Operations tab renders Warehouse name, weekday selector (Mon..Sat), Add Holiday, and Save",
+        "preconditions": "Seller is logged in and on /profile",
+        "checkpoints": [
+            "Navigate to /profile",
+            "Click Operations tab",
+            "Verify Operations tab is active",
+            "Verify Warehouse Name input is present",
+            "Verify weekday buttons (Mon, Tue, Wed, Thu, Fri, Sat) are present",
+            "Verify Add Holiday control is present",
+            "Verify Save / Save and Next button is present"
+        ],
+        "expected_result": "Operations tab loads with warehouse name, working-day selector, holiday controls, and Save"
+    },
+    {
+        "tc_id": "TC-SIGNUP-004",
+        "module": "Profile Setup",
+        "description": "Compliance tab renders State selector, document-type selector, expiry control, and license upload",
+        "preconditions": "Seller is logged in and on /profile",
+        "checkpoints": [
+            "Navigate to /profile",
+            "Click Compliance tab",
+            "Verify Compliance tab is active",
+            "Verify State selector is present",
+            "Verify document type / category selector is present",
+            "Verify Expiry date control is present",
+            "Verify License upload area is present"
+        ],
+        "expected_result": "Compliance tab loads with state, doc type, expiry, and license upload UI"
+    },
+    {
+        "tc_id": "TC-SIGNUP-005",
+        "module": "Profile Setup",
+        "description": "Business Terms tab renders Credit Days, Credit Limit to Agrim, and Submit",
+        "preconditions": "Seller is logged in and on /profile",
+        "checkpoints": [
+            "Navigate to /profile",
+            "Click Business Terms tab",
+            "Verify Business Terms tab is active",
+            "Verify Credit Days input is present",
+            "Verify Credit Limit to Agrim input is present",
+            "Verify Submit / Save button is present"
+        ],
+        "expected_result": "Business Terms tab loads with credit configuration fields and Submit"
     }
 ]
