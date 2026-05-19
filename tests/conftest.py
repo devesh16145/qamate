@@ -130,7 +130,7 @@ class CheckpointRunner:
 def checkpoints(request):
     """Provide a CheckpointRunner for every test. Automatically extracts tc_id from test name."""
     tc_name = request.node.name.split("[")[0]
-    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
+    match = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', tc_name)
     tc_id = match.group(1).replace("_", "-") if match else tc_name
     runner = CheckpointRunner(tc_id)
     yield runner
@@ -491,7 +491,7 @@ def capture_screenshot_on_failure(page, request, results_dir):
 def _extract_tc_id(node_name):
     """Extract TC ID from pytest node name."""
     tc_name = node_name.split("[")[0]
-    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
+    match = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', tc_name)
     if match:
         return match.group(1).replace("_", "-")
     return tc_name
@@ -549,7 +549,7 @@ def _is_variants(data):
 def pytest_generate_tests(metafunc):
     """Parametrize tests that have multiple data variants in test_data.json."""
     tc_name = metafunc.definition.function.__name__
-    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
+    match = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', tc_name)
     if not match:
         return
     tc_id = match.group(1).replace("_", "-")
@@ -580,7 +580,7 @@ def tc_data(request):
     tc_name = request.node.name.split("[")[0]
     tc_id = None
     # Use greedy match to capture full TC ID (e.g. TC_ORDERS_063, not just TC_ORDERS)
-    match = re.search(r'(TC_[A-Z]+_\d+)', tc_name)
+    match = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', tc_name)
     if match:
         tc_id = match.group(1).replace("_", "-")
 
