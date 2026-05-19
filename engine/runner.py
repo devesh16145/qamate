@@ -264,7 +264,7 @@ def extract_tc_id(line):
       tests/flows/catalog/test_catalog.py::test_TC_CATALOG_001_page_loads[chromium] PASSED
     Returns: TC-CATALOG-001
     """
-    match = re.search(r'(TC_[A-Z]+_\d+)', line)
+    match = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', line)
     if match:
         # Convert TC_CATALOG_001 back to TC-CATALOG-001
         return match.group(1).replace("_", "-")
