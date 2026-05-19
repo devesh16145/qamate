@@ -704,7 +704,13 @@ def generate_from_review(payload, ats_root):
                 full_url = raw_url_match.group(2)
                 path_match = re.search(r'https?://[^/]+(/.*)', full_url)
                 if path_match:
-                    path = path_match.group(1)
+                    # Strip the leading slash from the extracted path —
+                    # admin_url / base_url already end with `/` (per conftest's
+                    # _get_platform_url), so naive concatenation produces a
+                    # double slash like `https://admin-dev.agrim.app//#/login`.
+                    # Some hosting layers (S3 / CloudFront on admin-dev) reject
+                    # double-slash paths with AccessDenied.
+                    path = path_match.group(1).lstrip("/")
                     if "admin" in full_url:
                         raw = raw.replace(f'{quote}{full_url}{quote}', f'admin_url + "{path}"')
                     else:
