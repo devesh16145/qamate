@@ -120,3 +120,285 @@ def admin_home(admin_page: Page, admin_url):
 #         ...assertions...
 #
 #     checkpoints.run("Step description", cp_<step>)
+
+
+@pytest.mark.tc("TC-ADMIN-EXPLORE-ORDERS")
+def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Explore orders
+    """
+    # Step 1: Navigate to Navigate to https://admin-dev.agrim.app/#/login
+    page.goto(admin_url + "/#/login")
+    page.wait_for_load_state("networkidle")
+    # Step 2: Enter "amit.dalal@agrim.app" in Textbox "Username"
+    page.get_by_role("textbox", name="Username").fill(tc_data.get("input_1", ""))
+    # Step 3: Click Textbox "Password"
+    page.get_by_role("textbox", name="Password").click()
+    page.wait_for_timeout(500)
+    # Step 5: Enter "A" in Textbox "Password"
+    page.get_by_role("textbox", name="Password").fill(tc_data.get("input_2", ""))
+    # Step 7: Enter "Amit@12345" in Textbox "Password"
+    page.get_by_role("textbox", name="Password").fill(tc_data.get("input_3", ""))
+    # Step 8: Click Button "Sign in"
+    page.get_by_role("button", name="Sign in").click()
+    page.wait_for_timeout(500)
+    # Step 9: Click Button "user icon Purchase orders"
+    page.get_by_role("button", name="user icon Purchase orders").click()
+    page.wait_for_timeout(500)
+    # Step 10: Click Menuitem "All Orders"
+    page.get_by_role("menuitem", name="All Orders").click()
+    page.wait_for_timeout(500)
+    # Step 11: Click child(3) > img")
+    page.locator(r".align-items-center > div > div:nth-child(3) > img").scroll_into_view_if_needed()
+    page.locator(r".align-items-center > div > div:nth-child(3) > img").click()
+    page.wait_for_timeout(500)
+    # Step 12: Click root").first
+    page.locator(r".MuiFormControl-root").first.scroll_into_view_if_needed()
+    page.locator(r".MuiFormControl-root").first.click()
+    page.wait_for_timeout(500)
+    # Step 13: Enter "m&" in Textbox "Search"
+    page.get_by_role("textbox", name="Search").first.fill(tc_data.get("input_4", ""))
+    # Step 14: Double-click M_Brand1")
+    page.get_by_role("menuitem", name="M&M_Brand1").dblclick()
+    page.wait_for_timeout(500)
+    # Step 15: Click child(3) > div").first
+    page.locator(r".align-items-center > div:nth-child(3) > div").first.scroll_into_view_if_needed()
+    page.locator(r".align-items-center > div:nth-child(3) > div").first.click()
+    page.wait_for_timeout(500)
+    # Step 16: Click Menuitem "ODISHA"
+    page.get_by_role("menuitem", name="ODISHA").click()
+    page.wait_for_timeout(500)
+    # Step 17: Click child(2) > div").first
+    page.locator(r".jss7 > .d-flex > div > div:nth-child(2) > div").first.scroll_into_view_if_needed()
+    page.locator(r".jss7 > .d-flex > div > div:nth-child(2) > div").first.click()
+    page.wait_for_timeout(500)
+    # Step 18: Click Text "CUTTACK WH"
+    page.get_by_text("CUTTACK WH").click()
+    page.wait_for_timeout(500)
+    # Step 19: Click ")).nth(1)
+    page.locator(r"div").filter(has_text=re.compile(r"^Load Type$")).nth(1).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Load Type$")).nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 20: Click Text "Full Load"
+    page.get_by_text("Full Load").click()
+    page.wait_for_timeout(500)
+    # Step 21: Click Img "Filled Checkbox"
+    page.get_by_role("img", name="Filled Checkbox").click(force=True)
+    page.wait_for_timeout(500)
+    # Step 22: Click Text "PO Type"
+    page.get_by_text("PO Type").nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 23: Click Menuitem "Inventory Purchase"
+    page.get_by_role("menuitem", name="Inventory Purchase").click()
+    page.wait_for_timeout(500)
+    # Step 24: Click ")).nth(1)
+    page.locator(r"div").filter(has_text=re.compile(r"^Type of Inventory Purchase$")).nth(1).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Type of Inventory Purchase$")).nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 25: Click Menuitem "Business Purchase"
+    page.get_by_role("menuitem", name="Business Purchase", exact=True).click()
+    page.wait_for_timeout(500)
+    # Step 26: Click Textbox "Search"
+    page.get_by_role("textbox", name="Search").nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 27: Enter "test" in Textbox "Search"
+    page.get_by_role("textbox", name="Search").nth(1).fill(tc_data.get("input_5", ""))
+    # Step 28: Click Text "Testing Brand Saloniiiiii (HY"
+    page.get_by_text("Testing Brand Saloniiiiii (HY").click()
+    page.wait_for_timeout(500)
+    # Step 29: Click "]")
+    page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
+    page.locator(r"input[name=\"quantity\"]").click()
+    page.wait_for_timeout(500)
+    # Step 30: Enter "7" in "]")
+    page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
+    page.locator(r"input[name=\"quantity\"]").fill(tc_data.get("input_6", ""))
+    # Step 31: Click Text "Add New Row"
+    page.get_by_text("Add New Row").click()
+    page.wait_for_timeout(500)
+    # Step 32: Click Textbox "Search"
+    page.get_by_role("textbox", name="Search").nth(2).click()
+    page.wait_for_timeout(500)
+    # Step 33: Enter "test" in Textbox "Search"
+    page.get_by_role("textbox", name="Search").nth(2).fill(tc_data.get("input_7", ""))
+    # Step 34: Click Text "Testing Ajay Seeds 100 Micron"
+    page.get_by_text("Testing Ajay Seeds 100 Micron").click()
+    page.wait_for_timeout(500)
+    # Step 35: Click ").nth(1)
+    page.get_by_placeholder("#").nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 36: Enter "8" in ").nth(1)
+    page.get_by_placeholder("#").nth(1).fill(tc_data.get("input_8", ""))
+    # Step 37: Click Spinbutton "spinbutton"
+    page.get_by_role("spinbutton").nth(2).click()
+    page.wait_for_timeout(500)
+    # Step 38: Enter "8" in Spinbutton "spinbutton"
+    page.get_by_role("spinbutton").nth(2).fill(tc_data.get("input_9", ""))
+    # Step 39: Click Text "Save Changes"
+    page.get_by_text("Save Changes").click()
+    page.wait_for_timeout(500)
+    # Step 40: Click Cell "cell"
+    page.get_by_role("cell").nth(5).click()
+    page.wait_for_timeout(500)
+    # Step 41: Click Img "edit icon"
+    page.get_by_role("img", name="edit icon").click()
+    page.wait_for_timeout(500)
+    # Step 42: Click ")).first
+    page.locator(r"div").filter(has_text=re.compile(r"^ODISHA$")).first.scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^ODISHA$")).first.click()
+    page.wait_for_timeout(500)
+    # Step 43: Click invisible")
+    page.locator(r".MuiBackdrop-root.MuiBackdrop-invisible").scroll_into_view_if_needed()
+    page.locator(r".MuiBackdrop-root.MuiBackdrop-invisible").click()
+    page.wait_for_timeout(500)
+    # Step 44: Click Text "Update"
+    page.get_by_text("Update").click()
+    page.wait_for_timeout(500)
+    # Step 45: Click ")).first
+    page.locator(r"div").filter(has_text=re.compile(r"^Update$")).first.scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Update$")).first.click()
+    page.wait_for_timeout(500)
+    # Step 46: Click Text "Tracking"
+    page.get_by_text("Tracking").click()
+    page.wait_for_timeout(500)
+    # Step 47: Click Proof")
+    page.get_by_text("Documents & Proof").click()
+    page.wait_for_timeout(500)
+    # Step 48: Click Text "Addresses"
+    page.get_by_text("Addresses").click()
+    page.wait_for_timeout(500)
+    # Step 49: Click Text "Return"
+    page.get_by_text("Return").click()
+    page.wait_for_timeout(500)
+    # Step 50: Click Text "Shipment"
+    page.get_by_text("Shipment").click()
+    page.wait_for_timeout(500)
+    # Step 51: Click Text "Payment"
+    page.get_by_text("Payment", exact=True).click()
+    page.wait_for_timeout(500)
+    # Step 52: Click Text "Overview"
+    page.get_by_text("Overview").click()
+    page.wait_for_timeout(500)
+    # Step 53: Click ")).first
+    page.locator(r"div").filter(has_text=re.compile(r"^Accept$")).first.scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Accept$")).first.click()
+    page.wait_for_timeout(500)
+    # Step 54: Click Text "XYZ_WH"
+    page.get_by_text("XYZ_WH", exact=True).click()
+    page.wait_for_timeout(500)
+    # Step 55: Click ")).nth(4)
+    page.locator(r"div").filter(has_text=re.compile(r"^XYZ_WH$")).nth(4).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^XYZ_WH$")).nth(4).click()
+    page.wait_for_timeout(500)
+    # Step 56: Click invisible")
+    page.locator(r".MuiBackdrop-root.MuiBackdrop-invisible").scroll_into_view_if_needed()
+    page.locator(r".MuiBackdrop-root.MuiBackdrop-invisible").click()
+    page.wait_for_timeout(500)
+    # Step 57: Click div
+    page.locator(r"div").filter(has_text="Confirm").nth(4).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text="Confirm").nth(4).click()
+    page.wait_for_timeout(500)
+    # Step 58: Click Text "Pack at XYZ_WH"
+    page.get_by_text("Pack at XYZ_WH").click()
+    page.wait_for_timeout(500)
+    # Step 59: Click Text "Ready"
+    page.get_by_text("Ready").nth(2).click()
+    page.wait_for_timeout(500)
+    # Step 60: Click Proof")
+    page.get_by_text("Documents & Proof").click()
+    page.wait_for_timeout(500)
+    # Step 61: Click Text "Click to Upload Document"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("Click to Upload Document").first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
+    # Step 63: Click Text "Ready"
+    page.get_by_text("Ready").nth(2).click()
+    page.wait_for_timeout(500)
+    # Step 64: Click Text "Picked Up"
+    page.get_by_text("Picked Up").nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 65: with page.expect_download() as download_info:
+    with page.expect_download() as download_info:
+        page.get_by_role("button", name="Generate & Download PoP").click()
+        page.wait_for_timeout(500)
+    download = download_info.value
+    # Step 69: Click Button "Close"
+    page.get_by_role("button", name="Close").click()
+    page.wait_for_timeout(500)
+    # Step 70: Click Text "File size should not exceed"
+    with page.expect_file_chooser() as fc_info:
+        page.get_by_text("File size should not exceed").first.click()
+    fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+    page.wait_for_timeout(500)
+    # Step 72: Click Text "Accept"
+    page.get_by_text("Accept").nth(5).click()
+    page.wait_for_timeout(500)
+    # Step 73: Click Text "Reject"
+    page.get_by_text("Reject", exact=True).click()
+    page.wait_for_timeout(500)
+    # Step 74: Click ")).nth(1)
+    page.locator(r"div").filter(has_text=re.compile(r"^Reason$")).nth(1).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Reason$")).nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 75: Click invisible")
+    page.locator(r".MuiBackdrop-root.MuiBackdrop-invisible").scroll_into_view_if_needed()
+    page.locator(r".MuiBackdrop-root.MuiBackdrop-invisible").click()
+    page.wait_for_timeout(500)
+    # Step 77: Click Text "Shipment"
+    page.get_by_text("Shipment").click()
+    page.wait_for_timeout(500)
+    # Step 78: Click Text "Shipments will reflect here"
+    page.get_by_text("Shipments will reflect here").click()
+    page.wait_for_timeout(500)
+    # Step 79: Click Text "Payment"
+    page.get_by_text("Payment", exact=True).click()
+    page.wait_for_timeout(500)
+    # Step 80: Click Text "Debit Note"
+    page.get_by_text("Debit Note").click()
+    page.wait_for_timeout(500)
+    # Step 81: Click Text "Return"
+    page.get_by_text("Return").click()
+    page.wait_for_timeout(500)
+    # Step 82: Click Text "Shipment"
+    page.get_by_text("Shipment").click()
+    page.wait_for_timeout(500)
+    # Step 83: Click Img "edit icon"
+    page.get_by_role("img", name="edit icon").click()
+    page.wait_for_timeout(500)
+    # Step 84: Click Img "Edit"
+    page.get_by_role("img", name="Edit").first.click()
+    page.wait_for_timeout(500)
+    # Step 85: Click Img "Edit"
+    page.get_by_role("img", name="Edit").nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 87: Double-click Img "Edit"
+    page.get_by_role("img", name="Edit").nth(1).dblclick()
+    page.wait_for_timeout(500)
+    # Step 88: Click ")).nth(1)
+    page.locator(r"div").filter(has_text=re.compile(r"^Update$")).nth(1).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Update$")).nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 89: Click Cell "May 2026 19:30"
+    page.get_by_role("cell", name="May 2026 19:30").click()
+    page.wait_for_timeout(500)
+    # Step 90: Click ")).nth(1)
+    page.locator(r"div").filter(has_text=re.compile(r"^Cancel$")).nth(1).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Cancel$")).nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 91: Click ")).nth(1)
+    page.locator(r"div").filter(has_text=re.compile(r"^Reason$")).nth(1).scroll_into_view_if_needed()
+    page.locator(r"div").filter(has_text=re.compile(r"^Reason$")).nth(1).click()
+    page.wait_for_timeout(500)
+    # Step 92: Click Text "Incorrect Purchase Price"
+    page.get_by_text("Incorrect Purchase Price").click()
+    page.wait_for_timeout(500)
+    # Step 93: Click Text "Confirm"
+    page.get_by_text("Confirm", exact=True).click()
+    page.wait_for_timeout(500)
+    # Step 94: Click Text "Overview"
+    page.get_by_text("Overview").click()
+    page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow executed successfully")
