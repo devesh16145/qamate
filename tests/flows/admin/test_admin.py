@@ -202,25 +202,36 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 27: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(1).fill(tc_data.get("input_5", ""))
-    # Auto-fix: select first MUI autocomplete option (scoped to popup, not sidebar)
+    # Auto-fix: MUI autocomplete select — popup-scoped, with timing guards
+    page.wait_for_timeout(2000)  # let autocomplete API trigger
     try:
-        page.wait_for_load_state("networkidle", timeout=3000)
+        page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:
         pass
-    _ac_popup = page.locator(".MuiPopover-root, .MuiAutocomplete-popper, .MuiAutocomplete-listbox").last
-    _ac_li = _ac_popup.locator('li, [role="menuitem"]').first
+    _ac_popup = page.locator(
+        ".MuiAutocomplete-popper:visible, "
+        ".MuiAutocomplete-listbox:visible, "
+        ".MuiPopover-root:visible, "
+        ".MuiMenu-paper:visible"
+    ).last
+    _ac_item = _ac_popup.locator('li, [role="menuitem"]').first
+    _selected = False
     try:
-        _ac_li.wait_for(state="visible", timeout=8000)
-        _ac_box = _ac_li.bounding_box()
-        if _ac_box:
-            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)
-        page.wait_for_timeout(1000)
+        _ac_item.wait_for(state="visible", timeout=12000)
+        page.wait_for_timeout(500)  # let item finalise
+        _ac_box = _ac_item.bounding_box()
+        if _ac_box and _ac_box["height"] > 5:
+            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2,
+                             _ac_box["y"] + _ac_box["height"] / 2)
+            _selected = True
     except Exception:
-        # Fallback: keyboard select if popup didn\'t render
+        pass
+    if not _selected:
+        # Fallback: keyboard select
         page.keyboard.press("ArrowDown")
         page.wait_for_timeout(300)
         page.keyboard.press("Enter")
-        page.wait_for_timeout(800)
+    page.wait_for_timeout(1500)  # React state commit after selection
     # Step 29: Click "]")
     page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
     page.locator(r"input[name=\"quantity\"]").click(force=True)
@@ -238,25 +249,36 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 33: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(2).fill(tc_data.get("input_7", ""))
-    # Auto-fix: select first MUI autocomplete option (scoped to popup, not sidebar)
+    # Auto-fix: MUI autocomplete select — popup-scoped, with timing guards
+    page.wait_for_timeout(2000)  # let autocomplete API trigger
     try:
-        page.wait_for_load_state("networkidle", timeout=3000)
+        page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:
         pass
-    _ac_popup = page.locator(".MuiPopover-root, .MuiAutocomplete-popper, .MuiAutocomplete-listbox").last
-    _ac_li = _ac_popup.locator('li, [role="menuitem"]').first
+    _ac_popup = page.locator(
+        ".MuiAutocomplete-popper:visible, "
+        ".MuiAutocomplete-listbox:visible, "
+        ".MuiPopover-root:visible, "
+        ".MuiMenu-paper:visible"
+    ).last
+    _ac_item = _ac_popup.locator('li, [role="menuitem"]').first
+    _selected = False
     try:
-        _ac_li.wait_for(state="visible", timeout=8000)
-        _ac_box = _ac_li.bounding_box()
-        if _ac_box:
-            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)
-        page.wait_for_timeout(1000)
+        _ac_item.wait_for(state="visible", timeout=12000)
+        page.wait_for_timeout(500)  # let item finalise
+        _ac_box = _ac_item.bounding_box()
+        if _ac_box and _ac_box["height"] > 5:
+            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2,
+                             _ac_box["y"] + _ac_box["height"] / 2)
+            _selected = True
     except Exception:
-        # Fallback: keyboard select if popup didn\'t render
+        pass
+    if not _selected:
+        # Fallback: keyboard select
         page.keyboard.press("ArrowDown")
         page.wait_for_timeout(300)
         page.keyboard.press("Enter")
-        page.wait_for_timeout(800)
+    page.wait_for_timeout(1500)  # React state commit after selection
     # Step 35: Click ").nth(1)
     page.get_by_placeholder("#").nth(1).click(force=True)
     page.wait_for_timeout(500)

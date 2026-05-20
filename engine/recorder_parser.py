@@ -857,33 +857,47 @@ def generate_from_review(payload, ats_root):
                     test_lines.append('    page.keyboard.press("Tab")')
                     test_lines.append("    page.wait_for_timeout(500)")
                 if is_search_autocomplete:
-                    # Select first MUI autocomplete option — must be scoped to
-                    # the popup (NOT sidebar). PO_CREATION_FLOW_DISCOVERY.md:
+                    # Select first MUI autocomplete option. Discovery doc:
                     #   "`.MuiMenu-root li` — scoped to portal, NOT sidebar"
-                    # The admin's sidebar is also `.MuiMenu-root`, so a bare
-                    # `.MuiMenu-root li`.first hits sidebar items, not the
-                    # autocomplete options. We anchor on .MuiPopover-root /
-                    # .MuiAutocomplete-popper which are body-portal popups
-                    # only, then pick the most recently opened one (.last).
-                    test_lines.append('    # Auto-fix: select first MUI autocomplete option (scoped to popup, not sidebar)')
+                    # Three layers of robustness needed because the API
+                    # timing varies and the popup contents include loading
+                    # placeholders before real items arrive:
+                    #   1. Wait 2s + networkidle so the API has time to return
+                    #   2. Scope locator to body-portal popups (NOT sidebar)
+                    #      using :visible filters and .last
+                    #   3. Sanity-check the bounding box has non-trivial height
+                    #      so we don't click a 0-height loading skeleton
+                    #   4. Generous 1.5s post-click wait for React state commit
+                    test_lines.append('    # Auto-fix: MUI autocomplete select — popup-scoped, with timing guards')
+                    test_lines.append('    page.wait_for_timeout(2000)  # let autocomplete API trigger')
                     test_lines.append('    try:')
-                    test_lines.append('        page.wait_for_load_state("networkidle", timeout=3000)')
+                    test_lines.append('        page.wait_for_load_state("networkidle", timeout=5000)')
                     test_lines.append('    except Exception:')
                     test_lines.append('        pass')
-                    test_lines.append('    _ac_popup = page.locator(".MuiPopover-root, .MuiAutocomplete-popper, .MuiAutocomplete-listbox").last')
-                    test_lines.append('    _ac_li = _ac_popup.locator(\'li, [role="menuitem"]\').first')
+                    test_lines.append('    _ac_popup = page.locator(')
+                    test_lines.append('        ".MuiAutocomplete-popper:visible, "')
+                    test_lines.append('        ".MuiAutocomplete-listbox:visible, "')
+                    test_lines.append('        ".MuiPopover-root:visible, "')
+                    test_lines.append('        ".MuiMenu-paper:visible"')
+                    test_lines.append('    ).last')
+                    test_lines.append('    _ac_item = _ac_popup.locator(\'li, [role="menuitem"]\').first')
+                    test_lines.append('    _selected = False')
                     test_lines.append('    try:')
-                    test_lines.append('        _ac_li.wait_for(state="visible", timeout=8000)')
-                    test_lines.append('        _ac_box = _ac_li.bounding_box()')
-                    test_lines.append('        if _ac_box:')
-                    test_lines.append('            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)')
-                    test_lines.append('        page.wait_for_timeout(1000)')
+                    test_lines.append('        _ac_item.wait_for(state="visible", timeout=12000)')
+                    test_lines.append('        page.wait_for_timeout(500)  # let item finalise')
+                    test_lines.append('        _ac_box = _ac_item.bounding_box()')
+                    test_lines.append('        if _ac_box and _ac_box["height"] > 5:')
+                    test_lines.append('            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2,')
+                    test_lines.append('                             _ac_box["y"] + _ac_box["height"] / 2)')
+                    test_lines.append('            _selected = True')
                     test_lines.append('    except Exception:')
-                    test_lines.append('        # Fallback: keyboard select if popup didn\\\'t render')
+                    test_lines.append('        pass')
+                    test_lines.append('    if not _selected:')
+                    test_lines.append('        # Fallback: keyboard select')
                     test_lines.append('        page.keyboard.press("ArrowDown")')
                     test_lines.append('        page.wait_for_timeout(300)')
                     test_lines.append('        page.keyboard.press("Enter")')
-                    test_lines.append('        page.wait_for_timeout(800)')
+                    test_lines.append('    page.wait_for_timeout(1500)  # React state commit after selection')
                     skip_count = 1  # consume the get_by_text click step
 
             # Smart waits: only where truly needed
