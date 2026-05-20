@@ -202,7 +202,8 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 27: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(1).fill(tc_data.get("input_5", ""))
-    # Auto-fix: MUI autocomplete select — popup-scoped, with timing guards
+    # Auto-fix: MUI autocomplete select #1 → pick .first
+    # (different .nth per call so multi-row flows pick distinct items)
     page.wait_for_timeout(2000)  # let autocomplete API trigger
     try:
         page.wait_for_load_state("networkidle", timeout=5000)
@@ -227,7 +228,7 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     except Exception:
         pass
     if not _selected:
-        # Fallback: keyboard select
+        # Fallback: keyboard select — ArrowDown N+1 times to highlight nth item
         page.keyboard.press("ArrowDown")
         page.wait_for_timeout(300)
         page.keyboard.press("Enter")
@@ -247,7 +248,8 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 33: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(2).fill(tc_data.get("input_7", ""))
-    # Auto-fix: MUI autocomplete select — popup-scoped, with timing guards
+    # Auto-fix: MUI autocomplete select #2 → pick .nth(1)
+    # (different .nth per call so multi-row flows pick distinct items)
     page.wait_for_timeout(2000)  # let autocomplete API trigger
     try:
         page.wait_for_load_state("networkidle", timeout=5000)
@@ -259,7 +261,7 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
         ".MuiPopover-root:visible, "
         ".MuiMenu-paper:visible"
     ).last
-    _ac_item = _ac_popup.locator('li, [role="menuitem"]').first
+    _ac_item = _ac_popup.locator('li, [role="menuitem"]').nth(1)
     _selected = False
     try:
         _ac_item.wait_for(state="visible", timeout=12000)
@@ -272,8 +274,10 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     except Exception:
         pass
     if not _selected:
-        # Fallback: keyboard select
-        page.keyboard.press("ArrowDown")
+        # Fallback: keyboard select — ArrowDown N+1 times to highlight nth item
+        for _i in range(2):
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(100)
         page.wait_for_timeout(300)
         page.keyboard.press("Enter")
     page.wait_for_timeout(1500)  # React state commit after selection

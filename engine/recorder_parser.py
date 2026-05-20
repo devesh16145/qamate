@@ -705,6 +705,7 @@ def generate_from_review(payload, ats_root):
     test_lines = []
     prev_raw = ""
     skip_count = 0           # how many subsequent steps to skip (consumed by a multi-line emit)
+    autocomplete_pick_count = 0  # how many autocomplete-selects have fired so far; nth index for the next pick
     for i, step in enumerate(steps):
         if skip_count > 0:
             skip_count -= 1
@@ -969,18 +970,25 @@ def generate_from_review(payload, ats_root):
                     test_lines.append('    page.keyboard.press("Tab")')
                     test_lines.append("    page.wait_for_timeout(500)")
                 if is_search_autocomplete:
-                    # Select first MUI autocomplete option. Discovery doc:
-                    #   "`.MuiMenu-root li` — scoped to portal, NOT sidebar"
-                    # Three layers of robustness needed because the API
-                    # timing varies and the popup contents include loading
-                    # placeholders before real items arrive:
+                    # Select an MUI autocomplete option. Each successive
+                    # autocomplete fires picks a DIFFERENT item from the
+                    # dropdown — first call → .first, second → .nth(1), etc.
+                    # Reason: the PO form (and similar admin forms) rejects
+                    # duplicate line items. If two rows both pick .first
+                    # with the same search query, Save Changes stays
+                    # silently blocked.
+                    _pick_idx = autocomplete_pick_count
+                    _nth_arg = ".first" if _pick_idx == 0 else f".nth({_pick_idx})"
+                    autocomplete_pick_count += 1
+
+                    # Three layers of robustness:
                     #   1. Wait 2s + networkidle so the API has time to return
                     #   2. Scope locator to body-portal popups (NOT sidebar)
-                    #      using :visible filters and .last
-                    #   3. Sanity-check the bounding box has non-trivial height
-                    #      so we don't click a 0-height loading skeleton
-                    #   4. Generous 1.5s post-click wait for React state commit
-                    test_lines.append('    # Auto-fix: MUI autocomplete select — popup-scoped, with timing guards')
+                    #   3. Sanity-check bounding-box height > 5 (not a 0-height
+                    #      loading skeleton); fall back to keyboard if so
+                    #   4. 1.5s post-click wait for React state commit
+                    test_lines.append(f'    # Auto-fix: MUI autocomplete select #{_pick_idx + 1} → pick {_nth_arg}')
+                    test_lines.append(f'    # (different .nth per call so multi-row flows pick distinct items)')
                     test_lines.append('    page.wait_for_timeout(2000)  # let autocomplete API trigger')
                     test_lines.append('    try:')
                     test_lines.append('        page.wait_for_load_state("networkidle", timeout=5000)')
@@ -992,7 +1000,7 @@ def generate_from_review(payload, ats_root):
                     test_lines.append('        ".MuiPopover-root:visible, "')
                     test_lines.append('        ".MuiMenu-paper:visible"')
                     test_lines.append('    ).last')
-                    test_lines.append('    _ac_item = _ac_popup.locator(\'li, [role="menuitem"]\').first')
+                    test_lines.append(f'    _ac_item = _ac_popup.locator(\'li, [role="menuitem"]\'){_nth_arg}')
                     test_lines.append('    _selected = False')
                     test_lines.append('    try:')
                     test_lines.append('        _ac_item.wait_for(state="visible", timeout=12000)')
@@ -1005,8 +1013,13 @@ def generate_from_review(payload, ats_root):
                     test_lines.append('    except Exception:')
                     test_lines.append('        pass')
                     test_lines.append('    if not _selected:')
-                    test_lines.append('        # Fallback: keyboard select')
-                    test_lines.append('        page.keyboard.press("ArrowDown")')
+                    test_lines.append('        # Fallback: keyboard select — ArrowDown N+1 times to highlight nth item')
+                    if _pick_idx == 0:
+                        test_lines.append('        page.keyboard.press("ArrowDown")')
+                    else:
+                        test_lines.append(f'        for _i in range({_pick_idx + 1}):')
+                        test_lines.append('            page.keyboard.press("ArrowDown")')
+                        test_lines.append('            page.wait_for_timeout(100)')
                     test_lines.append('        page.wait_for_timeout(300)')
                     test_lines.append('        page.keyboard.press("Enter")')
                     test_lines.append('    page.wait_for_timeout(1500)  # React state commit after selection')
