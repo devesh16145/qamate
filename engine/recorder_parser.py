@@ -769,15 +769,21 @@ def generate_from_review(payload, ats_root):
                     else:
                         raw = raw.replace(f'{quote}{full_url}{quote}', f'base_url + "{path}"')
 
-        # ── Selective force=True — only for elements with known overlay patterns ──
+        # ── Selective force=True — for elements with known overlay/disabled patterns ──
         if stype in ("click", "check", "dblclick"):
             target = step.get("target", "")
-            # Force only for checkboxes and Tailwind styled overlays (.peer class)
+            # Force for:
+            #  - checkboxes / Tailwind styled overlays (.peer) — hidden inputs
+            #  - MUI number inputs (quantity, unit_price, etc.) — they are
+            #    briefly disabled while React wires the row's listing_id
+            #    after a product is selected from autocomplete; without force
+            #    Playwright waits up to the default timeout and bails.
             needs_force = (
                 'checkbox' in target.lower()
                 or '.peer' in target
                 or 'role="checkbox"' in target
                 or '.check(' in raw
+                or _MUI_NUMERIC_RE.search(raw + " " + target) is not None
             )
             if needs_force:
                 raw = raw.replace('.click()', '.click(force=True)')
