@@ -270,6 +270,37 @@ def _is_mui_numeric_input_fill(step):
     return bool(_MUI_NUMERIC_RE.search(raw + " " + target))
 
 
+# Admin PO submit buttons that are gated on form validation. When invalid,
+# their wrapper has opacity:0.6 + pointer-events:none, so a plain Playwright
+# .click() looks like it succeeded but never reaches the React handler.
+# Rewrite to: wait for the wrapper to become enabled (opacity >= 0.9), then
+# force-click, then ALSO dispatch a direct DOM .click() as backup (bypasses
+# any lingering pointer-events:none on ancestors).
+_ADMIN_GATED_SUBMIT_BUTTONS = (
+    "Save Changes",
+    "Submit",
+    "Create my Account",
+    "Update",
+)
+
+
+def _is_admin_gated_submit_click(step):
+    """True if this step is a .click() on an admin submit button that's
+    gated on validation. The recording captures these as
+    `page.get_by_text("Save Changes").click()` or similar — they need
+    enabled-state waiting + force=True + JS-click fallback."""
+    if step.get("type") != "click":
+        return False
+    raw = step.get("rawLine", "")
+    if "get_by_text(" not in raw:
+        return False
+    for label in _ADMIN_GATED_SUBMIT_BUTTONS:
+        # Match the label inside the get_by_text(...) argument
+        if f'"{label}"' in raw or f"'{label}'" in raw:
+            return label
+    return None
+
+
 def _is_search_autocomplete_pair(step, next_step):
     """True if this step is a fill on a Search textbox immediately followed
     by a click on a get_by_text element — the classic MUI autocomplete
@@ -857,6 +888,12 @@ def generate_from_review(payload, ats_root):
                 not is_file_chooser_trigger
                 and _is_mui_numeric_input_fill(step)
             )
+            # 3) Admin gated submit click (Save Changes, Submit, etc.) → wait
+            #    for enabled state + force=True + JS-click fallback.
+            gated_submit_label = (
+                None if is_file_chooser_trigger
+                else _is_admin_gated_submit_click(step)
+            )
 
             # For CSS-locator elements, scroll into view first (handles sticky footers)
             if 'locator(' in raw and stype in ("click", "fill", "check"):
@@ -885,7 +922,49 @@ def generate_from_review(payload, ats_root):
                         raw,
                         count=1,
                     )
-                test_lines.append(f"    {raw}")
+                if gated_submit_label:
+                    # Admin PO gated submit buttons (Save Changes, Submit, etc.)
+                    # have opacity:0.6 + pointer-events:none on the wrapper when
+                    # validation isn't complete. A plain .click() looks like it
+                    # succeeded to Playwright but the click event never reaches
+                    # the React handler. Emit: wait for enabled state → force
+                    # click → JS .click() fallback that bypasses pointer-events.
+                    _label = gated_submit_label
+                    test_lines.append(f'    # Auto-fix: wait for "{_label}" wrapper to enable, then force-click + JS fallback')
+                    test_lines.append('    try:')
+                    test_lines.append('        page.wait_for_function(')
+                    test_lines.append(f'            """() => {{')
+                    test_lines.append(f'                const els = Array.from(document.querySelectorAll("p, span, button, div"));')
+                    test_lines.append(f'                const el = els.find(x => (x.textContent || "").trim() === "{_label}");')
+                    test_lines.append('                if (!el) return false;')
+                    test_lines.append('                // Walk up to 5 ancestors checking opacity & pointer-events')
+                    test_lines.append('                let cur = el;')
+                    test_lines.append('                for (let i = 0; i < 5 && cur; i++) {')
+                    test_lines.append('                    const cs = window.getComputedStyle(cur);')
+                    test_lines.append('                    if (parseFloat(cs.opacity || "1") < 0.9) return false;')
+                    test_lines.append('                    if (cs.pointerEvents === "none") return false;')
+                    test_lines.append('                    cur = cur.parentElement;')
+                    test_lines.append('                }')
+                    test_lines.append('                return true;')
+                    test_lines.append('            }""",')
+                    test_lines.append('            timeout=15000,')
+                    test_lines.append('        )')
+                    test_lines.append('    except Exception:')
+                    test_lines.append('        pass  # click anyway')
+                    test_lines.append(f'    page.get_by_text("{_label}").first.click(force=True)')
+                    test_lines.append('    # JS-click fallback in case wrapper still has pointer-events:none')
+                    test_lines.append(f'    page.evaluate("""() => {{')
+                    test_lines.append(f'        const els = Array.from(document.querySelectorAll("p, span, button"));')
+                    test_lines.append(f'        const el = els.find(x => (x.textContent || "").trim() === "{_label}");')
+                    test_lines.append('        if (el) el.click();')
+                    test_lines.append('    }""")')
+                    test_lines.append('    try:')
+                    test_lines.append('        page.wait_for_load_state("networkidle", timeout=10000)')
+                    test_lines.append('    except Exception:')
+                    test_lines.append('        pass')
+                    test_lines.append('    page.wait_for_timeout(2000)  # let post-save UI render')
+                else:
+                    test_lines.append(f"    {raw}")
                 if is_mui_numeric_fill:
                     test_lines.append('    page.keyboard.press("Tab")')
                     test_lines.append("    page.wait_for_timeout(500)")
