@@ -202,11 +202,20 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 27: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(1).fill(tc_data.get("input_5", ""))
-    page.wait_for_timeout(1500)  # wait for MUI autocomplete results
-    page.keyboard.press("ArrowDown")
-    page.wait_for_timeout(300)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    # Auto-fix: select first MUI autocomplete option via bounding-box mouse click
+    _ac_li = page.locator('.MuiMenu-root li, .MuiAutocomplete-listbox li').first
+    try:
+        _ac_li.wait_for(state="visible", timeout=8000)
+        _ac_box = _ac_li.bounding_box()
+        if _ac_box:
+            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)
+        page.wait_for_timeout(800)
+    except Exception as _e:
+        # Fallback: keyboard select if popup didn\'t render or coords failed
+        page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(300)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(800)
     # Step 29: Click "]")
     page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
     page.locator(r"input[name=\"quantity\"]").click()
@@ -224,11 +233,20 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 33: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(2).fill(tc_data.get("input_7", ""))
-    page.wait_for_timeout(1500)  # wait for MUI autocomplete results
-    page.keyboard.press("ArrowDown")
-    page.wait_for_timeout(300)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    # Auto-fix: select first MUI autocomplete option via bounding-box mouse click
+    _ac_li = page.locator('.MuiMenu-root li, .MuiAutocomplete-listbox li').first
+    try:
+        _ac_li.wait_for(state="visible", timeout=8000)
+        _ac_box = _ac_li.bounding_box()
+        if _ac_box:
+            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)
+        page.wait_for_timeout(800)
+    except Exception as _e:
+        # Fallback: keyboard select if popup didn\'t render or coords failed
+        page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(300)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(800)
     # Step 35: Click ").nth(1)
     page.get_by_placeholder("#").nth(1).click()
     page.wait_for_timeout(500)
