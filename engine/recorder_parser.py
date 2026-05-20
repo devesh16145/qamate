@@ -857,26 +857,29 @@ def generate_from_review(payload, ats_root):
                     test_lines.append('    page.keyboard.press("Tab")')
                     test_lines.append("    page.wait_for_timeout(500)")
                 if is_search_autocomplete:
-                    # Select first MUI autocomplete option via mouse-click on
-                    # bounding box (per PO_CREATION_FLOW_DISCOVERY.md):
-                    #   - .click() on the <li> sets display text but not React
-                    #     state (listing_id stays 0).
-                    #   - Keyboard ArrowDown+Enter often misses if the
-                    #     autocomplete API hasn't returned in time, or if the
-                    #     portal popup doesn't receive keyboard events from
-                    #     the textbox.
-                    #   - mouse.click(box.x + w/2, box.y + h/2) on the first
-                    #     <li> is the proven selection that wires the row.
-                    test_lines.append('    # Auto-fix: select first MUI autocomplete option via bounding-box mouse click')
-                    test_lines.append('    _ac_li = page.locator(\'.MuiMenu-root li, .MuiAutocomplete-listbox li\').first')
+                    # Select first MUI autocomplete option — must be scoped to
+                    # the popup (NOT sidebar). PO_CREATION_FLOW_DISCOVERY.md:
+                    #   "`.MuiMenu-root li` — scoped to portal, NOT sidebar"
+                    # The admin's sidebar is also `.MuiMenu-root`, so a bare
+                    # `.MuiMenu-root li`.first hits sidebar items, not the
+                    # autocomplete options. We anchor on .MuiPopover-root /
+                    # .MuiAutocomplete-popper which are body-portal popups
+                    # only, then pick the most recently opened one (.last).
+                    test_lines.append('    # Auto-fix: select first MUI autocomplete option (scoped to popup, not sidebar)')
+                    test_lines.append('    try:')
+                    test_lines.append('        page.wait_for_load_state("networkidle", timeout=3000)')
+                    test_lines.append('    except Exception:')
+                    test_lines.append('        pass')
+                    test_lines.append('    _ac_popup = page.locator(".MuiPopover-root, .MuiAutocomplete-popper, .MuiAutocomplete-listbox").last')
+                    test_lines.append('    _ac_li = _ac_popup.locator(\'li, [role="menuitem"]\').first')
                     test_lines.append('    try:')
                     test_lines.append('        _ac_li.wait_for(state="visible", timeout=8000)')
                     test_lines.append('        _ac_box = _ac_li.bounding_box()')
                     test_lines.append('        if _ac_box:')
                     test_lines.append('            page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)')
-                    test_lines.append('        page.wait_for_timeout(800)')
-                    test_lines.append('    except Exception as _e:')
-                    test_lines.append('        # Fallback: keyboard select if popup didn\\\'t render or coords failed')
+                    test_lines.append('        page.wait_for_timeout(1000)')
+                    test_lines.append('    except Exception:')
+                    test_lines.append('        # Fallback: keyboard select if popup didn\\\'t render')
                     test_lines.append('        page.keyboard.press("ArrowDown")')
                     test_lines.append('        page.wait_for_timeout(300)')
                     test_lines.append('        page.keyboard.press("Enter")')
