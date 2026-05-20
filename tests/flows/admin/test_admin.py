@@ -202,16 +202,21 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 27: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(1).fill(tc_data.get("input_5", ""))
-    # Auto-fix: select first MUI autocomplete option via bounding-box mouse click
-    _ac_li = page.locator('.MuiMenu-root li, .MuiAutocomplete-listbox li').first
+    # Auto-fix: select first MUI autocomplete option (scoped to popup, not sidebar)
+    try:
+        page.wait_for_load_state("networkidle", timeout=3000)
+    except Exception:
+        pass
+    _ac_popup = page.locator(".MuiPopover-root, .MuiAutocomplete-popper, .MuiAutocomplete-listbox").last
+    _ac_li = _ac_popup.locator('li, [role="menuitem"]').first
     try:
         _ac_li.wait_for(state="visible", timeout=8000)
         _ac_box = _ac_li.bounding_box()
         if _ac_box:
             page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)
-        page.wait_for_timeout(800)
-    except Exception as _e:
-        # Fallback: keyboard select if popup didn\'t render or coords failed
+        page.wait_for_timeout(1000)
+    except Exception:
+        # Fallback: keyboard select if popup didn\'t render
         page.keyboard.press("ArrowDown")
         page.wait_for_timeout(300)
         page.keyboard.press("Enter")
@@ -233,16 +238,21 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     page.wait_for_timeout(500)
     # Step 33: Enter "test" in Textbox "Search"
     page.get_by_role("textbox", name="Search").nth(2).fill(tc_data.get("input_7", ""))
-    # Auto-fix: select first MUI autocomplete option via bounding-box mouse click
-    _ac_li = page.locator('.MuiMenu-root li, .MuiAutocomplete-listbox li').first
+    # Auto-fix: select first MUI autocomplete option (scoped to popup, not sidebar)
+    try:
+        page.wait_for_load_state("networkidle", timeout=3000)
+    except Exception:
+        pass
+    _ac_popup = page.locator(".MuiPopover-root, .MuiAutocomplete-popper, .MuiAutocomplete-listbox").last
+    _ac_li = _ac_popup.locator('li, [role="menuitem"]').first
     try:
         _ac_li.wait_for(state="visible", timeout=8000)
         _ac_box = _ac_li.bounding_box()
         if _ac_box:
             page.mouse.click(_ac_box["x"] + _ac_box["width"] / 2, _ac_box["y"] + _ac_box["height"] / 2)
-        page.wait_for_timeout(800)
-    except Exception as _e:
-        # Fallback: keyboard select if popup didn\'t render or coords failed
+        page.wait_for_timeout(1000)
+    except Exception:
+        # Fallback: keyboard select if popup didn\'t render
         page.keyboard.press("ArrowDown")
         page.wait_for_timeout(300)
         page.keyboard.press("Enter")
