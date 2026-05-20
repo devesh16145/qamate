@@ -237,6 +237,29 @@ _MUI_NUMERIC_RE = re.compile(
 )
 
 
+# The admin PO form's rendered DOM doesn't actually expose `name="quantity"`
+# / `name="unit_price"` on the editable inputs — even though the JS bundle
+# uses those names internally (per PO_CREATION_FLOW_DISCOVERY.md). Codegen
+# captured the JS-bundle names but Playwright can't find them at runtime.
+# What IS exposed on the rendered DOM:
+#   - Quantity inputs use `placeholder="#"`
+#   - Rate inputs are `<input type="number">` → role="spinbutton"
+# Rewrite the brittle name= selectors to the working DOM-level selectors.
+_BROKEN_TO_FIXED_SELECTORS = [
+    # (regex matching the broken `page.locator("input[name=\"quantity\"]")`
+    #  form (including raw-string + escape variants),
+    #  replacement using a selector that matches the actual rendered DOM)
+    (
+        re.compile(r'page\.locator\(r?(["\'])input\[name=\\?"quantity\\?"\]\1\)'),
+        'page.get_by_placeholder("#")',
+    ),
+    (
+        re.compile(r'page\.locator\(r?(["\'])input\[name=\\?"unit_price\\?"\]\1\)'),
+        'page.get_by_role("spinbutton")',
+    ),
+]
+
+
 def _is_mui_numeric_input_fill(step):
     """True if this step is a .fill() on a number input that needs
     press_sequentially instead. See PO_CREATION_FLOW_DISCOVERY.md."""
@@ -732,6 +755,16 @@ def generate_from_review(payload, ats_root):
             raw = raw.replace('locator("', 'locator(r"')
         elif "locator('" in raw:
             raw = raw.replace("locator('", "locator(r'")
+
+        # ── Rewrite broken `input[name="..."]` selectors to working DOM-level
+        # selectors (admin PO form quirk — name attrs don't render but
+        # placeholder and role do). Always uses `.first` because codegen
+        # only emits the bare `input[name="quantity"]` form for the FIRST
+        # row's quantity; subsequent rows already have positional selectors
+        # like `get_by_placeholder("#").nth(1)`. ──
+        for _pattern, _replacement in _BROKEN_TO_FIXED_SELECTORS:
+            if _pattern.search(raw):
+                raw = _pattern.sub(_replacement + ".first", raw)
 
         # ── Replace hardcoded values with tc_data references ──
         if stype in ("fill", "type") and step.get("varName"):
