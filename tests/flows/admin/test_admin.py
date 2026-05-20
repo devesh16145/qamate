@@ -233,12 +233,10 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
         page.keyboard.press("Enter")
     page.wait_for_timeout(1500)  # React state commit after selection
     # Step 29: Click "]")
-    page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
-    page.locator(r"input[name=\"quantity\"]").click(force=True)
+    page.get_by_placeholder("#").first.click(force=True)
     page.wait_for_timeout(500)
     # Step 30: Enter "7" in "]")
-    page.locator(r"input[name=\"quantity\"]").scroll_into_view_if_needed()
-    page.locator(r"input[name=\"quantity\"]").press_sequentially(tc_data.get("input_6", ""), delay=80)
+    page.get_by_placeholder("#").first.press_sequentially(tc_data.get("input_6", ""), delay=80)
     page.keyboard.press("Tab")
     page.wait_for_timeout(500)
     # Step 31: Click Text "Add New Row"
