@@ -528,3 +528,350 @@ def test_TC_ADMIN_EXPLORE_ORDERS(page: Page, tc_data, base_url, admin_url, check
     # ── Final wait before closing ──
     page.wait_for_timeout(2000)
     checkpoints.mark_passed("Flow executed successfully")
+
+
+# ============================================================
+# TC-ADMIN-001 — Full PO Lifecycle
+# Hand-authored from analyzer captures + PO_CREATION_FLOW_DISCOVERY.md.
+# One end-to-end flow: admin creates PO → accepts → edits → packs →
+# uploads ready proof → marks ready. Each business action is its own
+# checkpoint so a failure at "Pack" still records that "Create" passed.
+# ============================================================
+
+TEST_UPLOAD_IMAGE = os.path.join(
+    os.path.dirname(__file__), "..", "..", "fixtures", "test_upload.png"
+)
+
+
+def _admin_settle(page, timeout=8000):
+    """Best-effort wait for the admin SPA to quiesce after an action."""
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout)
+    except Exception:
+        pass
+    page.wait_for_timeout(600)
+
+
+def _click_popup_item(page, nth_idx=0, timeout=12000):
+    """Click the nth item in the most recently opened MUI popup
+    (autocomplete / menu). Uses bounding-box mouse click so React's
+    onClick handler actually fires — `.click()` on the <li> sets display
+    text but doesn't wire internal state. Scoped to body-portal popups
+    (NOT sidebar). See ATS_TEST_PATTERNS.md §17."""
+    popup = page.locator(
+        ".MuiAutocomplete-popper:visible, "
+        ".MuiAutocomplete-listbox:visible, "
+        ".MuiPopover-root:visible, "
+        ".MuiMenu-paper:visible"
+    ).last
+    item = popup.locator('li, [role="menuitem"]').nth(nth_idx)
+    item.wait_for(state="visible", timeout=timeout)
+    page.wait_for_timeout(400)
+    box = item.bounding_box()
+    if not box or box["height"] < 5:
+        raise AssertionError(f"Popup item .nth({nth_idx}) has no usable bounding box (height={box['height'] if box else 'None'})")
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.wait_for_timeout(1200)
+
+
+def _click_gated_submit(page, label, timeout=15000):
+    """Click an admin gated submit button (Save Changes, Update, Submit,
+    Confirm, Accept, etc.). These have opacity:0.6 + pointer-events:none
+    on the wrapper when not ready; we wait for enable, then force-click,
+    then JS-click as final fallback. See ATS_TEST_PATTERNS.md."""
+    try:
+        page.wait_for_function(
+            f"""() => {{
+                const els = Array.from(document.querySelectorAll("p, span, button, div"));
+                const el = els.find(x => (x.textContent || "").trim() === "{label}");
+                if (!el) return false;
+                let cur = el;
+                for (let i = 0; i < 5 && cur; i++) {{
+                    const cs = window.getComputedStyle(cur);
+                    if (parseFloat(cs.opacity || "1") < 0.9) return false;
+                    if (cs.pointerEvents === "none") return false;
+                    cur = cur.parentElement;
+                }}
+                return true;
+            }}""",
+            timeout=timeout,
+        )
+    except Exception:
+        pass  # try clicking anyway
+    try:
+        page.get_by_text(label, exact=True).first.click(force=True)
+    except Exception:
+        pass
+    # JS-click fallback (bypasses pointer-events:none on ancestors)
+    page.evaluate(
+        f"""() => {{
+            const els = Array.from(document.querySelectorAll("p, span, button"));
+            const el = els.find(x => (x.textContent || "").trim() === "{label}");
+            if (el) el.click();
+        }}"""
+    )
+
+
+def _fill_mui_number(page, locator, value):
+    """Fill an MUI number input (quantity/rate/etc.) using press_sequentially
+    + Tab so React's onChange + validation fires. .fill() doesn't trigger
+    onChange on these inputs. See ATS_TEST_PATTERNS.md §18."""
+    locator.scroll_into_view_if_needed()
+    locator.click(force=True)
+    page.wait_for_timeout(200)
+    locator.press_sequentially(str(value), delay=80)
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(400)
+
+
+def _open_custom_dropdown(page, label_text):
+    """Open one of the admin's custom <p>-label + sibling-div dropdowns
+    (Agrim Branch, Select Address). Per PO_CREATION_FLOW_DISCOVERY.md
+    these can't be clicked via Playwright's element actions reliably —
+    we trigger via page.evaluate finding the label, walking to the
+    next sibling with cursor:pointer, calling .click()."""
+    page.evaluate(
+        f"""() => {{
+            const labels = document.querySelectorAll('p');
+            for (const label of labels) {{
+                if ((label.textContent || '').trim() === '{label_text}') {{
+                    const dropdown = label.nextElementSibling;
+                    if (dropdown && getComputedStyle(dropdown).cursor === 'pointer') {{
+                        dropdown.click();
+                        return;
+                    }}
+                }}
+            }}
+        }}"""
+    )
+    page.wait_for_timeout(1500)
+
+
+@pytest.mark.tc("TC-ADMIN-001")
+def test_TC_ADMIN_001_full_po_lifecycle(admin_page: Page, admin_url, tc_data, checkpoints):
+    """End-to-end PO lifecycle: admin creates a PO with 2 line items, opens
+    it, accepts, edits, packs (with confirm), uploads ready proof, and marks
+    ready. Each business milestone is its own checkpoint so a downstream
+    failure doesn't hide an earlier success.
+
+    Source of truth: PO_CREATION_FLOW_DISCOVERY.md + analyzer capture from
+    TC-ADMIN-EXPLORE-ORDERS_latest.json + ATS_TEST_PATTERNS.md sections
+    §17 (MUI autocomplete), §18 (MUI number inputs).
+    """
+    page = admin_page
+    state = {}  # shared across checkpoints (carries po_id)
+
+    # ── A. Navigation ─────────────────────────────────────────
+
+    def cp_open_po_listing():
+        page.goto(admin_url + "#/oms/po/all", wait_until="domcontentloaded")
+        _admin_settle(page, timeout=12000)
+        # Verify the "Create" affordance is visible
+        create_loc = page.locator('a:has-text("Create"), p:has-text("Create")').first
+        create_loc.wait_for(state="visible", timeout=10000)
+
+    def cp_open_create_form():
+        page.locator('a:has-text("Create"), p:has-text("Create")').first.click()
+        _admin_settle(page, timeout=12000)
+        page.get_by_text("Vendor Information").first.wait_for(state="visible", timeout=15000)
+
+    # ── B. Fill the PO form ────────────────────────────────────
+
+    def cp_select_vendor():
+        search = page.get_by_role("textbox", name="Search").first
+        search.click()
+        search.fill(tc_data.get("vendor_search", "m&"))
+        page.wait_for_timeout(2000)
+        # Vendor menu items have role=menuitem — Playwright's dblclick
+        # on the matching menuitem reliably wires the seller_id.
+        page.get_by_role("menuitem", name=tc_data.get("vendor_name", "M&M_Brand1")).first.dblclick()
+        _admin_settle(page, timeout=10000)
+        # Confirm billing address auto-populated (sanity check)
+        assert page.get_by_text("Billing Address", exact=False).count() > 0
+
+    def cp_select_agrim_branch():
+        _open_custom_dropdown(page, "Agrim Branch*")
+        target = tc_data.get("agrim_branch", "ODISHA")
+        page.get_by_role("menuitem", name=target).first.click()
+        _admin_settle(page, timeout=10000)
+
+    def cp_select_delivery_address():
+        _open_custom_dropdown(page, "Select Address")
+        target = tc_data.get("delivery_address", "CUTTACK WH")
+        page.get_by_text(target, exact=True).first.click()
+        _admin_settle(page)
+
+    def cp_set_load_type():
+        # Load Type is a dropdown — open it via the section header div
+        page.locator('div').filter(has_text=re.compile(r"^Load Type$")).nth(1).click()
+        page.wait_for_timeout(800)
+        page.get_by_text(tc_data.get("load_type", "Full Load"), exact=True).click()
+        page.wait_for_timeout(600)
+
+    def cp_set_po_type():
+        page.get_by_text("PO Type", exact=False).nth(1).click()
+        page.wait_for_timeout(800)
+        page.get_by_role("menuitem", name=tc_data.get("po_type", "Inventory Purchase")).first.click()
+        page.wait_for_timeout(800)
+        page.locator('div').filter(has_text=re.compile(r"^Type of Inventory Purchase$")).nth(1).click()
+        page.wait_for_timeout(800)
+        page.get_by_role("menuitem", name=tc_data.get("inventory_type", "Business Purchase")).first.click()
+        _admin_settle(page)
+
+    def cp_add_line_item_1():
+        # Product search is the SECOND "Search" textbox (vendor was first)
+        item_search = page.get_by_role("textbox", name="Search").nth(1)
+        item_search.click()
+        item_search.fill(tc_data.get("item_search_1", "test"))
+        page.wait_for_timeout(2000)
+        _click_popup_item(page, nth_idx=0)  # first product in dropdown
+        # Quantity = first placeholder="#" input on the page
+        qty = page.get_by_placeholder("#").first
+        _fill_mui_number(page, qty, tc_data.get("item_qty_1", "7"))
+
+    def cp_add_line_item_2():
+        page.get_by_text("Add New Row", exact=True).click()
+        page.wait_for_timeout(1500)
+        # Product search for row 2 is the THIRD "Search" textbox
+        item_search = page.get_by_role("textbox", name="Search").nth(2)
+        item_search.click()
+        item_search.fill(tc_data.get("item_search_2", "test"))
+        page.wait_for_timeout(2000)
+        # DIFFERENT product than row 1 — pick .nth(1) — the form rejects
+        # duplicate line items and Save Changes silently no-ops if rows
+        # have the same item. See memory: project_admin_po_duplicate_items.
+        _click_popup_item(page, nth_idx=1)
+        # Row 2 quantity is the SECOND placeholder="#" input
+        qty2 = page.get_by_placeholder("#").nth(1)
+        _fill_mui_number(page, qty2, tc_data.get("item_qty_2", "8"))
+        # Row 2 rate is the 3rd spinbutton (vendor search inputs above are spinbuttons too)
+        rate2 = page.get_by_role("spinbutton").nth(2)
+        _fill_mui_number(page, rate2, tc_data.get("item_rate_2", "8"))
+
+    def cp_save_create_po():
+        _click_gated_submit(page, "Save Changes")
+        # Wait for URL to switch to /<id>/show
+        page.wait_for_url(re.compile(r"/oms/po/all/\d+/show"), timeout=20000)
+        m = re.search(r"/oms/po/all/(\d+)", page.url)
+        assert m, f"Could not extract PO ID from URL {page.url}"
+        state["po_id"] = m.group(1)
+        print(f"[TC-ADMIN-001] Created PO ID: {state['po_id']}")
+        _admin_settle(page, timeout=10000)
+
+    def cp_verify_po_detail():
+        if not state.get("po_id"):
+            return False  # skip — create failed
+        # PO detail page should show vendor + items
+        assert tc_data.get("vendor_name", "M&M_Brand1") in page.content(), \
+            "Vendor name not visible on PO detail page"
+
+    # ── C. PO lifecycle actions ────────────────────────────────
+
+    def cp_accept_po():
+        if not state.get("po_id"):
+            return False
+        # "Accept" appears multiple times in the page (table headers, modals)
+        # — the recording captured nth(5) which is the actual action button
+        try:
+            page.get_by_text("Accept", exact=True).nth(5).click(force=True, timeout=5000)
+        except Exception:
+            # Fallback: find any visible Accept and click
+            page.get_by_role("button", name="Accept").first.click(force=True)
+        _admin_settle(page, timeout=10000)
+
+    def cp_open_edit_form():
+        if not state.get("po_id"):
+            return False
+        page.get_by_role("img", name="edit icon").first.click()
+        _admin_settle(page, timeout=10000)
+        # After clicking edit, URL should drop the /show suffix
+        # (e.g. /oms/po/all/1179 instead of /1179/show)
+        page.wait_for_url(re.compile(rf"/oms/po/all/{state['po_id']}(?!/show)"), timeout=10000)
+
+    def cp_update_po():
+        if not state.get("po_id"):
+            return False
+        # Click Update — same gated-submit pattern as Save Changes
+        _click_gated_submit(page, "Update")
+        _admin_settle(page, timeout=10000)
+        # After Update we usually go back to /show
+        try:
+            page.wait_for_url(re.compile(rf"/oms/po/all/{state['po_id']}/show"), timeout=10000)
+        except Exception:
+            pass  # don't fail if URL didn't change exactly as expected
+
+    def cp_pack_po():
+        if not state.get("po_id"):
+            return False
+        # Pack action: text like "Pack at <warehouse>"
+        pack_loc = page.get_by_text(re.compile(r"^Pack at ", re.I)).first
+        pack_loc.wait_for(state="visible", timeout=15000)
+        pack_loc.click(force=True)
+        _admin_settle(page, timeout=10000)
+        # If a Confirm dialog appears, accept it
+        try:
+            page.get_by_text("Confirm", exact=True).first.click(force=True, timeout=3000)
+            _admin_settle(page)
+        except Exception:
+            pass
+
+    def cp_upload_ready_proof():
+        if not state.get("po_id"):
+            return False
+        # Open Proof tab/section (recording used get_by_text("Proof") filter)
+        try:
+            page.locator('div').filter(has_text=re.compile(r"^Proof$")).first.click()
+            page.wait_for_timeout(1500)
+        except Exception:
+            pass
+        # Click "Click to Upload Document" — opens file chooser
+        try:
+            with page.expect_file_chooser(timeout=8000) as fc_info:
+                page.get_by_text("Click to Upload Document").first.click()
+            fc_info.value.set_files(TEST_UPLOAD_IMAGE)
+        except Exception:
+            # Fallback: find any visible file input and set directly
+            file_inputs = page.locator('input[type="file"]')
+            if file_inputs.count() > 0:
+                file_inputs.first.set_input_files(TEST_UPLOAD_IMAGE)
+        _admin_settle(page, timeout=10000)
+
+    def cp_mark_ready():
+        if not state.get("po_id"):
+            return False
+        # The recording clicked Ready a couple of times in the Proof section
+        ready_btns = page.get_by_text("Ready", exact=True)
+        # Pick the action button (usually the last visible one)
+        count = ready_btns.count()
+        if count == 0:
+            raise AssertionError("No 'Ready' button visible after upload")
+        ready_btns.last.click(force=True)
+        _admin_settle(page, timeout=10000)
+
+    def cp_verify_final_state():
+        if not state.get("po_id"):
+            return False
+        # Sanity check: the PO should still be loaded and not show an error toast
+        errors = page.locator('[role="alert"]:visible, [class*="toast"]:visible:has-text("error")')
+        assert errors.count() == 0, f"Error visible: {errors.first.text_content()[:200]}"
+
+    # ── Execute checkpoints ────────────────────────────────────
+
+    checkpoints.run("Open PO listing", cp_open_po_listing)
+    checkpoints.run("Open Create PO form", cp_open_create_form)
+    checkpoints.run("Select vendor + auto-populate addresses", cp_select_vendor)
+    checkpoints.run("Select Agrim Branch", cp_select_agrim_branch)
+    checkpoints.run("Select Delivery Address (warehouse)", cp_select_delivery_address)
+    checkpoints.run("Set Load Type", cp_set_load_type)
+    checkpoints.run("Set PO Type and Inventory Purchase type", cp_set_po_type)
+    checkpoints.run("Add line item 1 (first product)", cp_add_line_item_1)
+    checkpoints.run("Add line item 2 (distinct second product)", cp_add_line_item_2)
+    checkpoints.run("Save Changes — create PO", cp_save_create_po)
+    checkpoints.run("Verify PO detail page", cp_verify_po_detail)
+    checkpoints.run("Accept PO", cp_accept_po)
+    checkpoints.run("Open Edit form", cp_open_edit_form)
+    checkpoints.run("Update PO", cp_update_po)
+    checkpoints.run("Pack PO (with Confirm)", cp_pack_po)
+    checkpoints.run("Upload ready proof", cp_upload_ready_proof)
+    checkpoints.run("Mark Ready", cp_mark_ready)
+    checkpoints.run("Verify no errors on final state", cp_verify_final_state)

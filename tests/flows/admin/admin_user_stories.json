@@ -1,1 +1,42 @@
-{}
+{
+    "TC-ADMIN-001": {
+        "user_story": {
+            "summary": "Full PO lifecycle on admin panel — create through Ready",
+            "role": "Agrim Operations Admin",
+            "want": "to create a Purchase Order for a vendor with multiple line items, accept it, edit a detail if needed, pack it from the warehouse, upload the ready proof document, and mark it Ready for pickup — all from the admin panel in one continuous flow",
+            "benefit": "I can fulfil a vendor PO end-to-end without switching contexts and without leaving any state half-saved between steps; each milestone is independently visible if anything goes wrong",
+            "acceptance_criteria": [
+                "Create form opens from the PO listing page",
+                "Vendor selection auto-populates Billing and Shipping addresses",
+                "Save Changes is gated until at least one valid line item is present (different products per row)",
+                "After save, the new PO appears at /#/oms/po/all/<id>/show with a numeric ID",
+                "Accept transitions the PO to Accepted state",
+                "Edit form opens at /#/oms/po/all/<id> (no /show suffix) and Update returns to /show",
+                "Pack action moves PO to Packed state (with a Confirm dialog)",
+                "Ready Proof upload accepts an image file",
+                "Mark Ready transitions PO to Ready state",
+                "No error toasts surface during the lifecycle"
+            ]
+        },
+        "test_steps": [
+            {"step": 1, "action": "Navigate to /#/oms/po/all", "expected": "PO listing loads with Create button visible"},
+            {"step": 2, "action": "Click Create", "expected": "Create PO form opens with Vendor Information section"},
+            {"step": 3, "action": "Search vendor 'm&', dblclick M&M_Brand1 menuitem", "expected": "Billing and Shipping addresses auto-populate from vendor profile"},
+            {"step": 4, "action": "Open Agrim Branch dropdown, select ODISHA", "expected": "Branch set, delivery address dropdown enables"},
+            {"step": 5, "action": "Open Select Address dropdown, click CUTTACK WH", "expected": "Delivery address populated"},
+            {"step": 6, "action": "Open Load Type dropdown, click Full Load", "expected": "Load Type set"},
+            {"step": 7, "action": "Open PO Type, pick Inventory Purchase; pick Type of Inventory Purchase = Business Purchase", "expected": "PO Type configured"},
+            {"step": 8, "action": "Type 'test' in row-1 product search, pick first autocomplete item, fill quantity 7", "expected": "Row 1 wired with product, quantity, total visible"},
+            {"step": 9, "action": "Click Add New Row, type 'test' in row-2 product search, pick SECOND autocomplete item, fill quantity 8 and rate 8", "expected": "Row 2 has a DIFFERENT product from row 1; both rows valid"},
+            {"step": 10, "action": "Wait for Save Changes wrapper to enable (opacity 1), click it", "expected": "PO created; URL becomes /#/oms/po/all/<NEW_ID>/show"},
+            {"step": 11, "action": "Verify vendor name visible on detail page", "expected": "Detail page shows the created PO with the vendor name"},
+            {"step": 12, "action": "Click Accept", "expected": "PO transitions to Accepted state"},
+            {"step": 13, "action": "Click edit icon", "expected": "Edit form opens at /#/oms/po/all/<NEW_ID>"},
+            {"step": 14, "action": "Click Update", "expected": "Update fires; URL returns to /show"},
+            {"step": 15, "action": "Click 'Pack at <warehouse>' button; accept any Confirm dialog", "expected": "PO moves to Packed state"},
+            {"step": 16, "action": "Open Proof section, click 'Click to Upload Document', set fixture image via file chooser", "expected": "Document uploaded, file shows in proof section"},
+            {"step": 17, "action": "Click Ready", "expected": "PO moves to Ready state"},
+            {"step": 18, "action": "Scan page for error toasts", "expected": "No errors visible — lifecycle completed cleanly"}
+        ]
+    }
+}

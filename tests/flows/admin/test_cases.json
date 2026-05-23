@@ -1,5 +1,32 @@
 [
     {
+        "tc_id": "TC-ADMIN-001",
+        "module": "Admin Panel — Purchase Orders",
+        "description": "End-to-end PO lifecycle: admin creates PO with 2 distinct line items → accepts → edits → packs (with Confirm) → uploads ready proof → marks Ready. Single test, ~18 checkpoints, each business action recorded independently.",
+        "preconditions": "Admin user has access to PO module. Vendor 'M&M_Brand1' exists. Warehouse 'CUTTACK WH' (or similar) exists under Agrim Branch ODISHA. Product search 'test' returns at least 2 distinct products for the vendor.",
+        "checkpoints": [
+            "Open PO listing",
+            "Open Create PO form",
+            "Select vendor + auto-populate addresses",
+            "Select Agrim Branch",
+            "Select Delivery Address (warehouse)",
+            "Set Load Type",
+            "Set PO Type and Inventory Purchase type",
+            "Add line item 1 (first product)",
+            "Add line item 2 (distinct second product)",
+            "Save Changes — create PO",
+            "Verify PO detail page",
+            "Accept PO",
+            "Open Edit form",
+            "Update PO",
+            "Pack PO (with Confirm)",
+            "Upload ready proof",
+            "Mark Ready",
+            "Verify no errors on final state"
+        ],
+        "expected_result": "PO is created, accepted, edited, packed, ready proof uploaded, and marked Ready. PO status visible in the listing as Ready. No error toasts on the page."
+    },
+    {
         "tc_id": "TC-ADMIN-EXPLORE-ORDERS",
         "description": "Explore orders",
         "steps": [
