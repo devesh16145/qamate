@@ -1,4 +1,18 @@
 {
+    "TC-ADMIN-001": {
+        "vendor_search": "m&",
+        "vendor_name": "M&M_Brand1",
+        "agrim_branch": "ODISHA",
+        "delivery_address": "CUTTACK WH",
+        "load_type": "Full Load",
+        "po_type": "Inventory Purchase",
+        "inventory_type": "Business Purchase",
+        "item_search_1": "test",
+        "item_qty_1": "7",
+        "item_search_2": "test",
+        "item_qty_2": "8",
+        "item_rate_2": "8"
+    },
     "TC-ADMIN-EXPLORE-ORDERS": {
         "input_1": "amit.dalal@agrim.app",
         "input_2": "A",
