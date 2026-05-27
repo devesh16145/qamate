@@ -11,7 +11,13 @@
         "item_qty_1": "7",
         "item_search_2": "test",
         "item_qty_2": "8",
-        "item_rate_2": "8"
+        "item_rate_2": "8",
+        "shipment_load_type": "FTL",
+        "vehicle_number": "MH12AB1234",
+        "driver_number": "9999999999",
+        "transporter_bill": "TB123456",
+        "freight_charges": "1000",
+        "courier_edd": "31/12/2026"
     },
     "TC-ADMIN-EXPLORE-ORDERS": {
         "input_1": "amit.dalal@agrim.app",
