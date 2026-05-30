@@ -580,15 +580,18 @@ def _generate_assertion_code(assertion):
         op = assertion.get("operator", ">=")
         return f'assert page.locator("{selector}").count() {op} {count}'
     elif atype == "page_contains_text":
-        return f'page.wait_for_timeout(500)\nassert "{value}" in page.content()'
+        # Web-first: auto-retries until the text appears (or timeout) instead of
+        # a single brittle check after a fixed sleep.
+        return f'expect(page.locator("body")).to_contain_text("{value}", timeout={timeout})'
     elif atype == "page_not_contains_text":
-        return f'page.wait_for_timeout(500)\nassert "{value}" not in page.content()'
+        return f'expect(page.locator("body")).not_to_contain_text("{value}", timeout={timeout})'
     elif atype == "url_contains":
-        return f'page.wait_for_timeout(500)\nassert "{value}" in page.url'
+        # re.escape at runtime so URL punctuation (?, ., /) is matched literally.
+        return f'expect(page).to_have_url(re.compile(".*" + re.escape("{value}") + ".*"), timeout={timeout})'
     elif atype == "url_equals":
-        return f'page.wait_for_timeout(500)\nassert page.url == "{value}"'
+        return f'expect(page).to_have_url("{value}", timeout={timeout})'
     elif atype == "url_not_contains":
-        return f'page.wait_for_timeout(500)\nassert "{value}" not in page.url'
+        return f'expect(page).not_to_have_url(re.compile(".*" + re.escape("{value}") + ".*"), timeout={timeout})'
     elif atype == "title_contains":
         return f'expect(page).to_have_title(re.compile(r".*{value}.*"), timeout={timeout})'
     elif atype == "no_error_toast":

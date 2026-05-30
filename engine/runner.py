@@ -31,8 +31,23 @@ def log(message):
     emit({"event": "log", "message": str(message)})
 
 
+def _load_pass_criteria(ats_root):
+    """Read pass_criteria from config.json (best-effort)."""
+    try:
+        with open(os.path.join(ats_root, "config.json"), "r", encoding="utf-8") as f:
+            return json.load(f).get("pass_criteria") or {}
+    except Exception:
+        return {}
+
+
+def _has_rerunfailures():
+    """True if pytest-rerunfailures is installed (enables flaky retry)."""
+    import importlib.util
+    return importlib.util.find_spec("pytest_rerunfailures") is not None
+
+
 def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec_mode="sequential",
-              seller_user_index=None, admin_user_index=None, variant=None):
+              seller_user_index=None, admin_user_index=None, variant=None, project_id=None):
     """Execute selected test cases via pytest subprocess."""
     start_time = time.time()
 
@@ -89,11 +104,27 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     if exec_mode == "parallel" and parallel > 1 and len(tc_ids) > 1:
         cmd.extend(["-n", str(min(parallel, len(tc_ids)))])
 
+    # ── Flaky retry (pytest-rerunfailures) per pass_criteria ──
+    pass_criteria = _load_pass_criteria(ats_root)
+    try:
+        retries = int(pass_criteria.get("retries", 0) or 0)
+    except (TypeError, ValueError):
+        retries = 0
+    if retries > 0 and _has_rerunfailures():
+        cmd.extend(["--reruns", str(retries), "--reruns-delay", "1"])
+        log(f"Flaky retry enabled: up to {retries} rerun(s) of a failed test")
+    elif retries > 0:
+        log("pass_criteria.retries set but pytest-rerunfailures is not installed — retry skipped")
+
     log(f"Command: {' '.join(cmd)}")
 
     # ── Environment variables for conftest.py ──
     test_env = os.environ.copy()
     test_env["ATS_ENV"] = env
+    # Project mode: when set, conftest targets this project's URL + captured auth
+    # instead of the legacy Agrim platforms config.
+    if project_id:
+        test_env["ATS_PROJECT_ID"] = project_id
     test_env["ATS_RESULTS_DIR"] = results_dir
     test_env["ATS_RUN_TIMESTAMP"] = timestamp
     test_env["ATS_ROOT"] = ats_root
@@ -140,6 +171,7 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     failed = 0
     skipped = 0
     total = len(tc_ids)
+    rerun_seen = set()  # tc_ids that pytest-rerunfailures retried (flaky candidates)
 
     # Regex to match pytest result lines like:
     # tests/flows/catalog/test_catalog.py::test_TC_CATALOG_001_page_loads[chromium] PASSED  [33%]
@@ -186,13 +218,27 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
             else:
                 error_buffer.append(line)
 
+        # pytest-rerunfailures retried this test (failed attempt → will rerun).
+        # The final attempt still prints PASSED/FAILED and is counted there; here
+        # we only note that a retry happened so we can label the test FLAKY.
+        if " RERUN" in line:
+            rtc = extract_tc_id(line)
+            if rtc:
+                rerun_seen.add(rtc)
+            continue
+
         # Parse for test results
         if " PASSED" in line:
             passed += 1
             tc_id = extract_tc_id(line)
             if tc_id:
                 cps = _read_checkpoints(results_dir, tc_id)
-                emit({"event": "tc_result", "tc_id": tc_id, "status": "PASS", "duration": 0, "checkpoints": cps})
+                # A trace exists for a passing test only when tracing mode is "on"
+                artifacts = _find_test_artifacts(ats_root, tc_id, results_dir)
+                heals = _read_heals(results_dir, tc_id)
+                emit({"event": "tc_result", "tc_id": tc_id, "status": "PASS", "duration": 0,
+                      "checkpoints": cps, "trace_path": artifacts.get("trace"),
+                      "heals": heals, "heal_count": len(heals)})
             emit({"event": "progress", "passed": passed, "failed": failed, "skipped": skipped, "total": total})
 
         elif " FAILED" in line or " ERROR" in line:
@@ -201,13 +247,14 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
             if tc_id:
                 cps = _read_checkpoints(results_dir, tc_id)
                 # Find trace and screenshot artifacts for this test
-                artifacts = _find_test_artifacts(ats_root, tc_id)
+                artifacts = _find_test_artifacts(ats_root, tc_id, results_dir)
                 error_msg = error_details.get(tc_id, "")
                 # Extract the core error message (last E line)
                 short_error = ""
                 for err_line in error_msg.split("\n"):
                     if err_line.strip().startswith("E "):
                         short_error = err_line.strip()[2:].strip()
+                heals = _read_heals(results_dir, tc_id)
                 emit({
                     "event": "tc_result",
                     "tc_id": tc_id,
@@ -218,6 +265,8 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
                     "error_details": error_msg,
                     "trace_path": artifacts.get("trace"),
                     "screenshot_path": artifacts.get("screenshot"),
+                    "heals": heals,
+                    "heal_count": len(heals),
                 })
             emit({"event": "progress", "passed": passed, "failed": failed, "skipped": skipped, "total": total})
 
@@ -240,19 +289,56 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     except Exception as e:
         log(f"Warning: Report generation failed: {e}")
 
-    # ── Finalize metadata ──
+    # ── Finalize metadata — authoritative counts + per-test record from JUnit ──
+    # (not stdout scraping). This makes history correct and self-contained even
+    # when the live UI state is stale. Written defensively so a loader hiccup
+    # can never leave the run stuck on "Running".
     duration_str = f"{int(duration_s // 60)}m {int(duration_s % 60)}s" if duration_s >= 60 else f"{duration_s}s"
-    metadata.update({
-        "status": "Completed",
-        "passed": passed,
-        "failed": failed,
-        "skipped": skipped,
-        "duration": duration_str,
-        "report_path": report_path,
-        "folder_path": results_dir,
-    })
-    with open(meta_path, "w") as f:
-        json.dump(metadata, f, indent=2)
+    canonical = None
+    try:
+        from results_loader import load_run_results
+        canonical = load_run_results(results_dir, flaky_ids=rerun_seen)
+    except Exception as e:
+        log(f"Warning: results loader failed, falling back to live counts: {e}")
+
+    if canonical:
+        c = canonical["counts"]
+        metadata.update({
+            "status": "Completed",
+            "schema_version": canonical["schema_version"],
+            "total": c["total"],
+            "passed": c["passed"],
+            "failed": c["failed"],
+            "skipped": c["skipped"],
+            "flaky": c["flaky"],
+            "warnings": c["warnings"],
+            "duration": duration_str,
+            "duration_s": duration_s,
+            "report_path": report_path,
+            "folder_path": results_dir,
+            "results": canonical["tests"],
+        })
+        log(f"Results: {c['passed']} passed, {c['failed']} failed, {c['skipped']} skipped"
+            + (f", {c['flaky']} flaky" if c['flaky'] else "")
+            + (f", {c['warnings']} warning(s)" if c['warnings'] else ""))
+    else:
+        # Fallback: stdout-scraped counts (only if JUnit was unreadable)
+        metadata.update({
+            "status": "Completed",
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+            "duration": duration_str,
+            "duration_s": duration_s,
+            "report_path": report_path,
+            "folder_path": results_dir,
+        })
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+    except Exception as e:
+        log(f"ERROR: could not write run_metadata.json: {e}")
 
     emit({"event": "run_complete", "summary": metadata})
 
@@ -286,14 +372,54 @@ def _read_checkpoints(results_dir, tc_id):
     return []
 
 
-def _find_test_artifacts(ats_root, tc_id):
-    """Find trace.zip and screenshot.png for a failed test in test-results/.
+def _read_heals(results_dir, tc_id):
+    """Read self-heal events written by conftest's healer fixture, if any."""
+    heal_file = os.path.join(results_dir, "heals", f"{tc_id}.json")
+    if os.path.exists(heal_file):
+        try:
+            with open(heal_file, "r", encoding="utf-8") as f:
+                return json.load(f).get("heals", [])
+        except Exception:
+            pass
+    return []
 
-    pytest-playwright saves artifacts in directories like:
+
+def _find_test_artifacts(ats_root, tc_id, results_dir=None):
+    """Find trace.zip and screenshot.png for a test.
+
+    Preferred source is the per-run folder written by conftest.py:
+      results/<timestamp>/traces/<tc_id>.zip
+      results/<timestamp>/screenshots/<tc_name>_FAILED.png
+    Falls back to the pytest-playwright layout:
       test-results/test-TC-SIGNUP-001-chromium/trace.zip
-      test-results/test-TC-SIGNUP-001-chromium/test-failed-1.png
     """
     artifacts = {}
+
+    # ── Preferred: this run's traces/ and screenshots/ folders ──
+    if results_dir:
+        traces_dir = os.path.join(results_dir, "traces")
+        if os.path.isdir(traces_dir):
+            exact = os.path.join(traces_dir, f"{tc_id}.zip")
+            if os.path.exists(exact):
+                artifacts["trace"] = exact
+            else:
+                # variant traces are named <tc_id>_<variant>.zip
+                for f in sorted(os.listdir(traces_dir)):
+                    if f.endswith(".zip") and f.startswith(tc_id):
+                        artifacts["trace"] = os.path.join(traces_dir, f)
+                        break
+        ss_dir = os.path.join(results_dir, "screenshots")
+        if os.path.isdir(ss_dir):
+            underscored = tc_id.replace("-", "_")
+            for f in sorted(os.listdir(ss_dir)):
+                if f.endswith(".png") and (tc_id in f or underscored in f):
+                    artifacts["screenshot"] = os.path.join(ss_dir, f)
+                    break
+
+    if "trace" in artifacts:
+        return artifacts
+
+    # ── Fallback: pytest-playwright test-results/ layout ──
     test_results_dir = os.path.join(ats_root, "test-results")
     if not os.path.exists(test_results_dir):
         return artifacts
@@ -353,6 +479,7 @@ def main():
             admin_user_index = data.get("adminUserIndex", 0)
             variant = data.get("variant", None)
             exec_mode = data.get("execMode", "sequential")
+            project_id = data.get("project_id") or data.get("projectId")
 
             if not tc_ids:
                 log("ERROR: No test cases provided")
@@ -366,8 +493,11 @@ def main():
             # Run in a thread so stdin remains readable (for stop commands)
             if variant:
                 log(f"Target variant: {variant}")
+            if project_id:
+                log(f"Project: {project_id}")
             t = threading.Thread(target=run_tests, args=(tc_ids, env, mode, parallel, ats_root, zoom, user_index, exec_mode),
-                                 kwargs={"seller_user_index": seller_user_index, "admin_user_index": admin_user_index, "variant": variant},
+                                 kwargs={"seller_user_index": seller_user_index, "admin_user_index": admin_user_index,
+                                         "variant": variant, "project_id": project_id},
                                  daemon=True)
             t.start()
 

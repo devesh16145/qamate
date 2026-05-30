@@ -16,6 +16,47 @@ import re
 import time
 import sys
 
+# Self-healing locator engine (engine/smart_locator.py). Added to sys.path so it
+# imports under both the Electron runner (PYTHONPATH=ats_root) and bare pytest.
+_ENGINE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine")
+if _ENGINE_DIR not in sys.path:
+    sys.path.insert(0, _ENGINE_DIR)
+from smart_locator import Healer, smart_locator as _smart_locator
+import project_store
+
+
+# ── Project mode (general-purpose) ───────────────────────────────────────────
+# A run targets a Project only when the runner explicitly sets ATS_PROJECT_ID.
+# Without it we stay in legacy mode (Agrim's config.json `platforms`), so all
+# existing Agrim tests behave exactly as before.
+
+def _ats_root():
+    return os.environ.get("ATS_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _active_project():
+    pid = os.environ.get("ATS_PROJECT_ID")
+    if not pid:
+        return None
+    try:
+        return project_store.get_project(_ats_root(), pid)
+    except Exception:
+        return None
+
+
+def _project_storage_state(project):
+    """A project's captured Playwright storage_state (cookies + origins), or empty."""
+    if not project:
+        return {"cookies": [], "origins": []}
+    try:
+        ss = project_store.storage_state_path(_ats_root(), project["id"])
+        if os.path.exists(ss):
+            with open(ss, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"cookies": [], "origins": []}
+
 
 # ── Config loading ──
 def _load_config():
@@ -35,35 +76,90 @@ def pytest_configure(config):
 
 # ── Checkpoint Reporting ──
 
-def _write_checkpoints(tc_id, checkpoints):
-    """Write checkpoint results to a JSON file for the runner to pick up."""
-    results_dir = os.environ.get("ATS_RESULTS_DIR", "")
-    if not results_dir:
-        return
+_SEVERITIES = ("critical", "normal", "minor")
+
+_DEFAULT_CRITERIA = {
+    "mode": "critical_only",       # critical_only | all | threshold
+    "threshold_pct": 90.0,
+    "treat_skipped_as": "ignore",  # ignore | fail | pass
+    "default_severity": "critical",
+}
+
+
+def _criteria_with_defaults(raw):
+    """Merge config pass_criteria over safe defaults and validate."""
+    c = dict(_DEFAULT_CRITERIA)
+    if isinstance(raw, dict):
+        for k in _DEFAULT_CRITERIA:
+            if raw.get(k) is not None:
+                c[k] = raw[k]
+    if c["mode"] not in ("critical_only", "all", "threshold"):
+        c["mode"] = "critical_only"
+    if c["default_severity"] not in _SEVERITIES:
+        c["default_severity"] = "critical"
+    if c["treat_skipped_as"] not in ("ignore", "fail", "pass"):
+        c["treat_skipped_as"] = "ignore"
+    try:
+        c["threshold_pct"] = float(c["threshold_pct"])
+    except Exception:
+        c["threshold_pct"] = 90.0
+    return c
+
+
+def _write_checkpoints(tc_id, checkpoints, verdict=None, criteria=None):
+    """Persist checkpoint results (and, once known, the criteria verdict) so the
+    runner / results loader / UI can show per-checkpoint detail. Rewritten after
+    every checkpoint so partial results survive an early exit. Falls back to a
+    manual results dir when ATS_RESULTS_DIR is unset (never silently dropped).
+    tc_id carries any variant suffix, so parametrized variants don't collide."""
+    results_dir = os.environ.get("ATS_RESULTS_DIR") or os.path.join(
+        os.path.dirname(__file__), "results", "manual")
     cp_dir = os.path.join(results_dir, "checkpoints")
     os.makedirs(cp_dir, exist_ok=True)
     safe_id = tc_id.replace("-", "_")
     cp_file = os.path.join(cp_dir, f"{safe_id}.json")
+    payload = {"tc_id": tc_id, "checkpoints": checkpoints}
+    if verdict is not None:
+        payload["verdict"] = verdict
+    if criteria is not None:
+        payload["criteria"] = criteria
     with open(cp_file, "w", encoding="utf-8") as f:
-        json.dump({"tc_id": tc_id, "checkpoints": checkpoints}, f, indent=2)
+        json.dump(payload, f, indent=2)
 
 
 class CheckpointRunner:
-    """Runs checkpoints sequentially. Continues after failure so all checkpoints execute.
-    After all checkpoints, raises the first failure."""
+    """Runs checkpoints sequentially, continuing after failure so every checkpoint
+    executes. The verdict is decided by the configured pass criteria rather than
+    'first exception wins':
+      - critical_only : only a failed CRITICAL checkpoint fails the test;
+                        normal/minor failures become non-blocking warnings
+      - all           : any failed checkpoint fails the test
+      - threshold     : pass if >= threshold_pct of checkpoints pass AND every
+                        critical one passes
+    Skipped checkpoints are handled per treat_skipped_as (ignore|fail|pass)."""
 
-    def __init__(self, tc_id):
+    def __init__(self, tc_id, criteria=None):
         self.tc_id = tc_id
         self.checkpoints = []
         self._first_error = None
+        self._first_critical_error = None
+        self.criteria = _criteria_with_defaults(criteria)
+        self.verdict = None
+        self._finalized = False
 
-    def run(self, name, fn, *args, **kwargs):
-        """Execute a checkpoint. Returns True if passed, False if failed."""
-        cp_entry = {"name": name, "status": "PASS", "error": None}
+    def _default_severity(self):
+        return self.criteria.get("default_severity", "critical")
+
+    def run(self, name, fn, *args, severity=None, **kwargs):
+        """Execute a checkpoint. `severity` is critical|normal|minor; critical
+        is blocking, normal/minor are warnings under critical_only mode.
+        Returns True if the checkpoint passed."""
+        sev = severity if severity in _SEVERITIES else self._default_severity()
+        cp_entry = {"name": name, "status": "PASS", "error": None, "severity": sev}
         print(f"[{self.tc_id}] >> {name}", flush=True)
         try:
             result = fn(*args, **kwargs)
-            # If fn returns False explicitly, treat as skip (used for gating subsequent steps)
+            # An explicit False return means "condition not met" → skip (used to gate later steps)
             if result is False:
                 cp_entry["status"] = "SKIP"
                 cp_entry["error"] = "Step returned False (condition not met)"
@@ -75,40 +171,80 @@ class CheckpointRunner:
             cp_entry["error"] = str(e)[:500]
             if self._first_error is None:
                 self._first_error = e
-            print(f"[{self.tc_id}] FAIL {name}: {str(e)[:200]}", flush=True)
+            if sev == "critical" and self._first_critical_error is None:
+                self._first_critical_error = e
+            tag = "FAIL" if sev == "critical" else f"WARN[{sev}]"
+            print(f"[{self.tc_id}] {tag} {name}: {str(e)[:200]}", flush=True)
         self.checkpoints.append(cp_entry)
-        # Flush checkpoints to file after each one (so partial results survive early exits)
         _write_checkpoints(self.tc_id, self.checkpoints)
         return cp_entry["status"] == "PASS"
 
     def mark_passed(self, name):
         """Directly record a passed checkpoint."""
-        cp_entry = {"name": name, "status": "PASS", "error": None}
-        self.checkpoints.append(cp_entry)
+        self.checkpoints.append({"name": name, "status": "PASS", "error": None, "severity": "critical"})
         print(f"[{self.tc_id}] OK {name}", flush=True)
         _write_checkpoints(self.tc_id, self.checkpoints)
 
     def mark_failed(self, name, error_msg="Assertion Failed"):
-        """Directly record a failed checkpoint and raise the error."""
-        cp_entry = {"name": name, "status": "FAIL", "error": error_msg}
-        self.checkpoints.append(cp_entry)
+        """Directly record a hard (critical) failure and raise immediately."""
+        self.checkpoints.append({"name": name, "status": "FAIL", "error": error_msg, "severity": "critical"})
         print(f"[{self.tc_id}] FAIL {name}: {error_msg}", flush=True)
         if self._first_error is None:
             self._first_error = AssertionError(error_msg)
+        if self._first_critical_error is None:
+            self._first_critical_error = AssertionError(error_msg)
         _write_checkpoints(self.tc_id, self.checkpoints)
-        raise self._first_error
+        raise self._first_critical_error
 
     def skip(self, name, reason="Skipped"):
         """Record a skipped checkpoint (e.g. optional feature not present)."""
-        self.checkpoints.append({"name": name, "status": "SKIP", "error": reason})
+        self.checkpoints.append({"name": name, "status": "SKIP", "error": reason, "severity": "minor"})
         print(f"[{self.tc_id}] SKIP {name}: {reason}", flush=True)
         _write_checkpoints(self.tc_id, self.checkpoints)
 
-    def finalize(self):
-        """Call after all checkpoints. Raises the first failure if any checkpoint failed."""
-        _write_checkpoints(self.tc_id, self.checkpoints)
-        if self._first_error is not None:
-            raise self._first_error
+    def _evaluate(self):
+        """Decide the verdict from the configured criteria. Returns (verdict, error_or_None)."""
+        fails = [c for c in self.checkpoints if c["status"] == "FAIL"]
+        crit_fails = [c for c in fails if c.get("severity") == "critical"]
+        skips = [c for c in self.checkpoints if c["status"] == "SKIP"]
+        treat_skip = self.criteria.get("treat_skipped_as", "ignore")
+        mode = self.criteria.get("mode", "critical_only")
+        skip_fails = len(skips) if treat_skip == "fail" else 0
+
+        if mode == "all":
+            failed = (len(fails) + skip_fails) > 0
+        elif mode == "threshold":
+            considered = [c for c in self.checkpoints if c["status"] != "SKIP"]
+            if treat_skip != "ignore":
+                considered = considered + skips
+            total = max(1, len(considered))
+            passes = sum(1 for c in considered
+                         if c["status"] == "PASS" or (c["status"] == "SKIP" and treat_skip == "pass"))
+            pct = passes / total * 100.0
+            failed = pct < self.criteria.get("threshold_pct", 90.0) or len(crit_fails) > 0
+        else:  # critical_only
+            failed = len(crit_fails) > 0 or skip_fails > 0
+
+        if failed:
+            err = self._first_critical_error or self._first_error or AssertionError(
+                f"Pass criteria '{mode}' not met: {len(crit_fails)} critical failure(s), "
+                f"{len(fails)} total failure(s), {len(skips)} skipped.")
+            return "FAIL", err
+        non_critical_fails = [c for c in fails if c.get("severity") != "critical"]
+        return ("PASS_WITH_WARNINGS" if non_critical_fails else "PASS"), None
+
+    def finalize(self, raise_on_fail=True):
+        """Decide and persist the verdict. Idempotent. Raises the criteria
+        failure iff the verdict is FAIL and raise_on_fail is True."""
+        if self._finalized:
+            return self.verdict
+        verdict, err = self._evaluate()
+        self.verdict = verdict
+        self._finalized = True
+        _write_checkpoints(self.tc_id, self.checkpoints, verdict=verdict, criteria=self.criteria)
+        if err is not None and raise_on_fail:
+            raise err
+        return verdict
 
     @property
     def passed(self):
@@ -127,15 +263,42 @@ class CheckpointRunner:
 
 
 @pytest.fixture(autouse=True)
-def checkpoints(request):
-    """Provide a CheckpointRunner for every test. Automatically extracts tc_id from test name."""
-    tc_name = request.node.name.split("[")[0]
-    match = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', tc_name)
-    tc_id = match.group(1).replace("_", "-") if match else tc_name
-    runner = CheckpointRunner(tc_id)
+def checkpoints(request, ats_config):
+    """Provide a CheckpointRunner for every test, wired to the configured pass
+    criteria. tc_id includes any variant suffix so per-variant checkpoint files
+    don't overwrite each other."""
+    tc_id = _tc_id_with_variant(request.node)
+    runner = CheckpointRunner(tc_id, criteria=(ats_config or {}).get("pass_criteria"))
+    request.node._checkpoint_runner = runner
     yield runner
-    # After the test function returns, finalize (raise if any checkpoint failed)
-    runner.finalize()
+    # Normally finalized by the pytest_runtest_call hook (so a criteria FAIL is
+    # reported as a call-phase FAILURE, not a teardown error). Safety net for
+    # paths where that hook didn't run; never raise during teardown.
+    if not runner._finalized:
+        runner.finalize(raise_on_fail=False)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Apply the checkpoint criteria verdict to the test's CALL phase, so a
+    criteria FAIL is reported as a clean FAILED (consistent live and in history)
+    rather than a passed call + teardown error."""
+    outcome = yield
+    runner = getattr(item, "_checkpoint_runner", None)
+    if runner is None or runner._finalized:
+        return
+    if outcome.excinfo is not None:
+        # The test body itself raised — persist the verdict but let that
+        # primary exception stand as the failure.
+        runner.finalize(raise_on_fail=False)
+        return
+    try:
+        runner.finalize(raise_on_fail=True)
+    except Exception as e:
+        if hasattr(outcome, "force_exception"):
+            outcome.force_exception(e)   # attribute the FAIL to the call phase
+        else:
+            raise
 
 
 # ── Platform helpers ──
@@ -269,6 +432,76 @@ def _apply_login_state(page, state, url):
     page.wait_for_timeout(2000)
 
 
+# ── Playwright Trace recording ──────────────────────────────────────────────
+# A trace is a zip capturing a full DOM snapshot, network log, console, and
+# before/after screenshot for every action — opened with `playwright show-trace`
+# for time-travel debugging. This is the industry-standard way to diagnose an
+# E2E failure (far richer than a single screenshot + video). Traces are saved
+# to results/<timestamp>/traces/<tc_id>.zip. All trace handling is wrapped in
+# try/except: a tracing problem must NEVER fail or mask a real test result.
+
+_BROWSER_NAMES = {"chromium", "firefox", "webkit"}
+
+
+def _tc_id_with_variant(node):
+    """Hyphenated TC id plus any *data* variant suffix (e.g. TC-CATALOG-010_negative).
+
+    pytest-playwright always parametrizes browser_name, so node names look like
+    `test_TC_X_001[chromium]` or `test_TC_X_001[chromium-negative]` when a data
+    variant is also present. We strip the browser-name token(s) so the artifact
+    name stays clean (TC-X-001) while a real data variant is preserved."""
+    tc_name = node.name.split("[")[0]
+    m = re.search(r'(TC_[A-Z]+(?:_[A-Z]+|_\d+)+)', tc_name)
+    tc_id = m.group(1).replace("_", "-") if m else tc_name
+    bracket = re.search(r'\[(.+?)\]', node.name)
+    if bracket:
+        tokens = [t for t in bracket.group(1).split("-") if t and t.lower() not in _BROWSER_NAMES]
+        if tokens:
+            tc_id += "_" + "-".join(tokens)
+    return tc_id
+
+
+def _trace_mode(ats_config):
+    """Resolve tracing mode: ATS_TRACING env override > config.json > default."""
+    mode = os.environ.get("ATS_TRACING") or ats_config.get("tracing", {}).get("mode", "retain-on-failure")
+    mode = str(mode).strip().lower()
+    return mode if mode in ("on", "off", "retain-on-failure") else "retain-on-failure"
+
+
+def _should_save_trace(mode, failed):
+    """Given the mode and whether the test failed, should the trace be kept?"""
+    if mode == "off":
+        return False
+    if mode == "on":
+        return True
+    return bool(failed)  # retain-on-failure
+
+
+def _start_trace(context, title, mode):
+    """Begin tracing on a context. Returns True if started. Fail-safe."""
+    if mode == "off":
+        return False
+    try:
+        context.tracing.start(title=title, screenshots=True, snapshots=True, sources=True)
+        return True
+    except Exception as e:
+        print(f"[TRACE] start failed: {e}", flush=True)
+        return False
+
+
+def _finalize_trace(context, save, target_path):
+    """Stop tracing; write the zip if save else discard. Fail-safe."""
+    try:
+        if save:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            context.tracing.stop(path=target_path)
+            print(f"[TRACE] Saved {target_path}", flush=True)
+        else:
+            context.tracing.stop()
+    except Exception as e:
+        print(f"[TRACE] stop failed: {e}", flush=True)
+
+
 # ── Fixtures ──
 @pytest.fixture(scope="session")
 def ats_config():
@@ -285,21 +518,48 @@ def results_dir():
 
 
 @pytest.fixture(scope="session")
-def seller_url(ats_config):
-    """Seller app URL for the active environment."""
+def active_project():
+    """The Project this run targets, or None for legacy (Agrim platforms) mode."""
+    return _active_project()
+
+
+@pytest.fixture(scope="session")
+def seller_url(ats_config, active_project):
+    """Base app URL for the active environment. In project mode this is the
+    project's URL; otherwise the Agrim seller-app URL (backward compatible)."""
+    if active_project:
+        return project_store.resolve_base_url(active_project, os.environ.get("ATS_ENV"))
     return _get_platform_url(ats_config, "seller")
 
 
 @pytest.fixture(scope="session")
-def admin_url(ats_config):
-    """Admin panel URL for the active environment."""
+def admin_url(ats_config, active_project):
+    """Admin panel URL. In project mode there's no separate admin app, so this
+    falls back to the project base URL; otherwise the Agrim admin URL."""
+    if active_project:
+        return project_store.resolve_base_url(active_project, os.environ.get("ATS_ENV"))
     return _get_platform_url(ats_config, "admin")
 
 
 @pytest.fixture(scope="session")
 def base_url(seller_url):
-    """Seller app URL — backward compatibility alias."""
+    """Base app URL — alias of seller_url (project-aware)."""
     return seller_url
+
+
+@pytest.fixture(autouse=True)
+def _project_auth(page, active_project, seller_url):
+    """In project mode, apply the project's captured login (storage_state) to the
+    page so synthesized/explored tests run authenticated. No-op in legacy mode
+    or when the project has no captured auth."""
+    if active_project:
+        state = _project_storage_state(active_project)
+        if state.get("cookies") or state.get("origins"):
+            try:
+                _apply_login_state(page, state, seller_url)
+            except Exception as e:
+                print(f"[PROJECT AUTH] failed: {e}", flush=True)
+    yield
 
 
 @pytest.fixture(scope="session")
@@ -376,7 +636,7 @@ def seller_page(page, seller_login_state, seller_url):
 
 
 @pytest.fixture
-def admin_page(browser, browser_context_args, admin_login_state, admin_url, request):
+def admin_page(browser, browser_context_args, admin_login_state, admin_url, request, results_dir, ats_config):
     """Per-test page logged into admin panel. Own browser context so it can
     coexist with seller_page in the same test."""
     has_cookies = len(admin_login_state.get("cookies", [])) > 0
@@ -385,6 +645,11 @@ def admin_page(browser, browser_context_args, admin_login_state, admin_url, requ
     page = context.new_page()
     page.set_default_timeout(30000)
     page.set_default_navigation_timeout(30000)
+    # Trace this context too — admin tests are the most failure-prone, so a
+    # full DOM/network trace is especially valuable here.
+    mode = _trace_mode(ats_config)
+    tc_id = _tc_id_with_variant(request.node)
+    admin_trace_on = _start_trace(context, f"{tc_id} [admin]", mode)
     _apply_login_state(page, admin_login_state, admin_url)
     print(f"[FIXTURE] admin_page: ready. Current URL: {page.url}", flush=True)
     # Track video path so screenshot/video fixtures know about this context
@@ -395,6 +660,11 @@ def admin_page(browser, browser_context_args, admin_login_state, admin_url, requ
     except Exception:
         pass
     yield page
+    # Finalize the admin trace BEFORE closing the context (stop requires a live context).
+    if admin_trace_on:
+        rep = getattr(request.node, "rep_call", None)
+        save = _should_save_trace(mode, bool(rep and rep.failed))
+        _finalize_trace(context, save, os.path.join(results_dir, "traces", f"{tc_id}.zip"))
     page.close()
     context.close()
 
@@ -405,6 +675,72 @@ def set_page_timeouts(page):
     page.set_default_timeout(30000)
     page.set_default_navigation_timeout(30000)
     yield page
+
+
+@pytest.fixture(autouse=True)
+def manage_trace(page, request, results_dir, ats_config):
+    """Record a Playwright trace for the default browser context (seller / generic
+    tests), saved to results/<timestamp>/traces/<tc_id>.zip per the configured
+    mode. Admin-panel tests record their own trace inside admin_page, so here we
+    only persist the default-context trace when that page was actually used —
+    avoiding a noise trace of a blank, unused default tab on pure-admin tests."""
+    mode = _trace_mode(ats_config)
+    tc_id = _tc_id_with_variant(request.node)
+    started = _start_trace(page.context, tc_id, mode)
+
+    yield
+
+    if not started:
+        return
+    rep = getattr(request.node, "rep_call", None)
+    failed = bool(rep and rep.failed)
+    save = _should_save_trace(mode, failed)
+
+    name = tc_id
+    if save and getattr(request.node, "_admin_page", None) is not None:
+        # The admin context's trace (saved by admin_page) is the meaningful one.
+        # Keep this default-context trace only if the seller/default page was
+        # actually navigated; otherwise it's a blank unused tab → discard.
+        try:
+            blank = page.url in ("about:blank", "", "chrome://newtab/")
+        except Exception:
+            blank = True
+        if blank:
+            save = False
+        else:
+            name = f"{tc_id}_seller"
+    _finalize_trace(page.context, save, os.path.join(results_dir, "traces", f"{name}.zip"))
+
+
+@pytest.fixture
+def healer(request, results_dir):
+    """Per-test heal recorder. Writes results/<ts>/heals/<tc_id>.json only if a
+    locator actually drifted — so the run report can show "N locators
+    auto-healed" and (later) offer to commit the repaired locator."""
+    tc_id = _tc_id_with_variant(request.node)
+    h = Healer(tc_id)
+    yield h
+    try:
+        if h.events:
+            h.write(os.path.join(results_dir, "heals", f"{tc_id}.json"))
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def heal(healer):
+    """Self-healing locator factory. Use it for the parts of a flow most prone
+    to UI drift (buttons, CTAs, dynamic rows) instead of a raw page.locator():
+
+        heal(seller_page, 'page.get_by_role("button", name="Save")').resolve().click()
+
+    The returned object resolves through primary -> derived fallbacks ->
+    fingerprint scan, recording any heal. Pass explicit `fallbacks=[...]` /
+    `fingerprint={...}` (captured at record/synthesis time) for best accuracy."""
+    def _heal(page, primary, **kwargs):
+        kwargs.setdefault("healer", healer)
+        return _smart_locator(page, primary, **kwargs)
+    return _heal
 
 
 # ── Screenshot on failure ──
