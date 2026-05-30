@@ -50,6 +50,7 @@ CLI:
 """
 
 import os
+import re
 import sys
 import json
 import asyncio
@@ -67,11 +68,18 @@ from smart_locator import smart_locator, SelfHealError
 from recorder_parser import generate_from_review
 from agent_recorder import _locator_str, _q  # reuse the proven codegen helpers
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, capture_run_messages
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
+
+# Max tool calls per chat turn — a bound on runaway loops AND on turn duration
+# (each call is a model round-trip + a browser action). When hit, we preserve the
+# full history and summarize findings so the user can say "continue". Override
+# with ATS_AGENT_TOOL_BUDGET.
+TOOL_BUDGET = int(os.environ.get("ATS_AGENT_TOOL_BUDGET") or 30)
 
 
 # ── stdout: JSON lines, ASCII-only (the Electron runner pipes through a cp1252
@@ -87,6 +95,35 @@ def emit(obj):
 
 def log(msg):
     emit({"event": "log", "message": str(msg)})
+
+
+def _read_json_file(path, default=None):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _trim_dangling_tool_calls(messages):
+    """Drop trailing model responses whose tool calls were never executed (the run
+    stopped on the tool-call budget mid-request). Without this the history ends with
+    an 'unprocessed tool call' and pydantic-ai rejects the next user prompt."""
+    msgs = list(messages)
+    returned = set()
+    for m in msgs:
+        for p in getattr(m, "parts", []):
+            if isinstance(p, ToolReturnPart):
+                returned.add(p.tool_call_id)
+    while msgs:
+        last = msgs[-1]
+        if isinstance(last, ModelResponse) and any(
+                isinstance(p, ToolCallPart) and p.tool_call_id not in returned
+                for p in getattr(last, "parts", [])):
+            msgs.pop()
+        else:
+            break
+    return msgs
 
 
 # ── The single thread that owns ALL Playwright objects ───────────────────────
@@ -407,7 +444,19 @@ _SYSTEM = (
     "- Add a checkpoint (add_checkpoint) at each meaningful outcome so the test verifies results.\n"
     "- When you have done what the user asked, call create_test_case EXACTLY ONCE and then STOP. "
     "It becomes a normal, runnable, self-healing test case. Use a clear tc_id (TC-<AREA>-NNN) and flow_id.\n\n"
+    "Using the ATS app itself (as a user, never editing its code):\n"
+    "- You CAN read and change the app's Settings: get_settings (environments, the seller/admin "
+    "accounts WITH their credentials, execution options, Jira) and update_setting. So when asked to "
+    "'use the seller credentials from settings', call get_settings — never ask the user for them.\n"
+    "- You CAN browse the existing test suite (list_test_flows / read_test_cases) and read run "
+    "reports / history (list_runs / read_run), and list projects (list_projects).\n"
+    "- Note: you usually do NOT need credentials to log in — the session is already authenticated "
+    "for you; get_settings is for answering questions and for flows that explicitly need an account.\n\n"
     "Stay on task:\n"
+    "- You have a limited action budget per turn; spend it efficiently (don't re-inspect when the "
+    "page did not change). For open-ended exploration, cover the most important things first, then "
+    "give a SUMMARY of what you found and offer to continue — never trail off mid-action or try to "
+    "do everything in one turn.\n"
     "- Pursue ONLY the user's goal; do not wander into unrelated pages or features.\n"
     "- If you get stuck (an element is missing, a modal will not close, a page is unexpectedly "
     "complex) or you are unsure, STOP and ASK the user — do NOT keep clicking around hoping it works.\n"
@@ -484,6 +533,124 @@ def build_agent(model):
         Returns the created test's flow/path."""
         return await _bro(ctx.deps.session.create_test, ctx.deps.ats_root, ctx.deps.project,
                           tc_id, flow_id, description, preconditions, expected_result)
+
+    # ── ATS app features: use the tool itself AS A USER (read/change settings,
+    # browse the suite, read reports). File-backed — no browser involved. ──
+
+    @agent.tool
+    async def get_settings(ctx: RunContext[Deps]) -> dict:
+        """Read the ATS app Settings (config.json): environments, platform accounts
+        (seller/admin) WITH their login credentials, execution defaults, LLM providers,
+        pass criteria, and Jira project. Use this to look up credentials, URLs, or any
+        configured option a user would see in Settings (the Jira API token is redacted)."""
+        cfg = _read_json_file(os.path.join(ctx.deps.ats_root, "config.json")) or {}
+        cfg = json.loads(json.dumps(cfg, default=str))
+        try:
+            if (cfg.get("jira") or {}).get("apiToken"):
+                cfg["jira"]["apiToken"] = "[set]"
+        except Exception:
+            pass
+        return cfg
+
+    @agent.tool
+    async def update_setting(ctx: RunContext[Deps], dotted_path: str, value: str) -> dict:
+        """Change ONE setting in config.json (as a user would in the Settings UI).
+        dotted_path e.g. 'execution.default_mode' or 'default_environment'; value is
+        parsed as JSON when possible (true / 5 / "x"), else kept as a string."""
+        path = os.path.join(ctx.deps.ats_root, "config.json")
+        cfg = _read_json_file(path)
+        if cfg is None:
+            return {"ok": False, "error": "config.json not found"}
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = value
+        keys = [k for k in dotted_path.split(".") if k]
+        if not keys:
+            return {"ok": False, "error": "empty dotted_path"}
+        node = cfg
+        for k in keys[:-1]:
+            if not isinstance(node.get(k), dict):
+                node[k] = {}
+            node = node[k]
+        node[keys[-1]] = parsed
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+        except Exception as e:
+            return {"ok": False, "error": f"could not write config.json: {e}"}
+        return {"ok": True, "path": dotted_path, "value": parsed}
+
+    @agent.tool
+    async def list_test_flows(ctx: RunContext[Deps]) -> dict:
+        """List the test flows and their test case IDs (tests/flows/*/test_cases.json) —
+        the suite shown in the app's left panel."""
+        flows_dir = os.path.join(ctx.deps.ats_root, "tests", "flows")
+        out = []
+        try:
+            names = sorted(os.listdir(flows_dir))
+        except Exception:
+            names = []
+        for name in names:
+            tcf = os.path.join(flows_dir, name, "test_cases.json")
+            if os.path.isfile(tcf):
+                tcs = _read_json_file(tcf) or []
+                if isinstance(tcs, list):
+                    out.append({"flow": name, "count": len(tcs),
+                                "tc_ids": [t.get("tc_id") for t in tcs if isinstance(t, dict)][:60]})
+        return {"flows": out}
+
+    @agent.tool
+    async def read_test_cases(ctx: RunContext[Deps], flow_id: str) -> dict:
+        """Read the test cases in a flow (id, description, checkpoints, expected_result)."""
+        tcf = os.path.join(ctx.deps.ats_root, "tests", "flows", flow_id, "test_cases.json")
+        tcs = _read_json_file(tcf)
+        if tcs is None:
+            return {"ok": False, "error": f"flow '{flow_id}' not found"}
+        return {"flow": flow_id, "test_cases": [
+            {"tc_id": t.get("tc_id"), "description": t.get("description"),
+             "checkpoints": t.get("checkpoints"), "expected_result": t.get("expected_result")}
+            for t in tcs if isinstance(t, dict)][:60]}
+
+    @agent.tool
+    async def list_runs(ctx: RunContext[Deps], limit: int = 10) -> dict:
+        """List recent test runs with pass/fail summaries (results/<ts>/run_metadata.json) —
+        the History panel."""
+        rd = os.path.join(ctx.deps.ats_root, "results")
+        runs = []
+        try:
+            stamps = sorted([d for d in os.listdir(rd) if os.path.isdir(os.path.join(rd, d))], reverse=True)
+        except Exception:
+            stamps = []
+        for ts in stamps:
+            m = _read_json_file(os.path.join(rd, ts, "run_metadata.json"))
+            if m:
+                runs.append({"run": ts, "status": m.get("status"), "passed": m.get("passed"),
+                             "failed": m.get("failed"), "skipped": m.get("skipped"), "total": m.get("total")})
+            if len(runs) >= max(1, limit):
+                break
+        return {"runs": runs}
+
+    @agent.tool
+    async def read_run(ctx: RunContext[Deps], run_id: str) -> dict:
+        """Read one run's per-test results (verdict, duration, error) from run_metadata.json."""
+        m = _read_json_file(os.path.join(ctx.deps.ats_root, "results", run_id, "run_metadata.json"))
+        if m is None:
+            return {"ok": False, "error": f"run '{run_id}' not found"}
+        res = m.get("results", []) if isinstance(m.get("results"), list) else []
+        return {"run": run_id, "status": m.get("status"),
+                "summary": {k: m.get(k) for k in ("passed", "failed", "skipped", "flaky", "warnings", "total")},
+                "results": [{"tc": r.get("tc_id") or r.get("name"), "verdict": r.get("status") or r.get("verdict"),
+                             "duration": r.get("duration"), "error": (r.get("error") or "")[:200]}
+                            for r in res if isinstance(r, dict)][:80]}
+
+    @agent.tool
+    async def list_projects(ctx: RunContext[Deps]) -> dict:
+        """List the projects this tool targets (apps under test) and which is active."""
+        root = ctx.deps.ats_root
+        return {"active": project_store.get_active_project_id(root),
+                "projects": [{"id": p.get("id"), "name": p.get("name"), "url": project_store.resolve_base_url(p)}
+                             for p in project_store.list_projects(root)]}
 
     return agent
 
@@ -584,6 +751,7 @@ class AgentRuntime:
     def __init__(self):
         self.session = None
         self.agent = None
+        self.model = None
         self.deps = None
         self.history = []        # list[ModelMessage] — conversation memory
         self.ats_root = os.environ.get("ATS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -601,6 +769,7 @@ class AgentRuntime:
         except Exception as e:
             emit({"event": "error", "message": str(e)})
             return
+        self.model = model
 
         project_id = cmd.get("project_id") or project_store.get_active_project_id(self.ats_root)
         project = project_store.get_project(self.ats_root, project_id) if project_id else None
@@ -641,23 +810,51 @@ class AgentRuntime:
         if not message:
             emit({"event": "error", "message": "empty message"})
             return
+        with capture_run_messages() as messages:
+            try:
+                result = await self.agent.run(
+                    message, deps=self.deps, message_history=self.history,
+                    event_stream_handler=_stream_handler,
+                    usage_limits=UsageLimits(tool_calls_limit=TOOL_BUDGET))
+                self.history = result.all_messages()
+                emit({"event": "turn_complete", "text": result.output})
+            except UsageLimitExceeded:
+                # Hit the per-turn action budget. Keep the partial history so "continue"
+                # has context, but TRIM the trailing un-executed tool call (else
+                # pydantic-ai rejects the next prompt), then summarize findings.
+                if messages:
+                    self.history = _trim_dangling_tool_calls(messages)
+                await self._summarize_after_budget()
+            except Exception as e:
+                emit({"event": "error", "message": f"{type(e).__name__}: {e}"})
+                log(traceback.format_exc())
+
+    async def _summarize_after_budget(self):
+        """After the tool budget is hit, produce a findings summary (a tool-less run
+        over the preserved history) so the exploration isn't lost, then invite the
+        user to continue. Falls back to a plain pause note if summarizing fails."""
+        summary = ""
         try:
-            result = await self.agent.run(
-                message, deps=self.deps, message_history=self.history,
-                event_stream_handler=_stream_handler,
-                usage_limits=UsageLimits(tool_calls_limit=20))
-            self.history = result.all_messages()
-            emit({"event": "turn_complete", "text": result.output})
-        except UsageLimitExceeded:
-            # Bound a runaway turn so the user regains control. History is left at the
-            # previous turn; the live browser stays wherever it ended up.
-            emit({"event": "turn_complete",
-                  "text": ("(Stopped — I hit the per-turn budget of ~20 actions without finishing, "
-                           "which usually means I got stuck. Tell me the next concrete step or refine "
-                           "the goal, and I'll continue from the current page.)")})
+            s_agent = Agent(self.model, system_prompt=(
+                "You are wrapping up a browser-exploration session. You have NO tools and CANNOT take "
+                "any further action. From the tool results already in the conversation, reply with ONLY "
+                "a concise plain-text summary of what was found (pages, key elements/actions, any "
+                "breakage) plus concrete suggestions for what to explore or test next. NEVER output "
+                "<tool_call>, <function>, or any function-call syntax."))
+            sr = await s_agent.run("Summarize what you found so far and suggest next steps.",
+                                   message_history=list(self.history),
+                                   usage_limits=UsageLimits(request_limit=3))
+            summary = (sr.output or "").strip()
+            # MiMo sometimes leaks a raw <tool_call> text token (it 'wants' to act); strip it.
+            summary = re.sub(r"<tool_call>.*?</tool_call>", "", summary, flags=re.DOTALL)
+            summary = re.sub(r"</?function[^>]*>", "", summary).strip()
+            if len(summary) < 40:
+                summary = ""
         except Exception as e:
-            emit({"event": "error", "message": f"{type(e).__name__}: {e}"})
-            log(traceback.format_exc())
+            log(f"[agent] post-budget summary failed: {e}")
+        note = (f"(Paused after {TOOL_BUDGET} exploration steps — my per-turn budget. I've kept "
+                f"everything I found, so just say \"continue\" to keep going, or tell me what to focus on.)")
+        emit({"event": "turn_complete", "text": (summary + "\n\n" + note) if summary else note})
 
     def reset(self):
         self.history = []
@@ -730,10 +927,14 @@ async def main_loop():
 # ── Offline self-test (no browser, no network): proves tool wiring ───────────
 
 def _selftest():
+    import tempfile
     from pydantic_ai.models.test import TestModel
     agent = build_agent(TestModel())
     sess = BrowserSession()
-    deps = Deps(session=sess, ats_root=".", project=None, config={})
+    # Isolate file writes: TestModel calls EVERY tool with dummy args, incl.
+    # update_setting — point ats_root at a throwaway dir so the real config.json
+    # is never touched.
+    deps = Deps(session=sess, ats_root=tempfile.mkdtemp(prefix="ats_selftest_"), project=None, config={})
     tools = sorted(agent._function_toolset.tools.keys()) if hasattr(agent, "_function_toolset") else []
     print("agent built OK; tools:", tools)
 
