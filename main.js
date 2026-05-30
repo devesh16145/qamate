@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -16,6 +16,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -26,13 +27,14 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-  // mainWindow.webContents.openDevTools(); // Uncomment for debugging
+  mainWindow.webContents.openDevTools();
 }
 
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   killPython();
+  killAgent();
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -151,6 +153,28 @@ ipcMain.handle('run-tests', async (event, options) => {
     }
     sendToRenderer('test-log', `Engine exited with code ${code}`);
     pythonProcess = null;
+
+    // Safety net: if a run is still "Running" (engine was stopped/killed or
+    // crashed before finalizing), mark it terminal so history never gets stuck
+    // on "Running". The runner finalizes normal/crashed runs itself; this only
+    // catches the hard-kill (Stop) case.
+    try {
+      if (fs.existsSync(RESULTS_DIR)) {
+        const dirs = fs.readdirSync(RESULTS_DIR)
+          .filter(f => { try { return fs.lstatSync(path.join(RESULTS_DIR, f)).isDirectory(); } catch { return false; } })
+          .sort().reverse().slice(0, 3);
+        for (const d of dirs) {
+          const mp = path.join(RESULTS_DIR, d, 'run_metadata.json');
+          if (!fs.existsSync(mp)) continue;
+          const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
+          if (meta.status === 'Running') {
+            meta.status = 'Stopped';
+            meta.note = 'Run did not finalize (stopped or engine exited early).';
+            fs.writeFileSync(mp, JSON.stringify(meta, null, 2));
+          }
+        }
+      }
+    } catch (e) { /* best effort */ }
   });
 
   // Send the run command to the Python process via stdin
@@ -166,6 +190,7 @@ ipcMain.handle('run-tests', async (event, options) => {
     sellerUserIndex: options.sellerUserIndex ?? options.userIndex ?? 0,
     adminUserIndex: options.adminUserIndex ?? 0,
     variant: options.variant,
+    project_id: options.project_id || options.projectId || null,
     ats_root: __dirname,
   });
 
@@ -214,6 +239,257 @@ ipcMain.handle('open-file', async (event, filePath) => {
     const abs = path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
     shell.openPath(abs);
   }
+});
+
+// Open a Playwright trace (.zip) in the interactive Trace Viewer — time-travel
+// debugging with DOM snapshots, network, console and per-action screenshots.
+ipcMain.handle('open-trace', async (event, tracePath) => {
+  if (!tracePath) return { status: 'error', message: 'No trace path provided' };
+  const abs = path.isAbsolute(tracePath) ? tracePath : path.join(__dirname, tracePath);
+  if (!fs.existsSync(abs)) return { status: 'error', message: 'Trace file not found' };
+  try {
+    const proc = spawn(VENV_PYTHON, ['-m', 'playwright', 'show-trace', abs], {
+      cwd: __dirname,
+      detached: true,
+      stdio: 'ignore',
+    });
+    proc.unref();
+    return { status: 'success' };
+  } catch (e) {
+    return { status: 'error', message: e.message };
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// Autonomous pipeline IPC: secrets, projects, explore (L1), PRD (L2),
+// synthesize (L3). Mirrors the analyze-coverage spawn+stream pattern.
+// ════════════════════════════════════════════════════════════════
+const PROJECT_STORE = path.join(__dirname, 'engine', 'project_store.py');
+const APP_EXPLORER = path.join(__dirname, 'engine', 'app_explorer.py');
+const PRD_EXTRACTOR = path.join(__dirname, 'engine', 'prd_extractor.py');
+const TEST_SYNTH = path.join(__dirname, 'engine', 'test_synthesizer.py');
+const AGENT_RECORDER = path.join(__dirname, 'engine', 'agent_recorder.py');
+const SECRETS_PATH = path.join(app.getPath('userData'), 'ats_secrets.json');
+
+// ── Secrets: encrypted at rest via OS keychain (safeStorage). Plaintext is
+// only ever held in memory and injected into the Python child's env at spawn.
+function _readSecrets() {
+  try {
+    if (!fs.existsSync(SECRETS_PATH) || !safeStorage.isEncryptionAvailable()) return {};
+    const enc = JSON.parse(fs.readFileSync(SECRETS_PATH, 'utf8'));
+    const out = {};
+    for (const k of Object.keys(enc)) {
+      try { out[k] = safeStorage.decryptString(Buffer.from(enc[k], 'base64')); } catch (e) { /* skip */ }
+    }
+    return out;
+  } catch (e) { return {}; }
+}
+function _writeSecret(key, value) {
+  let enc = {};
+  try { if (fs.existsSync(SECRETS_PATH)) enc = JSON.parse(fs.readFileSync(SECRETS_PATH, 'utf8')); } catch (e) { /* fresh */ }
+  if (value) {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('OS keychain encryption unavailable');
+    enc[key] = safeStorage.encryptString(value).toString('base64');
+  } else {
+    delete enc[key];
+  }
+  fs.writeFileSync(SECRETS_PATH, JSON.stringify(enc));
+}
+function _llmEnv() {
+  const s = _readSecrets();
+  const env = {};
+  for (const k of Object.keys(s)) if (k.startsWith('ATS_')) env[k] = s[k];
+  return env;
+}
+
+// ── Conversational AI Agent (engine/agent_chat.py) ────────────────────────────
+// A PERSISTENT child process (unlike the one-shot explore/record spawns): we send
+// it chat messages over stdin and stream its {event:...} lines back to the
+// renderer on the 'agent-event' channel. Same newline-JSON transport as runner.py.
+const AGENT_CHAT = path.join(__dirname, 'engine', 'agent_chat.py');
+let agentProcess = null;
+let agentStdoutBuf = '';
+
+function killAgent() {
+  if (agentProcess) {
+    try { agentProcess.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n'); } catch (e) { /* ignore */ }
+    try { agentProcess.kill('SIGTERM'); } catch (e) { /* ignore */ }
+    agentProcess = null;
+  }
+}
+
+function _agentWrite(obj) {
+  if (!agentProcess || !agentProcess.stdin || !agentProcess.stdin.writable) return false;
+  try { agentProcess.stdin.write(JSON.stringify(obj) + '\n'); return true; }
+  catch (e) { return false; }
+}
+
+ipcMain.handle('agent-start', async (event, opts = {}) => {
+  killAgent();
+  if (!fs.existsSync(VENV_PYTHON)) return { status: 'error', message: `Python not found at ${VENV_PYTHON}` };
+  agentStdoutBuf = '';
+  try {
+    agentProcess = spawn(VENV_PYTHON, [AGENT_CHAT], {
+      cwd: __dirname,
+      env: { ...process.env, ATS_ROOT: __dirname, PYTHONUNBUFFERED: '1', ..._llmEnv() },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) { agentProcess = null; return { status: 'error', message: err.message }; }
+
+  agentProcess.stdout.on('data', (chunk) => {
+    agentStdoutBuf += chunk.toString();
+    const lines = agentStdoutBuf.split('\n');
+    agentStdoutBuf = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;
+      try { sendToRenderer('agent-event', JSON.parse(t)); }
+      catch (e) { sendToRenderer('agent-event', { event: 'log', message: t }); }
+    }
+  });
+  agentProcess.stderr.on('data', (d) => {
+    const t = d.toString().trim();
+    if (t) sendToRenderer('agent-event', { event: 'log', message: 'STDERR: ' + t });
+  });
+  agentProcess.on('error', (err) => { sendToRenderer('agent-event', { event: 'error', message: err.message }); agentProcess = null; });
+  agentProcess.on('close', (code) => { sendToRenderer('agent-event', { event: 'exited', code }); agentProcess = null; });
+
+  _agentWrite({
+    action: 'init',
+    project_id: opts.projectId || null,
+    env: opts.env || null,
+    provider: opts.provider || null,
+    headed: !!opts.headed,
+    start_path: opts.startPath || '',
+  });
+  return { status: 'success' };
+});
+
+ipcMain.handle('agent-send', async (event, { message } = {}) => {
+  if (!agentProcess) return { status: 'error', message: 'agent not running — start it first' };
+  return _agentWrite({ action: 'chat', message: String(message || '') })
+    ? { status: 'success' } : { status: 'error', message: 'failed to write to agent' };
+});
+
+ipcMain.handle('agent-reset', async () => (
+  _agentWrite({ action: 'reset' }) ? { status: 'success' } : { status: 'error', message: 'agent not running' }
+));
+
+ipcMain.handle('agent-stop', async () => { killAgent(); return { status: 'success' }; });
+
+ipcMain.handle('set-secret', async (e, { key, value }) => {
+  try { _writeSecret(key, value); return { status: 'success' }; }
+  catch (err) { return { status: 'error', message: err.message }; }
+});
+ipcMain.handle('get-secret-status', async () => {
+  const s = _readSecrets();
+  const keys = {};
+  for (const k of Object.keys(s)) keys[k] = !!s[k];
+  return { status: 'success', keys, available: safeStorage.isEncryptionAvailable() };
+});
+
+// Spawn a Python engine script; stream {event:"log"} lines to `progressChannel`,
+// resolve with the final {event:"result"|status:...} object.
+function runEngine(event, args, progressChannel, extraEnv) {
+  return new Promise((resolve) => {
+    let result = null;
+    let proc;
+    try {
+      proc = spawn(VENV_PYTHON, args, { cwd: __dirname, env: { ...process.env, ATS_ROOT: __dirname, ...(extraEnv || {}) } });
+    } catch (err) { return resolve({ status: 'error', message: err.message }); }
+    proc.stdout.on('data', (chunk) => {
+      for (const raw of chunk.toString().split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        try {
+          const evt = JSON.parse(line);
+          if (evt.event === 'log') { if (progressChannel) event.sender.send(progressChannel, { message: evt.message }); }
+          else if (evt.event === 'result') result = evt;
+          else if (evt.status) result = evt;
+        } catch (e2) { if (progressChannel) event.sender.send(progressChannel, { message: line }); }
+      }
+    });
+    proc.stderr.on('data', (d) => { if (progressChannel) event.sender.send(progressChannel, { message: 'STDERR: ' + d.toString().trim() }); });
+    proc.on('close', (code) => resolve(result || { status: code === 0 ? 'success' : 'error', message: 'engine exited ' + code }));
+    proc.on('error', (err) => resolve({ status: 'error', message: err.message }));
+  });
+}
+
+// Projects (project_store.py CLI emits a single JSON status line)
+ipcMain.handle('list-projects', async (e) => runEngine(e, [PROJECT_STORE, 'list'], null));
+ipcMain.handle('create-project', async (e, { name, baseUrl, environment }) =>
+  runEngine(e, [PROJECT_STORE, 'create', name, baseUrl, environment || 'dev'], null));
+ipcMain.handle('set-active-project', async (e, { projectId }) =>
+  runEngine(e, [PROJECT_STORE, 'set-active', projectId], null));
+ipcMain.handle('delete-project', async (e, { projectId }) =>
+  runEngine(e, [PROJECT_STORE, 'delete', projectId], null));
+ipcMain.handle('get-app-model', async (e, { projectId }) => {
+  try { const p = path.join(__dirname, 'projects', projectId, 'app_model.json'); return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null; }
+  catch (err) { return null; }
+});
+ipcMain.handle('get-requirements', async (e, { projectId }) => {
+  try { const p = path.join(__dirname, 'projects', projectId, 'requirements.json'); return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null; }
+  catch (err) { return null; }
+});
+
+// Pipeline (stream progress to 'autopilot-progress')
+ipcMain.handle('explore-app', async (e, { projectId, maxPages, maxDepth, headed }) => {
+  const args = [APP_EXPLORER, projectId];
+  if (maxPages) args.push('--max-pages', String(maxPages));
+  if (maxDepth) args.push('--max-depth', String(maxDepth));
+  if (headed) args.push('--headed');
+  return runEngine(e, args, 'autopilot-progress', _llmEnv());
+});
+ipcMain.handle('extract-requirements', async (e, { projectId, prdText, prdPath, provider }) => {
+  let pth = prdPath;
+  if (!pth && prdText != null) {
+    pth = path.join(app.getPath('temp'), `ats_prd_${Date.now()}.md`);
+    fs.writeFileSync(pth, prdText, 'utf8');
+  }
+  if (!pth) return { status: 'error', message: 'no PRD provided' };
+  const args = [PRD_EXTRACTOR, pth, '--project', projectId];
+  if (provider) args.push('--provider', provider);
+  return runEngine(e, args, 'autopilot-progress', _llmEnv());
+});
+ipcMain.handle('synthesize-tests', async (e, { projectId, flowId, provider }) => {
+  const args = [TEST_SYNTH, projectId];
+  if (flowId) args.push('--flow', flowId);
+  if (provider) args.push('--provider', provider);
+  return runEngine(e, args, 'autopilot-progress', _llmEnv());
+});
+
+// Autonomous record: the LLM drives the browser to accomplish a goal and emits
+// an ordinary test case via the existing recorder pipeline. Credentials (if
+// given) are folded into the goal so the agent logs in first.
+ipcMain.handle('agent-record', async (e, { projectId, goal, username, password, startPath, provider, maxSteps, tcId, flowId, headed }) => {
+  let fullGoal = (goal && goal.trim()) || 'Explore the app and exercise its main happy-path flow, verifying the key results along the way.';
+  if (username) {
+    fullGoal = `First, log in with username "${username}" and password "${password || ''}". Then: ${fullGoal}`;
+  }
+  const args = [AGENT_RECORDER, projectId, '--goal', fullGoal,
+    '--tc', tcId || ('TC-AUTO-' + String(Date.now()).slice(-6)),
+    '--flow', flowId || 'autopilot'];
+  if (startPath) args.push('--start', startPath);
+  if (provider) args.push('--provider', provider);
+  if (maxSteps) args.push('--max-steps', String(maxSteps));
+  if (headed) args.push('--headed');
+  return runEngine(e, args, 'autopilot-progress', _llmEnv());
+});
+
+// Capture a project's login once (Playwright codegen --save-storage). The
+// generated code is discarded; we only keep the storage_state for reuse.
+ipcMain.handle('capture-login', async (e, { projectId, url }) => {
+  return new Promise((resolve) => {
+    try {
+      const authDir = path.join(__dirname, 'projects', projectId, 'auth');
+      fs.mkdirSync(authDir, { recursive: true });
+      const storageFile = path.join(authDir, 'storage_state.json');
+      const proc = spawn(VENV_PYTHON, ['-m', 'playwright', 'codegen', '--channel', 'chrome', '--save-storage', storageFile, url || 'about:blank'],
+        { cwd: __dirname, env: { ...process.env }, detached: false });
+      proc.on('close', (code) => resolve({ status: code === 0 ? 'success' : 'error', captured: fs.existsSync(storageFile) }));
+      proc.on('error', (err) => resolve({ status: 'error', message: err.message }));
+    } catch (err) { resolve({ status: 'error', message: err.message }); }
+  });
 });
 
 // ──────────────────────────────────────
@@ -273,13 +549,35 @@ ipcMain.handle('get-run-artifacts', async (event, runId) => {
         .sort((a, b) => a.name.localeCompare(b.name))
     : [];
 
+  const tracesDir = path.join(runDir, 'traces');
+  const traces = fs.existsSync(tracesDir)
+    ? fs.readdirSync(tracesDir)
+        .filter(f => f.endsWith('.zip'))
+        .map(f => ({ name: f.replace('.zip', ''), path: path.join(tracesDir, f) }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
+  // Self-heal events: which locators drifted and how they were recovered.
+  const healsDir = path.join(runDir, 'heals');
+  const heals = fs.existsSync(healsDir)
+    ? fs.readdirSync(healsDir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => {
+          let events = [];
+          try { events = (JSON.parse(fs.readFileSync(path.join(healsDir, f), 'utf8')).heals) || []; }
+          catch (e) { /* skip corrupt */ }
+          return { name: f.replace('.json', ''), count: events.length, events };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
   const reportFile = fs.readdirSync(runDir).find(f => f.endsWith('.xlsx'));
   const report = reportFile ? path.join(runDir, reportFile) : null;
 
   const junitFile = fs.readdirSync(runDir).find(f => f.endsWith('.xml'));
   const junit = junitFile ? path.join(runDir, junitFile) : null;
 
-  return { videos, screenshots, report, junit, folder: runDir };
+  return { videos, screenshots, traces, heals, report, junit, folder: runDir };
 });
 
 // ──────────────────────────────────────
@@ -338,13 +636,29 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, pl
       // Clean up any previous temp file
       try { fs.unlinkSync(tempFile); } catch (e) { /* ok */ }
 
-      const codegenProcess = spawn(VENV_PYTHON, [
+      // ── Persist login across recordings ──
+      // codegen saves the browser storage state on close (--save-storage) and
+      // reloads it next time (--load-storage), so you log in ONCE per
+      // platform/env and every later recording starts already authenticated —
+      // no repetitive logins. When a saved session exists we open the app home
+      // instead of the login page.
+      const authDir = path.join(__dirname, '.auth');
+      try { fs.mkdirSync(authDir, { recursive: true }); } catch (e) { /* ok */ }
+      const storageFile = path.join(authDir, `${platform || 'seller'}_${env || 'dev'}_storage.json`);
+      const hasStorage = fs.existsSync(storageFile);
+      const recordUrl = hasStorage ? baseUrl : startUrl;
+
+      const codegenArgs = [
         '-m', 'playwright', 'codegen',
         '--target', 'python-pytest',
         '--channel', 'chrome',
         '-o', tempFile,
-        startUrl
-      ], {
+      ];
+      if (hasStorage) codegenArgs.push('--load-storage', storageFile);
+      codegenArgs.push('--save-storage', storageFile);
+      codegenArgs.push(recordUrl);
+
+      const codegenProcess = spawn(VENV_PYTHON, codegenArgs, {
         cwd: __dirname,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],

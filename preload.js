@@ -10,7 +10,37 @@ contextBridge.exposeInMainWorld('ats', {
   openReport: (path) => ipcRenderer.invoke('open-report', path),
   openFolder: (path) => ipcRenderer.invoke('open-folder', path),
   openFile: (path) => ipcRenderer.invoke('open-file', path),
+  openTrace: (path) => ipcRenderer.invoke('open-trace', path),
   getRunArtifacts: (runId) => ipcRenderer.invoke('get-run-artifacts', runId),
+  // ── Autonomous pipeline (projects, explore, PRD, synthesize) ──
+  setSecret: (opts) => ipcRenderer.invoke('set-secret', opts),
+  getSecretStatus: () => ipcRenderer.invoke('get-secret-status'),
+  listProjects: () => ipcRenderer.invoke('list-projects'),
+  createProject: (opts) => ipcRenderer.invoke('create-project', opts),
+  setActiveProject: (opts) => ipcRenderer.invoke('set-active-project', opts),
+  deleteProject: (opts) => ipcRenderer.invoke('delete-project', opts),
+  getAppModel: (opts) => ipcRenderer.invoke('get-app-model', opts),
+  getRequirements: (opts) => ipcRenderer.invoke('get-requirements', opts),
+  exploreApp: (opts) => ipcRenderer.invoke('explore-app', opts),
+  extractRequirements: (opts) => ipcRenderer.invoke('extract-requirements', opts),
+  synthesizeTests: (opts) => ipcRenderer.invoke('synthesize-tests', opts),
+  agentRecord: (opts) => ipcRenderer.invoke('agent-record', opts),
+  captureLogin: (opts) => ipcRenderer.invoke('capture-login', opts),
+  // ── Conversational AI agent (agent_chat.py): persistent chat process ──
+  agentStart: (opts) => ipcRenderer.invoke('agent-start', opts),
+  agentSend: (opts) => ipcRenderer.invoke('agent-send', opts),
+  agentReset: () => ipcRenderer.invoke('agent-reset'),
+  agentStop: () => ipcRenderer.invoke('agent-stop'),
+  onAgentEvent: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on('agent-event', handler);
+    return () => ipcRenderer.removeListener('agent-event', handler);
+  },
+  onAutopilotProgress: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on('autopilot-progress', handler);
+    return () => ipcRenderer.removeListener('autopilot-progress', handler);
+  },
   getRunCheckpoints: (runId) => ipcRenderer.invoke('get-run-checkpoints', runId),
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),

@@ -11,6 +11,13 @@ test-results/
 *.png
 *.webm
 
+# Recording session auth (saved cookies/localStorage — reused across recordings)
+.auth/
+temp_recording.py
+
+# Per-project user data (URLs, captured login storage_state = secrets, app models)
+projects/
+
 # Node
 node_modules/
 
