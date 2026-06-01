@@ -15,6 +15,8 @@ Layout (all under <ats_root>/projects/):
         auth/storage_state.json   -> captured login (Playwright storage_state)
         app_model.json            -> App Explorer output (Phase 1)
         requirements.json         -> PRD Extractor output (Phase 2)
+        context/                  -> user-supplied context files the AI agent can read
+        AGENT_MEMORY.md           -> the agent's durable, self-updated memory (CLAUDE.md-style)
 
 project.json schema (schema_version 1):
 {
@@ -32,6 +34,8 @@ project.json schema (schema_version 1):
   },
   "llm_ref": "default",        # which entry in config.json "llm.providers" to use
   "prd_path": null,            # absolute or project-relative path to a PRD .md
+  "context_dir": null,         # optional ABSOLUTE path to an existing docs folder the
+                               # agent may read; null = managed projects/<id>/context/
   "rules": {                   # opt-in, per-project behaviour (Phase 4)
     "mui_quirks": false,
     "broken_selector_fixes": false
@@ -79,6 +83,55 @@ def app_model_path(ats_root, project_id):
 
 def requirements_path(ats_root, project_id):
     return os.path.join(project_dir(ats_root, project_id), "requirements.json")
+
+
+# ── AI-agent context folder + memory file ─────────────────────────────────────
+# These give the chat agent (engine/agent_chat.py) durable knowledge of the app:
+#   context/         user-supplied docs/screenshots the agent reads on demand
+#   AGENT_MEMORY.md  a CLAUDE.md-style memory the agent reads + updates itself
+# main.js replicates the SAME path convention (projects/<id>/context,
+# projects/<id>/AGENT_MEMORY.md; <ats_root>/.agent_context/ when there is no
+# project) — keep the two in sync.
+
+def context_dir(ats_root, project_id):
+    """Managed folder of context files. projects/<id>/context/ — or, when there is
+    no project (legacy Agrim), <ats_root>/.agent_context/."""
+    if project_id:
+        return os.path.join(project_dir(ats_root, project_id), "context")
+    return os.path.join(ats_root, ".agent_context")
+
+
+def memory_path(ats_root, project_id):
+    """The agent's durable memory file. projects/<id>/AGENT_MEMORY.md — or, with no
+    project, <ats_root>/.agent_context/AGENT_MEMORY.md."""
+    if project_id:
+        return os.path.join(project_dir(ats_root, project_id), "AGENT_MEMORY.md")
+    return os.path.join(ats_root, ".agent_context", "AGENT_MEMORY.md")
+
+
+def resolve_context_dir(ats_root, project_id, project=None, create=True):
+    """The context folder the agent actually reads: an ABSOLUTE project.json
+    'context_dir' override if set, else the managed location. Created on demand."""
+    proj = project if isinstance(project, dict) else get_project(ats_root, project_id)
+    override = (proj or {}).get("context_dir")
+    path = override if (override and os.path.isabs(override)) else context_dir(ats_root, project_id)
+    if create:
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+    return path
+
+
+def resolve_memory_path(ats_root, project_id, create=True):
+    """The agent's memory file path (its parent dir is created when create=True)."""
+    path = memory_path(ats_root, project_id)
+    if create:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        except Exception:
+            pass
+    return path
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -163,6 +216,7 @@ def create_project(ats_root, name, base_url, environment="dev", **extra):
         },
         "llm_ref": extra.get("llm_ref", "default"),
         "prd_path": extra.get("prd_path"),
+        "context_dir": extra.get("context_dir"),
         "rules": {"mui_quirks": False, "broken_selector_fixes": False},
     }
     _write_json(project_file(ats_root, pid), proj)

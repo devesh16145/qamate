@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, safeStorage, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -34,7 +34,7 @@ app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   killPython();
-  killAgent();
+  _agentKillAll();
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -302,80 +302,417 @@ function _llmEnv() {
   return env;
 }
 
-// ── Conversational AI Agent (engine/agent_chat.py) ────────────────────────────
-// A PERSISTENT child process (unlike the one-shot explore/record spawns): we send
-// it chat messages over stdin and stream its {event:...} lines back to the
-// renderer on the 'agent-event' channel. Same newline-JSON transport as runner.py.
+// ── Conversational AI Agent (engine/agent_chat.py) — concurrent persisted sessions ─
+// Each session is its own PERSISTENT child process driving its own browser, addressed by
+// a sessionId. We keep a Map<sessionId,{proc,buf,projectId}>; every stdout {event:...} line
+// is tagged with its sessionId and routed to the dedicated Agent window (not the IDE). The
+// conversation/transcript/meta persist on disk under projects/<id>/agent_sessions/ — Python
+// (engine/agent_sessions.py) owns messages.json; Node does the plain-JSON sidebar ops below.
 const AGENT_CHAT = path.join(__dirname, 'engine', 'agent_chat.py');
-let agentProcess = null;
-let agentStdoutBuf = '';
+const AGENT_MAX_SESSIONS = parseInt(process.env.ATS_AGENT_MAX_SESSIONS || '4', 10);
+const agentProcs = new Map(); // sessionId -> { proc, buf, projectId }
 
-function killAgent() {
-  if (agentProcess) {
-    try { agentProcess.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n'); } catch (e) { /* ignore */ }
-    try { agentProcess.kill('SIGTERM'); } catch (e) { /* ignore */ }
-    agentProcess = null;
+let agentWindow = null;
+function createAgentWindow() {
+  if (agentWindow && !agentWindow.isDestroyed()) { agentWindow.focus(); return agentWindow; }
+  agentWindow = new BrowserWindow({
+    width: 1240, height: 840,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    title: 'Agrim ATS — AI Agent',
+    backgroundColor: '#0f0f1a',
+  });
+  agentWindow.loadFile(path.join(__dirname, 'src', 'agent.html'));
+  // Closing the Agent window does NOT stop its sessions — they keep running (persisted +
+  // resumable) and stay visible in the docked panel or when the window is reopened. Sessions
+  // end on explicit Stop or app quit (window-all-closed -> _agentKillAll).
+  agentWindow.on('closed', () => { agentWindow = null; });
+  return agentWindow;
+}
+
+// Agent events are BROADCAST to every window: the dedicated agent window AND the main IDE
+// (when the agent is docked into its right panel) both run the same UI and route by sessionId.
+function sendToAgent(channel, data) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w && !w.isDestroyed()) w.webContents.send(channel, data);
   }
 }
 
-function _agentWrite(obj) {
-  if (!agentProcess || !agentProcess.stdin || !agentProcess.stdin.writable) return false;
-  try { agentProcess.stdin.write(JSON.stringify(obj) + '\n'); return true; }
-  catch (e) { return false; }
+function _agentKill(sessionId) {
+  const e = agentProcs.get(sessionId);
+  if (!e) return;
+  try { e.proc.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n'); } catch (err) { /* ignore */ }
+  try { e.proc.kill('SIGTERM'); } catch (err) { /* ignore */ }
+  agentProcs.delete(sessionId);
 }
 
-ipcMain.handle('agent-start', async (event, opts = {}) => {
-  killAgent();
-  if (!fs.existsSync(VENV_PYTHON)) return { status: 'error', message: `Python not found at ${VENV_PYTHON}` };
-  agentStdoutBuf = '';
-  try {
-    agentProcess = spawn(VENV_PYTHON, [AGENT_CHAT], {
-      cwd: __dirname,
-      env: { ...process.env, ATS_ROOT: __dirname, PYTHONUNBUFFERED: '1', ..._llmEnv() },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch (err) { agentProcess = null; return { status: 'error', message: err.message }; }
+function _agentKillAll() { for (const sid of Array.from(agentProcs.keys())) _agentKill(sid); }
 
-  agentProcess.stdout.on('data', (chunk) => {
-    agentStdoutBuf += chunk.toString();
-    const lines = agentStdoutBuf.split('\n');
-    agentStdoutBuf = lines.pop();
+function _agentWrite(sessionId, obj) {
+  const e = agentProcs.get(sessionId);
+  if (!e || !e.proc.stdin || !e.proc.stdin.writable) return false;
+  try { e.proc.stdin.write(JSON.stringify(obj) + '\n'); return true; }
+  catch (err) { return false; }
+}
+
+function _spawnAgent(sessionId, projectId, initCmd) {
+  const proc = spawn(VENV_PYTHON, [AGENT_CHAT], {
+    cwd: __dirname,
+    env: { ...process.env, ATS_ROOT: __dirname, PYTHONUNBUFFERED: '1', ..._llmEnv() },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const entry = { proc, buf: '', projectId };
+  agentProcs.set(sessionId, entry);
+  proc.stdout.on('data', (chunk) => {
+    entry.buf += chunk.toString();
+    const lines = entry.buf.split('\n');
+    entry.buf = lines.pop();
     for (const line of lines) {
       const t = line.trim();
       if (!t) continue;
-      try { sendToRenderer('agent-event', JSON.parse(t)); }
-      catch (e) { sendToRenderer('agent-event', { event: 'log', message: t }); }
+      let ev;
+      try { ev = JSON.parse(t); } catch (e) { ev = { event: 'log', message: t }; }
+      ev.sessionId = sessionId;  // route to the right session in the window
+      sendToAgent('agent-event', ev);
     }
   });
-  agentProcess.stderr.on('data', (d) => {
+  proc.stderr.on('data', (d) => {
     const t = d.toString().trim();
-    if (t) sendToRenderer('agent-event', { event: 'log', message: 'STDERR: ' + t });
+    if (t) sendToAgent('agent-event', { event: 'log', message: 'STDERR: ' + t, sessionId });
   });
-  agentProcess.on('error', (err) => { sendToRenderer('agent-event', { event: 'error', message: err.message }); agentProcess = null; });
-  agentProcess.on('close', (code) => { sendToRenderer('agent-event', { event: 'exited', code }); agentProcess = null; });
+  proc.on('error', (err) => { sendToAgent('agent-event', { event: 'error', message: err.message, sessionId }); agentProcs.delete(sessionId); });
+  proc.on('close', (code) => { sendToAgent('agent-event', { event: 'exited', code, sessionId }); agentProcs.delete(sessionId); });
+  _agentWrite(sessionId, initCmd);
+}
 
-  _agentWrite({
-    action: 'init',
-    project_id: opts.projectId || null,
-    env: opts.env || null,
-    provider: opts.provider || null,
-    headed: !!opts.headed,
-    start_path: opts.startPath || '',
-  });
+ipcMain.handle('agent-open-window', async () => { createAgentWindow(); return { status: 'success' }; });
+
+// Dock the floating agent window INTO the main IDE's right panel: tell the main window to
+// render the docked agent, then close the floating window. Sessions keep running (the window's
+// 'closed' handler no longer kills them), and events broadcast to both, so the dock takes over
+// seamlessly. The renderer flips its 'agentDock' state on the 'agent-dock-request' event.
+ipcMain.handle('agent-dock', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('agent-dock-request');
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (agentWindow && !agentWindow.isDestroyed()) agentWindow.close();
   return { status: 'success' };
 });
 
-ipcMain.handle('agent-send', async (event, { message } = {}) => {
-  if (!agentProcess) return { status: 'error', message: 'agent not running — start it first' };
-  return _agentWrite({ action: 'chat', message: String(message || '') })
+ipcMain.handle('agent-start', async (event, opts = {}) => {
+  if (!fs.existsSync(VENV_PYTHON)) return { status: 'error', message: `Python not found at ${VENV_PYTHON}` };
+  const sessionId = opts.sessionId;
+  if (!sessionId) return { status: 'error', message: 'sessionId required' };
+  if (agentProcs.has(sessionId)) return { status: 'success', already: true };  // already running
+  if (agentProcs.size >= AGENT_MAX_SESSIONS) {
+    return { status: 'error', message: `Too many concurrent sessions (max ${AGENT_MAX_SESSIONS}). Stop one before starting another.` };
+  }
+  try {
+    _spawnAgent(sessionId, opts.projectId || null, {
+      action: 'init',
+      session_id: sessionId,
+      project_id: opts.projectId || null,
+      env: opts.env || null,
+      provider: opts.provider || null,
+      headed: !!opts.headed,
+      title: opts.title || '',
+      start_path: opts.startPath || '',
+    });
+  } catch (err) { return { status: 'error', message: err.message }; }
+  return { status: 'success' };
+});
+
+ipcMain.handle('agent-send', async (event, { sessionId, message, attachments } = {}) => {
+  if (!sessionId || !agentProcs.has(sessionId)) return { status: 'error', message: 'session not running — start it first' };
+  // attachments: array of absolute file paths (the Python side reads + extracts them).
+  const atts = Array.isArray(attachments) ? attachments.filter(Boolean).map(String) : [];
+  return _agentWrite(sessionId, { action: 'chat', message: String(message || ''), attachments: atts })
     ? { status: 'success' } : { status: 'error', message: 'failed to write to agent' };
 });
 
-ipcMain.handle('agent-reset', async () => (
-  _agentWrite({ action: 'reset' }) ? { status: 'success' } : { status: 'error', message: 'agent not running' }
+ipcMain.handle('agent-reset', async (event, { sessionId } = {}) => (
+  (sessionId && _agentWrite(sessionId, { action: 'reset' })) ? { status: 'success' } : { status: 'error', message: 'session not running' }
 ));
 
-ipcMain.handle('agent-stop', async () => { killAgent(); return { status: 'success' }; });
+ipcMain.handle('agent-stop', async (event, { sessionId } = {}) => { if (sessionId) _agentKill(sessionId); return { status: 'success' }; });
+
+// ── Session sidebar ops (plain JSON over projects/<id>/agent_sessions/). Path convention
+// MUST match engine/agent_sessions.py `sessions_dir`. Python owns messages.json; Node only
+// reads session.json/transcript.jsonl and does title-rename / delete here. ──
+function _agentSessionsDir(projectId) {
+  projectId = projectId || _activeProjectId();
+  if (projectId) return path.join(__dirname, 'projects', projectId, 'agent_sessions');
+  return path.join(__dirname, '.agent_context', 'agent_sessions');
+}
+
+function _mintSessionId(title) {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const slug = (title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'session';
+  const rand = Math.random().toString(36).slice(2, 5);
+  return `${stamp}-${slug}-${rand}`;
+}
+
+function _readSessionMeta(dir, id) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, id, 'session.json'), 'utf8')); }
+  catch (e) { return null; }
+}
+
+ipcMain.handle('agent-list-sessions', async (event, { projectId } = {}) => {
+  const dir = _agentSessionsDir(projectId);
+  let ids = [];
+  try { ids = fs.readdirSync(dir); } catch (e) { /* none yet */ }
+  const sessions = [];
+  for (const id of ids) {
+    const m = _readSessionMeta(dir, id);
+    if (m && m.id) {
+      // Reconcile a stale "running" left by a crashed/closed previous app run.
+      if (m.status === 'running' && !agentProcs.has(m.id)) m.status = 'idle';
+      m.live = agentProcs.has(m.id);
+      sessions.push(m);
+    }
+  }
+  sessions.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  return { status: 'success', dir, sessions };
+});
+
+// Mint a session id for the UI (the disk record is created by Python on first start, so an
+// unstarted "new" session leaves no trace — which is correct).
+ipcMain.handle('agent-new-session', async (event, { projectId, title } = {}) => {
+  const now = new Date().toISOString().slice(0, 19);
+  return {
+    status: 'success',
+    session: {
+      id: _mintSessionId(title), project_id: projectId || _activeProjectId() || null,
+      title: title || 'New session', created_at: now, updated_at: now,
+      status: 'idle', message_count: 0, provider: '', model: '', live: false,
+    },
+  };
+});
+
+ipcMain.handle('agent-rename-session', async (event, { projectId, sessionId, title } = {}) => {
+  const f = path.join(_agentSessionsDir(projectId), sessionId, 'session.json');
+  try {
+    const m = JSON.parse(fs.readFileSync(f, 'utf8'));
+    m.title = String(title || '').slice(0, 120);
+    m.updated_at = new Date().toISOString().slice(0, 19);
+    fs.writeFileSync(f, JSON.stringify(m, null, 2));
+    return { status: 'success', session: m };
+  } catch (e) {
+    // Not yet persisted (an unstarted session) — the renderer renames it locally.
+    return { status: 'success', notPersisted: true };
+  }
+});
+
+ipcMain.handle('agent-delete-session', async (event, { projectId, sessionId } = {}) => {
+  if (agentProcs.has(sessionId)) _agentKill(sessionId);
+  try { fs.rmSync(path.join(_agentSessionsDir(projectId), sessionId), { recursive: true, force: true }); }
+  catch (e) { /* already gone */ }
+  return { status: 'success' };
+});
+
+ipcMain.handle('agent-session-transcript', async (event, { projectId, sessionId } = {}) => {
+  const f = path.join(_agentSessionsDir(projectId), sessionId, 'transcript.jsonl');
+  const bubbles = [];
+  try {
+    for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      try { bubbles.push(JSON.parse(t)); } catch (e) { /* skip bad line */ }
+    }
+  } catch (e) { /* none yet */ }
+  return { status: 'success', bubbles };
+});
+
+// ── AI agent: file attachments + per-project context folder & memory file ─────
+// Path convention MUST match engine/project_store.py: projects/<id>/context
+// (overridable by an absolute "context_dir" in project.json) + projects/<id>/
+// AGENT_MEMORY.md, and <ats_root>/.agent_context/ when there is no project.
+const ATTACH_FILTERS = [
+  { name: 'Documents & Images', extensions: ['md', 'markdown', 'txt', 'rst', 'pdf', 'docx', 'xlsx', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'xml', 'html', 'htm', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+  { name: 'Documents', extensions: ['md', 'markdown', 'txt', 'rst', 'pdf', 'docx', 'xlsx', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'xml', 'html', 'htm'] },
+  { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+  { name: 'All Files', extensions: ['*'] },
+];
+
+function _showOpen(opts) {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  return win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts);
+}
+
+// Mirror project_store.get_active_project_id: when the UI passes no project id,
+// the agent falls back to the active project — the context/memory buttons must too.
+function _activeProjectId() {
+  try {
+    const idx = JSON.parse(fs.readFileSync(path.join(__dirname, 'projects', '_index.json'), 'utf8'));
+    if (idx && idx.active && fs.existsSync(path.join(__dirname, 'projects', idx.active, 'project.json'))) return idx.active;
+  } catch (e) { /* no active project */ }
+  return null;
+}
+
+function _agentContextPaths(projectId) {
+  projectId = projectId || _activeProjectId();
+  if (projectId) {
+    const pdir = path.join(__dirname, 'projects', projectId);
+    let contextDir = path.join(pdir, 'context');
+    try {
+      const pj = JSON.parse(fs.readFileSync(path.join(pdir, 'project.json'), 'utf8'));
+      if (pj && pj.context_dir && path.isAbsolute(pj.context_dir)) contextDir = pj.context_dir;
+    } catch (e) { /* use default */ }
+    return { contextDir, memoryPath: path.join(pdir, 'AGENT_MEMORY.md') };
+  }
+  const base = path.join(__dirname, '.agent_context');
+  return { contextDir: base, memoryPath: path.join(base, 'AGENT_MEMORY.md') };
+}
+
+function _fileMeta(p) {
+  let size = 0;
+  try { size = fs.statSync(p).size; } catch (e) { /* ignore */ }
+  return { path: p, name: path.basename(p), ext: path.extname(p).toLowerCase().replace(/^\./, ''), size };
+}
+
+// Junk hidden when browsing/searching a scoped context folder — MIRRORS engine/agent_chat.py
+// `_is_junk_name` (keep in sync). The folder is EXPLORED on demand, not imported, so we never
+// deep-dump every file into the UI.
+const _CTX_SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', 'env', '__pycache__', '.idea',
+  '.vscode', 'dist', 'build', '.next', '.cache', '.pytest_cache', '.mypy_cache', '.gradle', 'target',
+  '.tox', 'coverage', '.turbo', '.parcel-cache', 'obj']);
+function _isJunkName(name) { return !name || _CTX_SKIP.has(name) || name.startsWith('.'); }
+
+// One directory LEVEL of the context folder (junk filtered), scoped so `subdir` can't escape it.
+function _listContextLevel(contextDir, subdir) {
+  const base = path.resolve(contextDir || '');
+  const start = path.resolve(base, (subdir && subdir !== '.') ? subdir : '');
+  if (!base || (start !== base && !start.startsWith(base + path.sep))) return { dirs: [], files: [] };
+  let entries = [];
+  try { entries = fs.readdirSync(start, { withFileTypes: true }); } catch (e) { return { dirs: [], files: [] }; }
+  const dirs = [], files = [];
+  for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (_isJunkName(e.name)) continue;
+    const full = path.join(start, e.name);
+    const rel = path.relative(base, full).split(path.sep).join('/');
+    if (e.isDirectory()) dirs.push({ name: rel });
+    else files.push({ ..._fileMeta(full), name: rel });
+    if (dirs.length + files.length >= 400) break;
+  }
+  return { dirs, files };
+}
+
+// Flat list of file paths (junk filtered, capped) — ONLY to power the @-mention fuzzy search.
+function _listContextFlat(contextDir, cap = 2000) {
+  const base = path.resolve(contextDir || '');
+  const out = [];
+  const walk = (dir) => {
+    if (out.length >= cap) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (out.length >= cap) return;
+      if (_isJunkName(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else out.push(path.relative(base, full).split(path.sep).join('/'));
+    }
+  };
+  if (base) walk(base);
+  return out;
+}
+
+// Native picker for per-message attachments. Returns file metadata; the absolute
+// paths are sent to Python on agent-send (Python reads + extracts the content).
+ipcMain.handle('agent-pick-files', async () => {
+  const r = await _showOpen({
+    title: 'Attach files for the AI agent',
+    properties: ['openFile', 'multiSelections'],
+    filters: ATTACH_FILTERS,
+  });
+  if (!r || r.canceled || !Array.isArray(r.filePaths)) return { status: 'success', files: [] };
+  return { status: 'success', files: r.filePaths.map(_fileMeta) };
+});
+
+ipcMain.handle('agent-context-list', async (event, { projectId, subdir } = {}) => {
+  const { contextDir } = _agentContextPaths(projectId);
+  const { dirs, files } = _listContextLevel(contextDir, subdir || '');
+  return { status: 'success', dir: contextDir, subdir: subdir || '', dirs, files };
+});
+
+// Junk-filtered flat path list for the @-mention picker (paths only, capped).
+ipcMain.handle('agent-context-files', async (event, { projectId } = {}) => {
+  const { contextDir } = _agentContextPaths(projectId);
+  return { status: 'success', dir: contextDir, files: _listContextFlat(contextDir) };
+});
+
+// Copy chosen files into the project's context folder (the agent reads them via tools).
+ipcMain.handle('agent-context-add', async (event, { projectId } = {}) => {
+  const { contextDir } = _agentContextPaths(projectId);
+  const r = await _showOpen({
+    title: 'Add files to the project context folder',
+    properties: ['openFile', 'multiSelections'],
+    filters: ATTACH_FILTERS,
+  });
+  if (!r || r.canceled || !r.filePaths || !r.filePaths.length) {
+    return { status: 'success', added: 0, dir: contextDir, ..._listContextLevel(contextDir, '') };
+  }
+  try { fs.mkdirSync(contextDir, { recursive: true }); } catch (e) { /* ignore */ }
+  let added = 0;
+  for (const src of r.filePaths) {
+    try { fs.copyFileSync(src, path.join(contextDir, path.basename(src))); added++; }
+    catch (e) { /* skip unreadable */ }
+  }
+  return { status: 'success', added, dir: contextDir, ..._listContextLevel(contextDir, '') };
+});
+
+// Attach an EXISTING folder on disk as the project's context (sets project.json "context_dir",
+// which both _agentContextPaths here and project_store.resolve_context_dir in Python honor).
+// This is the "attach the context folder to the project" action — distinct from copying files.
+ipcMain.handle('agent-context-set-folder', async (event, { projectId } = {}) => {
+  projectId = projectId || _activeProjectId();
+  if (!projectId) return { status: 'error', message: 'Select a project first to attach a context folder.' };
+  const pf = path.join(__dirname, 'projects', projectId, 'project.json');
+  if (!fs.existsSync(pf)) return { status: 'error', message: `Project '${projectId}' not found.` };
+  const r = await _showOpen({ title: 'Choose a folder to use as this project context', properties: ['openDirectory'] });
+  if (!r || r.canceled || !r.filePaths || !r.filePaths.length) return { status: 'cancelled' };
+  const folder = r.filePaths[0];
+  try {
+    const pj = JSON.parse(fs.readFileSync(pf, 'utf8'));
+    pj.context_dir = folder;
+    fs.writeFileSync(pf, JSON.stringify(pj, null, 2));
+  } catch (e) { return { status: 'error', message: 'Could not update project: ' + e.message }; }
+  const { contextDir } = _agentContextPaths(projectId);
+  return { status: 'success', dir: contextDir, folder, ..._listContextLevel(contextDir, '') };
+});
+
+ipcMain.handle('agent-context-open', async (event, { projectId } = {}) => {
+  const { contextDir } = _agentContextPaths(projectId);
+  try { fs.mkdirSync(contextDir, { recursive: true }); } catch (e) { /* ignore */ }
+  shell.openPath(contextDir);
+  return { status: 'success', dir: contextDir };
+});
+
+ipcMain.handle('agent-memory-get', async (event, { projectId } = {}) => {
+  const { memoryPath } = _agentContextPaths(projectId);
+  let content = '';
+  try { content = fs.readFileSync(memoryPath, 'utf8'); } catch (e) { /* empty/missing */ }
+  return { status: 'success', path: memoryPath, content };
+});
+
+ipcMain.handle('agent-memory-open', async (event, { projectId } = {}) => {
+  const { memoryPath } = _agentContextPaths(projectId);
+  try {
+    fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
+    if (!fs.existsSync(memoryPath)) {
+      fs.writeFileSync(memoryPath, '# Agent memory\n\nDurable facts the AI agent has learned about this app.\n');
+    }
+  } catch (e) { /* ignore */ }
+  shell.openPath(memoryPath);
+  return { status: 'success', path: memoryPath };
+});
 
 ipcMain.handle('set-secret', async (e, { key, value }) => {
   try { _writeSecret(key, value); return { status: 'success' }; }
@@ -600,6 +937,24 @@ ipcMain.handle('get-run-checkpoints', async (event, runId) => {
       if (data.tc_id && data.checkpoints) {
         result[data.tc_id] = data.checkpoints;
       }
+    } catch (e) { /* skip corrupt files */ }
+  }
+  return result;
+});
+
+// ──────────────────────────────────────
+// IPC: Get run network log (per-test API calls + payloads/responses) — keyed by file stem
+// (the variant tc_id). Lazily loaded by ResultsView when a test row is expanded.
+// ──────────────────────────────────────
+ipcMain.handle('get-run-network', async (event, runId) => {
+  const runDir = path.isAbsolute(runId) ? runId : path.join(RESULTS_DIR, runId);
+  const netDir = path.join(runDir, 'network');
+  if (!fs.existsSync(netDir)) return {};
+  const result = {};
+  for (const f of fs.readdirSync(netDir).filter(f => f.endsWith('.json'))) {
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(netDir, f), 'utf8'));
+      result[f.replace(/\.json$/, '')] = (data && data.calls) || [];
     } catch (e) { /* skip corrupt files */ }
   }
   return result;

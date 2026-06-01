@@ -1,0 +1,641 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Shared AI Agent UI — loaded by BOTH the dedicated window (src/agent.html) and
+   the main IDE (src/index.html, docked into the right panel) via
+       <script type="text/babel" src="agent_ui.js"></script>
+   Wrapped in an IIFE so its top-level consts (useState, helpers, component names)
+   never collide with index.html's own inline-babel globals. Exposes window.AgentApp.
+
+   AgentApp({ embedded, onUndock, onClose }):
+     embedded=false → window mode: session sidebar + chat (its own BrowserWindow)
+     embedded=true  → docked mode: a compact session switcher bar + chat, sized to
+                      the main window's right panel. onUndock pops out to a window;
+                      onClose removes the dock.
+   Backend is identical in both: window.ats IPC + onAgentEvent (events are tagged
+   with sessionId and broadcast to every window, so a docked panel and a popped-out
+   window both stay live).
+   ────────────────────────────────────────────────────────────────────────── */
+(function () {
+  const { useState, useEffect, useRef, useCallback, useMemo } = React;
+  const Ic = window.I || {};
+
+  /* ── helpers ─────────────────────────────────────────────────────────────── */
+  function relTime(iso) {
+    if (!iso) return '';
+    const t = new Date(iso.length <= 19 ? iso + 'Z' : iso).getTime();
+    if (isNaN(t)) return '';
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+  const isImg = (ext) => /^(png|jpe?g|webp|gif|bmp)$/i.test(ext || '');
+  const argStr = (a) => {
+    if (a == null) return '';
+    if (typeof a === 'string') return a;
+    try { return Object.entries(a).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', '); }
+    catch (e) { return String(a); }
+  };
+  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '' }; }
+  function finalizeStreaming(prev) {
+    const last = prev[prev.length - 1];
+    if (last && last.role === 'assistant' && last.streaming) return [...prev.slice(0, -1), { ...last, streaming: false }];
+    return prev;
+  }
+  function bubbleFromTranscript(b, id) {
+    return { id, role: b.role, text: b.text || '', tool: b.tool, args: b.args, attachments: b.attachments };
+  }
+
+  /* Reduce one streamed agent-event into a session's runtime state. */
+  function applyEvent(rt, msg, nextId) {
+    const ev = msg.event;
+    const messages = rt.messages;
+    const set = (patch) => ({ ...rt, ...patch });
+    if (ev === 'ready') {
+      const info = { provider: msg.provider, model: msg.model, url: msg.url, auth: msg.auth,
+        auth_via: msg.auth_via, project: msg.project, project_id: msg.project_id, session_id: msg.session_id };
+      let msgs = messages;
+      if (msg.resumed && Array.isArray(msg.transcript)) {
+        msgs = msg.transcript.map((b) => bubbleFromTranscript(b, nextId()));
+      }
+      const authTxt = msg.auth ? ` · authenticated (${msg.auth_via})` : ' · NOT logged in — set credentials in settings';
+      msgs = [...msgs, { id: nextId(), role: 'system',
+        text: `Connected to ${msg.provider} (${msg.model})${msg.project ? ' · ' + msg.project : ''}${authTxt}. Browser open${msg.url ? ' at ' + msg.url : ''}.${msg.resumed ? ' Resumed from saved memory.' : ''}` }];
+      return set({ status: 'ready', info, messages: msgs });
+    }
+    if (ev === 'text') {
+      const delta = msg.delta || '';
+      const last = messages[messages.length - 1];
+      if (last && last.role === 'assistant' && last.streaming)
+        return set({ messages: [...messages.slice(0, -1), { ...last, text: (last.text || '') + delta }] });
+      return set({ messages: [...messages, { id: nextId(), role: 'assistant', text: delta, streaming: true }] });
+    }
+    if (ev === 'thinking') return set({ status: 'busy' });
+    if (ev === 'tool_call') return set({ status: 'busy', messages: [...finalizeStreaming(messages), { id: nextId(), role: 'tool', tool: msg.tool, args: msg.args }] });
+    if (ev === 'tool_result') {
+      const t = typeof msg.summary === 'string' ? msg.summary : JSON.stringify(msg.summary || '');
+      return set({ messages: [...messages, { id: nextId(), role: 'tool_result', tool: msg.tool, text: t }] });
+    }
+    if (ev === 'turn_complete') {
+      let p = finalizeStreaming(messages);
+      const last = p[p.length - 1];
+      if ((!last || last.role !== 'assistant') && msg.text) p = [...p, { id: nextId(), role: 'assistant', text: msg.text }];
+      return set({ status: 'ready', lastLog: '', messages: p });
+    }
+    if (ev === 'reset_ok') return set({ messages: [], status: 'ready' });
+    if (ev === 'error') return set({ status: 'ready', messages: [...messages, { id: nextId(), role: 'error', text: msg.message || 'error' }] });
+    if (ev === 'exited') return set({ status: 'idle', info: null, messages: [...messages, { id: nextId(), role: 'system', text: 'Session stopped.' }] });
+    if (ev === 'log') return set({ lastLog: String(msg.message || '') });
+    return rt;
+  }
+
+  function statusColor(rt, live) {
+    const st = rt && rt.status;
+    if (st === 'busy' || st === 'starting') return 'var(--accent)';
+    if (live || st === 'ready') return 'var(--pass, #16a34a)';
+    if (st === 'error') return 'var(--fail, #dc2626)';
+    return 'var(--text-3)';
+  }
+
+  /* ── Session sidebar (window mode) ───────────────────────────────────────── */
+  function SessionSidebar({ projects, projectId, setProjectId, sessions, activeId, runtimeMap,
+                            onSelect, onNew, onRename, onDelete }) {
+    const [search, setSearch] = useState('');
+    const [editing, setEditing] = useState(null);
+    const [editText, setEditText] = useState('');
+    const [confirmDel, setConfirmDel] = useState(null);
+    const filtered = useMemo(() => {
+      const q = search.trim().toLowerCase();
+      if (!q) return sessions;
+      return sessions.filter((s) => (s.title || '').toLowerCase().includes(q));
+    }, [sessions, search]);
+
+    return (
+      <aside className="ses-sidebar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px' }}>
+          <Ic.MessageSquare size={16} style={{ color: 'var(--accent)' }} />
+          <b style={{ fontSize: 13 }}>AI Agent</b>
+        </div>
+        <div style={{ padding: '0 12px 8px' }}>
+          <label style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Project</label>
+          <select value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)}
+            style={{ width: '100%', fontSize: 11.5, padding: '4px 6px', marginTop: 3 }}>
+            <option value="">Default (no project)</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
+          </select>
+        </div>
+        <div style={{ padding: '0 12px 8px', display: 'flex', gap: 6 }}>
+          <button className="rv-cta primary" style={{ flex: 1, justifyContent: 'center' }} onClick={onNew}>
+            <Ic.Plus size={13} /> New session
+          </button>
+        </div>
+        <div style={{ padding: '0 12px 8px' }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions…"
+            style={{ width: '100%', fontSize: 11.5, padding: '4px 7px' }} />
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 8px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {filtered.length === 0 && (
+            <div style={{ color: 'var(--text-3)', fontSize: 11.5, padding: '10px 6px', lineHeight: 1.5 }}>
+              No sessions yet. Click <b>New session</b> to start the agent on this project — each session
+              keeps its own browser, memory, and transcript, and you can resume it later.
+            </div>
+          )}
+          {filtered.map((s) => {
+            const rt = runtimeMap[s.id];
+            const live = !!s.live || (rt && (rt.status === 'busy' || rt.status === 'ready' || rt.status === 'starting'));
+            return (
+              <div key={s.id} className={'ses-row' + (s.id === activeId ? ' active' : '')} onClick={() => onSelect(s.id)}>
+                <span className="ses-dot" style={{ background: statusColor(rt, live) }}></span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {editing === s.id ? (
+                    <input autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { onRename(s.id, editText); setEditing(null); } if (e.key === 'Escape') setEditing(null); }}
+                      onBlur={() => { onRename(s.id, editText); setEditing(null); }}
+                      style={{ width: '100%', fontSize: 12, padding: '1px 4px' }} />
+                  ) : (
+                    <div onDoubleClick={(e) => { e.stopPropagation(); setEditing(s.id); setEditText(s.title || ''); }}
+                      style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={s.title}>{s.title || 'Untitled'}</div>
+                  )}
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+                    {live ? 'running' : (s.message_count ? s.message_count + ' msgs' : 'new')}{s.updated_at ? ' · ' + relTime(s.updated_at) : ''}
+                  </div>
+                </div>
+                {confirmDel === s.id ? (
+                  <span style={{ display: 'inline-flex', gap: 3 }} onClick={(e) => e.stopPropagation()}>
+                    <button className="ses-x" style={{ opacity: 1, color: 'var(--fail)' }} title="Confirm delete"
+                      onClick={() => { setConfirmDel(null); onDelete(s.id); }}><Ic.Check size={13} /></button>
+                    <button className="ses-x" style={{ opacity: 1 }} title="Cancel" onClick={() => setConfirmDel(null)}><Ic.X size={13} /></button>
+                  </span>
+                ) : (
+                  <button className="ses-x" title="Delete session" onClick={(e) => { e.stopPropagation(); setConfirmDel(s.id); }}><Ic.Trash size={13} /></button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+    );
+  }
+
+  /* ── Compact session switcher (docked mode) ──────────────────────────────── */
+  function CompactBar({ projects, projectId, setProjectId, sessions, activeId, onSelect, onNew, onUndock, onClose }) {
+    return (
+      <div className="agent-embed-bar">
+        <Ic.MessageSquare size={14} style={{ color: 'var(--accent)' }} />
+        <b style={{ fontSize: 12 }}>AI Agent</b>
+        <select value={activeId || ''} onChange={(e) => onSelect(e.target.value || null)} title="Session"
+          style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '3px 5px' }}>
+          {!sessions.length && <option value="">No sessions yet</option>}
+          {sessions.map((s) => <option key={s.id} value={s.id}>{(s.live ? '● ' : '') + (s.title || 'Untitled')}</option>)}
+        </select>
+        <button className="rv-cta" onClick={onNew} title="New session"><Ic.Plus size={12} /></button>
+        <select value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)} title="Project"
+          style={{ fontSize: 10.5, padding: '3px 4px', maxWidth: 90 }}>
+          <option value="">Default</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
+        </select>
+        {onUndock && <button className="rv-cta" onClick={onUndock} title="Pop out to its own window"><Ic.ExternalLink size={12} /></button>}
+        {onClose && <button className="rv-cta" onClick={onClose} title="Close the agent panel"><Ic.X size={12} /></button>}
+      </div>
+    );
+  }
+
+  /* ── Active session chat ─────────────────────────────────────────────────── */
+  function SessionChat({ session, rt, provider, setProvider, headed, setHeaded,
+                         onStart, onSend, onStop, onReset, setInput, setAttachments, projectId, toast }) {
+    const scrollRef = useRef(null);
+    const taRef = useRef(null);
+    const caretRef = useRef(null);
+    const [ctxOpen, setCtxOpen] = useState(false);
+    const [ctxDir, setCtxDir] = useState('');
+    const [ctxSubdir, setCtxSubdir] = useState('');
+    const [ctxLevel, setCtxLevel] = useState(null);   // {dirs, files} | null = not loaded
+    const [dragOver, setDragOver] = useState(false);
+    // @-mention picker (fuzzy file references into the scoped context folder)
+    const [atFiles, setAtFiles] = useState(null);     // flat path list, cached per folder
+    const [atOpen, setAtOpen] = useState(false);
+    const [atQuery, setAtQuery] = useState('');
+    const [atIndex, setAtIndex] = useState(0);
+    useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [rt && rt.messages, rt && rt.status]);
+
+    if (!session || !rt) {
+      return (
+        <div className="agent-pane" style={{ alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, padding: 16 }}>
+            <Ic.MessageSquare size={28} style={{ color: 'var(--accent)', marginBottom: 10 }} />
+            <h2 style={{ fontSize: 15, margin: '0 0 6px', color: 'var(--text-1)' }}>No session selected</h2>
+            <p style={{ fontSize: 12, lineHeight: 1.5 }}>Create a <b>New session</b> or pick one.
+            Each session drives its own browser, keeps memory, and can run alongside others.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const status = rt.status;
+    const info = rt.info;
+    const messages = rt.messages || [];
+    const attachments = rt.attachments || [];
+    const connected = status === 'ready' || status === 'busy' || status === 'starting' || !!info;
+    const busy = status === 'busy' || status === 'starting';
+    const canResume = (session.message_count > 0) || messages.length > 0;
+
+    const ctxPid = () => projectId || (info && info.project_id) || null;
+    const loadCtx = async (subdir) => {
+      try {
+        const r = await window.ats.agentContextList({ projectId: ctxPid(), subdir: subdir || '' });
+        setCtxDir((r && r.dir) || '');
+        setCtxSubdir(subdir || '');
+        setCtxLevel({ dirs: (r && r.dirs) || [], files: (r && r.files) || [] });
+      } catch (e) { setCtxLevel({ dirs: [], files: [] }); }
+    };
+    const toggleCtx = () => { const n = !ctxOpen; setCtxOpen(n); if (n) loadCtx(ctxSubdir); };
+    const applyCtxResult = (r) => { if (!r) return; setCtxDir(r.dir || ''); setCtxSubdir(''); setCtxLevel({ dirs: r.dirs || [], files: r.files || [] }); setAtFiles(null); };
+    const addCtx = async () => {
+      try { const r = await window.ats.agentContextAdd({ projectId: ctxPid() }); applyCtxResult(r); if (r && r.added) toast(`Added ${r.added} file(s) to context`); }
+      catch (e) { toast('Could not add context files'); }
+    };
+    const useFolder = async () => {
+      try {
+        const r = await window.ats.agentContextSetFolder({ projectId: ctxPid() });
+        if (!r || r.status === 'cancelled') return;
+        if (r.status === 'error') { toast(r.message || 'Could not set folder'); return; }
+        applyCtxResult(r);
+        toast('Context folder attached to project');
+      } catch (e) { toast('Could not attach folder'); }
+    };
+
+    // @-mention: lazily fetch the flat file list (cached), fuzzy-match the typed token.
+    const ensureAtFiles = async () => {
+      if (atFiles) return atFiles;
+      try { const r = await window.ats.agentContextFiles({ projectId: ctxPid() }); const f = (r && r.files) || []; setAtFiles(f); return f; }
+      catch (e) { setAtFiles([]); return []; }
+    };
+    const atMatches = useMemo(() => {
+      if (!atOpen || !atFiles) return [];
+      const q = atQuery.toLowerCase();
+      return atFiles
+        .filter((p) => p.toLowerCase().includes(q))
+        .sort((a, b) => {
+          const ab = a.split('/').pop().toLowerCase().startsWith(q) ? 0 : 1;
+          const bb = b.split('/').pop().toLowerCase().startsWith(q) ? 0 : 1;
+          return ab - bb || a.length - b.length;
+        })
+        .slice(0, 8);
+    }, [atOpen, atFiles, atQuery]);
+    const onComposerChange = (e) => {
+      const v = e.target.value;
+      setInput(v);
+      const caret = e.target.selectionStart != null ? e.target.selectionStart : v.length;
+      const m = v.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+      if (m) { setAtQuery(m[1]); setAtIndex(0); setAtOpen(true); ensureAtFiles(); }
+      else if (atOpen) setAtOpen(false);
+    };
+    const insertAtMatch = (pathStr) => {
+      const ta = taRef.current; if (!ta) { setAtOpen(false); return; }
+      const v = rt.input || '';
+      const caret = ta.selectionStart != null ? ta.selectionStart : v.length;
+      const m = v.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+      if (!m) { setAtOpen(false); return; }
+      const start = caret - m[1].length - 1;          // position of '@'
+      const after = v.slice(caret);
+      const sep = after.startsWith(' ') ? '' : ' ';   // one space, never a double
+      setInput(v.slice(0, start) + '@' + pathStr + sep + after);
+      setAtOpen(false);
+      caretRef.current = start + 1 + pathStr.length + sep.length;  // caret after "@path "
+    };
+    useEffect(() => {
+      if (caretRef.current != null && taRef.current) {
+        const pos = caretRef.current; caretRef.current = null;
+        try { taRef.current.focus(); taRef.current.setSelectionRange(pos, pos); } catch (e) {}
+      }
+    });
+
+    const mergeAttachments = (metas) => {
+      const seen = new Set(attachments.map((a) => a.path));
+      setAttachments([...attachments, ...metas.filter((m) => m.path && !seen.has(m.path))]);
+    };
+    const addAttachments = async () => {
+      try { const r = await window.ats.agentPickFiles(); if (r && r.status === 'success' && r.files && r.files.length) mergeAttachments(r.files); }
+      catch (e) { toast('Could not open file picker'); }
+    };
+    const removeAttachment = (p) => setAttachments(attachments.filter((a) => a.path !== p));
+    const onDrop = (e) => {
+      e.preventDefault(); setDragOver(false);
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      const metas = files.map((f) => {
+        const p = (window.ats.getPathForFile && window.ats.getPathForFile(f)) || '';
+        const name = f.name || (p ? p.split(/[\\/]/).pop() : 'file');
+        return { path: p, name, ext: (name.split('.').pop() || '').toLowerCase(), size: f.size || 0 };
+      }).filter((m) => m.path);
+      if (!metas.length) { toast('Could not read dropped file path'); return; }
+      mergeAttachments(metas);
+    };
+    const onKey = (e) => {
+      if (atOpen && atMatches.length) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); setAtIndex((i) => (i + 1) % atMatches.length); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); setAtIndex((i) => (i - 1 + atMatches.length) % atMatches.length); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertAtMatch(atMatches[atIndex] || atMatches[0]); return; }
+        if (e.key === 'Escape') { e.preventDefault(); setAtOpen(false); return; }
+      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+    };
+
+    const bubble = (m) => {
+      if (m.role === 'user') return (
+        <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: '82%', background: 'var(--accent-bg)', color: 'var(--text-1)', padding: '8px 12px', borderRadius: 10, fontSize: 12.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {m.text}
+          {m.attachments && m.attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: m.text ? 6 : 0 }}>
+              {m.attachments.map((n, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '1px 6px' }}><Ic.File size={10} /> {n}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+      if (m.role === 'assistant') return (
+        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent-bg)', padding: '8px 12px', borderRadius: 10, fontSize: 12.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-1)' }}>{m.text}{m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}</div>
+      );
+      if (m.role === 'tool') return (
+        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
+          <Ic.Zap size={11} style={{ verticalAlign: -1 }} /><b>{m.tool}</b><span style={{ color: 'var(--text-3)' }}>{argStr(m.args).slice(0, 120)}</span>
+        </div>
+      );
+      if (m.role === 'tool_result') return (
+        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 16 }}>↳ {String(m.text).slice(0, 160)}</div>
+      );
+      if (m.role === 'error') return (
+        <div key={m.id} style={{ alignSelf: 'center', fontSize: 11, color: 'var(--fail)', fontFamily: 'var(--mono)' }}>⚠ {m.text}</div>
+      );
+      return <div key={m.id} style={{ alignSelf: 'center', fontSize: 10.5, color: 'var(--text-3)' }}>{m.text}</div>;
+    };
+
+    return (
+      <div className="agent-pane">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderBottom: '1px solid var(--accent-bg)', position: 'relative', flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }} title={session.title}>{session.title || 'Untitled session'}</b>
+          {info && <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>{info.model}{info.auth ? ' · ' + (info.auth_via || 'auth') : ' · no auth'}</span>}
+          <span style={{ flex: 1 }}></span>
+          {busy && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}><span className="live-dot"></span> {status === 'starting' ? 'starting' : 'working'}…</span>}
+          <button className="rv-cta" onClick={toggleCtx} title="Scoped project folder the agent explores"><Ic.Folder size={12} /> Context</button>
+          <button className="rv-cta" onClick={() => window.ats.agentMemoryOpen({ projectId: ctxPid() })} title="Open the agent's memory file (AGENT_MEMORY.md)"><Ic.FileText size={12} /> Memory</button>
+          {connected && <button className="rv-cta" onClick={onReset} disabled={busy} title="Clear this session's conversation"><Ic.RefreshCw size={12} /></button>}
+          {connected && <button className="rv-cta" onClick={onStop} title="Stop this session + close its browser">Stop</button>}
+          {ctxOpen && (
+            <div style={{ position: 'absolute', top: '100%', right: 12, zIndex: 30, width: 340, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <b style={{ fontSize: 11 }}>Project folder</b><span style={{ flex: 1 }}></span>
+                <button className="rv-cta" onClick={useFolder} title="Point this project at an existing folder on disk"><Ic.FolderOpen size={11} /> Use folder…</button>
+                <button className="rv-cta" onClick={addCtx} title="Copy individual files into the managed context folder"><Ic.Plus size={11} /> Add files</button>
+                <button className="rv-cta" onClick={() => window.ats.agentContextOpen({ projectId: ctxPid() })} title="Open the folder in your file explorer"><Ic.FolderOpen size={11} /></button>
+                <button className="rv-cta" onClick={() => setCtxOpen(false)}><Ic.X size={11} /></button>
+              </div>
+              {ctxDir
+                ? <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginBottom: 4, wordBreak: 'break-all' }} title={ctxDir}>{ctxDir}</div>
+                : <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '8px 2px', lineHeight: 1.5 }}>No folder yet. <b>Use folder…</b> to give this project a folder, or <b>Add files</b> to copy docs in.</div>}
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 6, lineHeight: 1.45 }}>The agent explores this folder on demand (lists, searches, reads) and you can <b>@</b>-mention files in chat — nothing is imported.</div>
+              {ctxLevel && (
+                <React.Fragment>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', marginBottom: 4, flexWrap: 'wrap' }}>
+                    <span style={{ cursor: 'pointer', color: ctxSubdir ? 'var(--accent)' : 'var(--text-2)' }} onClick={() => loadCtx('')}>root</span>
+                    {ctxSubdir && ctxSubdir.split('/').map((seg, i, arr) => (
+                      <span key={i}><span style={{ color: 'var(--text-3)' }}>/</span><span style={{ cursor: 'pointer', color: i === arr.length - 1 ? 'var(--text-2)' : 'var(--accent)' }} onClick={() => loadCtx(arr.slice(0, i + 1).join('/'))}>{seg}</span></span>
+                    ))}
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 11 }}>
+                    {!ctxLevel.dirs.length && !ctxLevel.files.length && <div style={{ color: 'var(--text-3)', padding: '8px 2px' }}>(empty)</div>}
+                    {ctxLevel.dirs.map((d) => (
+                      <div key={'d:' + d.name} onClick={() => loadCtx(d.name)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 2px', fontFamily: 'var(--mono)', cursor: 'pointer' }} title={d.name}>
+                        <Ic.Folder size={11} style={{ color: 'var(--accent)' }} />
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name.split('/').pop()}/</span>
+                      </div>
+                    ))}
+                    {ctxLevel.files.map((f) => (
+                      <div key={'f:' + f.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 2px', fontFamily: 'var(--mono)' }} title={f.name}>
+                        {isImg(f.ext) ? <Ic.File size={11} style={{ color: 'var(--text-3)' }} /> : <Ic.FileText size={11} style={{ color: 'var(--text-3)' }} />}
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name.split('/').pop()}</span>
+                        <span style={{ color: 'var(--text-3)' }}>{f.size ? Math.max(1, Math.round(f.size / 1024)) + 'k' : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                </React.Fragment>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div ref={scrollRef}
+          onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+          onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+          onDrop={onDrop}
+          style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
+          {messages.length === 0 && !connected && (
+            <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, fontSize: 12.5, lineHeight: 1.6 }}>
+              {canResume ? 'This session is paused. Resume it to continue from where you left off — its memory is restored.'
+                         : 'New session. Start the agent below, then tell it what to do — e.g. "explore the orders area and write a test for the full order lifecycle."'}
+            </div>
+          )}
+          {messages.map(bubble)}
+          {dragOver && <div style={{ alignSelf: 'center', margin: 'auto', color: 'var(--accent)', fontSize: 12, fontFamily: 'var(--mono)' }}>Drop files to attach</div>}
+        </div>
+
+        {busy && rt.lastLog && (
+          <div style={{ padding: '2px 16px', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rt.lastLog}</div>
+        )}
+
+        {!connected ? (
+          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--accent-bg)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider" style={{ fontSize: 11, padding: '3px 6px' }}>
+              <option value="mimo">Xiaomi MiMo</option><option value="openai">OpenAI</option><option value="ollama">Local (Ollama)</option>
+            </select>
+            <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+              Watch live
+            </label>
+            <span style={{ flex: 1 }}></span>
+            <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
+              <Ic.Play size={13} /> {status === 'starting' ? 'Starting…' : (canResume ? 'Resume' : 'Start session')}
+            </button>
+          </div>
+        ) : (
+          <div style={{ padding: '8px 16px 10px', borderTop: '1px solid var(--accent-bg)' }}>
+            {attachments.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
+                {attachments.map((a) => (
+                  <span key={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent-bg)', borderRadius: 6, padding: '2px 4px 2px 7px' }}>
+                    {isImg(a.ext) ? <Ic.File size={10} /> : <Ic.FileText size={10} />}
+                    <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
+                    <button onClick={() => removeAttachment(a.path)} title="Remove" style={{ display: 'inline-flex', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text-3)' }}><Ic.X size={11} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, position: 'relative' }}>
+              {atOpen && atMatches.length > 0 && (
+                <div style={{ position: 'absolute', bottom: '100%', left: 40, right: 0, marginBottom: 6, maxHeight: 210, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', zIndex: 40, fontSize: 11.5, fontFamily: 'var(--mono)' }}>
+                  <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-3)', borderBottom: '1px solid var(--accent-bg)' }}>Reference a file — ↑↓ then Enter</div>
+                  {atMatches.map((p, i) => (
+                    <div key={p} onMouseDown={(e) => { e.preventDefault(); insertAtMatch(p); }} onMouseEnter={() => setAtIndex(i)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer', background: i === atIndex ? 'var(--accent-bg)' : 'transparent' }}>
+                      <Ic.FileText size={11} style={{ color: 'var(--text-3)' }} />
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p}>{p}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images" style={{ alignSelf: 'flex-end' }}><Ic.Upload size={14} /></button>
+              <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
+                onBlur={() => setTimeout(() => setAtOpen(false), 120)}
+                placeholder={status === 'ready' ? 'Tell the agent what to do… (Enter to send) · @ to reference a file · attach or drop files' : 'Agent is working…'}
+                disabled={status !== 'ready'}
+                style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 12, padding: 8, fontFamily: 'inherit' }} />
+              <button className="rv-cta primary" onClick={onSend} disabled={status !== 'ready' || (!(rt.input || '').trim() && !attachments.length)} style={{ alignSelf: 'flex-end' }}><Ic.Play size={13} /> Send</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ── Root ────────────────────────────────────────────────────────────────── */
+  function AgentApp({ embedded, onUndock, onClose }) {
+    const [projects, setProjects] = useState([]);
+    const [projectId, setProjectId] = useState(null);
+    const [sessions, setSessions] = useState([]);
+    const [activeId, setActiveId] = useState(null);
+    const [runtime, setRuntime] = useState({});
+    const [provider, setProvider] = useState('mimo');
+    const [headed, setHeaded] = useState(false);
+    const [toasts, setToasts] = useState([]);
+    const idRef = useRef(0);
+    const nextId = () => (idRef.current += 1);
+    const toast = (msg) => { const id = Date.now() + Math.random(); setToasts((t) => [...t, { id, msg }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2400); };
+    const pidRef = useRef(projectId);
+    useEffect(() => { pidRef.current = projectId; }, [projectId]);
+
+    const refreshSessions = useCallback(async (pid) => {
+      try {
+        const r = await window.ats.agentListSessions({ projectId: pid });
+        const disk = (r && r.sessions) || [];
+        const diskIds = new Set(disk.map((s) => s.id));
+        setSessions((prev) => {
+          const placeholders = prev.filter((s) => s._placeholder && !diskIds.has(s.id));
+          return [...placeholders, ...disk];
+        });
+      } catch (e) { /* ignore */ }
+    }, []);
+
+    useEffect(() => {
+      window.ats.listProjects().then((r) => {
+        setProjects((r && r.projects) || []);
+        if (r && r.active) setProjectId(r.active);
+      }).catch(() => {});
+    }, []);
+
+    useEffect(() => { refreshSessions(projectId); }, [projectId, refreshSessions]);
+
+    useEffect(() => {
+      const off = window.ats.onAgentEvent((msg) => {
+        const sid = msg && msg.sessionId;
+        if (!sid) return;
+        setRuntime((prev) => {
+          const cur = prev[sid] || emptyRuntime();
+          return { ...prev, [sid]: applyEvent(cur, msg, nextId) };
+        });
+        if (msg.event === 'ready' || msg.event === 'turn_complete' || msg.event === 'exited' || msg.event === 'reset_ok') {
+          refreshSessions(pidRef.current);
+        }
+      });
+      return () => { if (off) off(); };
+    }, [refreshSessions]);
+
+    useEffect(() => {
+      if (!activeId || runtime[activeId]) return;
+      const sess = sessions.find((s) => s.id === activeId);
+      if (!sess) return;
+      if (sess._placeholder || !(sess.message_count > 0)) { setRuntime((prev) => (prev[activeId] ? prev : { ...prev, [activeId]: emptyRuntime() })); return; }
+      window.ats.agentSessionTranscript({ projectId, sessionId: activeId }).then((r) => {
+        const msgs = ((r && r.bubbles) || []).map((b) => bubbleFromTranscript(b, nextId()));
+        setRuntime((prev) => (prev[activeId] ? prev : { ...prev, [activeId]: { ...emptyRuntime(), messages: msgs } }));
+      }).catch(() => { setRuntime((prev) => (prev[activeId] ? prev : { ...prev, [activeId]: emptyRuntime() })); });
+    }, [activeId, sessions, projectId]);
+
+    const patchRt = (sid, patch) => setRuntime((prev) => ({ ...prev, [sid]: { ...(prev[sid] || emptyRuntime()), ...(typeof patch === 'function' ? patch(prev[sid] || emptyRuntime()) : patch) } }));
+
+    const onNew = async () => {
+      const r = await window.ats.agentNewSession({ projectId, title: '' });
+      if (!r || !r.session) return;
+      const s = { ...r.session, _placeholder: true };
+      setSessions((prev) => [s, ...prev]);
+      setActiveId(s.id);
+      setRuntime((prev) => ({ ...prev, [s.id]: emptyRuntime() }));
+    };
+    const onStart = async () => {
+      const sid = activeId; if (!sid) return;
+      const sess = sessions.find((s) => s.id === sid) || {};
+      patchRt(sid, (cur) => ({ status: 'starting', messages: [...cur.messages, { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' }] }));
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, title: sess.title || '' });
+      if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
+    };
+    const onSend = async () => {
+      const sid = activeId; if (!sid) return;
+      const cur = runtime[sid]; if (!cur) return;
+      const text = (cur.input || '').trim();
+      const atts = cur.attachments || [];
+      if ((!text && !atts.length) || cur.status !== 'ready') return;
+      patchRt(sid, (c) => ({ messages: [...c.messages, { id: nextId(), role: 'user', text, attachments: atts.map((a) => a.name) }], input: '', attachments: [], status: 'busy' }));
+      const res = await window.ats.agentSend({ sessionId: sid, message: text, attachments: atts.map((a) => a.path) });
+      if (res && res.status === 'error') patchRt(sid, (c) => ({ status: 'ready', messages: [...c.messages, { id: nextId(), role: 'error', text: res.message }] }));
+    };
+    const onStop = async () => { const sid = activeId; if (!sid) return; await window.ats.agentStop({ sessionId: sid }); patchRt(sid, { status: 'idle', info: null }); refreshSessions(projectId); };
+    const onReset = async () => { const sid = activeId; if (!sid) return; await window.ats.agentReset({ sessionId: sid }); patchRt(sid, { messages: [] }); toast('Conversation cleared'); };
+    const onRename = async (sid, title) => { setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s))); await window.ats.agentRenameSession({ projectId, sessionId: sid, title }); };
+    const onDelete = async (sid) => {
+      await window.ats.agentDeleteSession({ projectId, sessionId: sid });
+      setSessions((prev) => prev.filter((s) => s.id !== sid));
+      setRuntime((prev) => { const n = { ...prev }; delete n[sid]; return n; });
+      if (activeId === sid) setActiveId(null);
+      toast('Session deleted');
+    };
+
+    const activeSession = sessions.find((s) => s.id === activeId) || null;
+    const activeRt = activeId ? (runtime[activeId] || emptyRuntime()) : null;
+    const chat = (
+      <SessionChat session={activeSession} rt={activeRt}
+        provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+        onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset}
+        setInput={(v) => patchRt(activeId, { input: v })}
+        setAttachments={(v) => patchRt(activeId, { attachments: v })}
+        projectId={projectId} toast={toast} />
+    );
+
+    return (
+      <div className={'agent-shell' + (embedded ? ' embedded' : '')}>
+        {embedded ? (
+          <React.Fragment>
+            <CompactBar projects={projects} projectId={projectId} setProjectId={setProjectId}
+              sessions={sessions} activeId={activeId} onSelect={setActiveId} onNew={onNew}
+              onUndock={onUndock} onClose={onClose} />
+            {chat}
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <SessionSidebar projects={projects} projectId={projectId} setProjectId={setProjectId}
+              sessions={sessions} activeId={activeId} runtimeMap={runtime}
+              onSelect={setActiveId} onNew={onNew} onRename={onRename} onDelete={onDelete} />
+            {chat}
+          </React.Fragment>
+        )}
+        <div style={{ position: 'fixed', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 80 }}>
+          {toasts.map((t) => (
+            <div key={t.id} style={{ background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent)', borderRadius: 8, padding: '7px 12px', fontSize: 12, boxShadow: '0 6px 18px rgba(0,0,0,0.2)' }}>{t.msg}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  window.AgentApp = AgentApp;
+})();

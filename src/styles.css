@@ -790,6 +790,24 @@ input, select, textarea { font: inherit; color: inherit; }
 .main-grid.lc { grid-template-columns: 0 1fr var(--rw, 240px); }
 .main-grid.rc { grid-template-columns: var(--lw, 260px) 1fr 0; }
 .main-grid.lc.rc { grid-template-columns: 0 1fr 0; }
+/* Docked AI Agent: right column 50% wider (240 → 360). Never combined with .rc. */
+.main-grid.agent-docked { --rw: 360px; }
+
+/* ─── AI Agent (shared by the dedicated window AND the docked right panel) ─── */
+.agent-shell { display: flex; height: 100vh; min-height: 0; background: var(--bg); color: var(--text-1); }
+.agent-shell.embedded { height: 100%; flex-direction: column; border-left: 1px solid var(--accent-bg); }
+.ses-sidebar { width: 268px; flex: 0 0 268px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--accent-bg); min-height: 0; background: var(--bg-2, var(--bg)); }
+.ses-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px;
+  cursor: pointer; border: 1px solid transparent; }
+.ses-row:hover { background: var(--accent-bg); }
+.ses-row.active { background: var(--accent-bg); border-color: var(--accent); }
+.ses-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.ses-x { opacity: 0; border: none; background: transparent; cursor: pointer; color: var(--text-3); display: inline-flex; }
+.ses-row:hover .ses-x { opacity: 1; }
+.agent-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.agent-embed-bar { display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+  border-bottom: 1px solid var(--accent-bg); background: var(--bg-2, var(--bg)); }
 
 /* ─── Tool window ─── */
 .tw {

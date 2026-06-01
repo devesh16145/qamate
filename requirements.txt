@@ -26,5 +26,12 @@ pytest-playwright==0.7.2
 # (default), OpenAI, and Ollama. API keys come from the environment, never config.
 pydantic-ai-slim[openai]==1.104.0
 
+# ── Attachment / context-file text extraction (AI agent file context) ─────────
+# The agent inlines document text from attachments + the project context folder.
+# pypdf (PDF) and python-docx (.docx) are small, pure-python. xlsx uses openpyxl
+# below. Extraction degrades gracefully if any of these is missing.
+pypdf==6.1.1
+python-docx==1.1.2
+
 # ── Data files (field-mapping / migration spreadsheets) ───────────────────────
 openpyxl==3.1.5

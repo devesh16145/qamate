@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Agrim ATS — AI Agent</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Agent window fills the viewport; component styles live in styles.css (shared with the
+       docked panel in the IDE). */
+    html, body, #root { height: 100%; margin: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Vendor libraries (shared with the IDE window) -->
+  <script src="vendor/react.development.js"></script>
+  <script src="vendor/react-dom.development.js"></script>
+  <script src="vendor/babel.min.js"></script>
+  <script src="vendor/icons.js"></script>
+
+  <!-- Shared AI Agent UI (also used docked in the IDE's right panel) -->
+  <script type="text/babel" src="agent_ui.js"></script>
+
+  <!-- Mount in window mode (sidebar + chat). A "Dock" button asks the main window to
+       take over and closes this window. -->
+  <script type="text/babel">
+    function AgentWindowRoot() {
+      const dock = () => { try { window.ats.agentDock(); } catch (e) {} };
+      return (
+        <div style={{ position: 'relative', height: '100%' }}>
+          <button className="rv-cta" onClick={dock}
+            title="Dock into the main window's right panel"
+            style={{ position: 'fixed', top: 8, right: 12, zIndex: 90 }}>
+            <window.I.PanelRight size={12} /> Dock
+          </button>
+          <window.AgentApp />
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById('root')).render(<AgentWindowRoot />);
+  </script>
+</body>
+</html>

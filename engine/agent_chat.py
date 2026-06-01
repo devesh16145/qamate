@@ -54,6 +54,7 @@ import re
 import sys
 import json
 import asyncio
+import datetime
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -62,13 +63,14 @@ from typing import Any, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project_store
+import agent_sessions
 from app_explorer import _comprehensive_snapshot, element_to_model, _label
 from dom_inspector import DESTRUCTIVE_KEYWORDS
 from smart_locator import smart_locator, SelfHealError
 from recorder_parser import generate_from_review
 from agent_recorder import _locator_str, _q  # reuse the proven codegen helpers
 
-from pydantic_ai import Agent, RunContext, capture_run_messages
+from pydantic_ai import Agent, RunContext, capture_run_messages, BinaryContent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
@@ -126,6 +128,235 @@ def _trim_dangling_tool_calls(messages):
     return msgs
 
 
+# ── Attachments & context files: turn docs/images into prompt content ─────────
+# Documents are EXTRACTED TO TEXT (works on every model, incl. text-only ones);
+# images are passed as multimodal BinaryContent (works on vision-capable models —
+# GPT-4o / Claude, and MiMo if mimo-v2.5-pro accepts images; if it does not, switch
+# the model tag to the omnimodal mimo-v2.5). Every helper is wrapped so a bad file
+# never crashes a turn — the worst case is a "could not read" note.
+
+TEXT_EXTS = {".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".json", ".log",
+             ".yml", ".yaml", ".xml", ".html", ".htm", ".css", ".js", ".ts", ".jsx",
+             ".tsx", ".py", ".java", ".c", ".cpp", ".cs", ".go", ".rb", ".php", ".sh",
+             ".bat", ".sql", ".ini", ".toml", ".env", ".properties", ".conf"}
+IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp"}
+
+MAX_TEXT_PER_FILE = 200_000     # chars of extracted text kept per document
+MAX_TEXT_TOTAL = 500_000        # chars across all attachments in one message
+MAX_IMAGE_BYTES = 12_000_000    # ~12 MB cap per image
+MAX_PDF_BYTES = 20_000_000      # ~20 MB cap when sending a PDF as a binary doc
+
+
+# ── Scoped project folder (the agent EXPLORES it like a repo — it is NOT imported) ─────
+# A context folder may be a whole project tree, so listing/searching must hide the usual
+# junk and never escape the folder. _is_junk_name is MIRRORED in main.js `_isJunkName`
+# (the UI browser + @-search use the same convention) — keep them in sync.
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", ".idea", ".vscode",
+             "dist", "build", ".next", ".cache", ".pytest_cache", ".mypy_cache", ".gradle",
+             "target", ".tox", "coverage", ".turbo", ".parcel-cache", "obj"}
+MAX_SCAN_BYTES = 2_000_000      # files larger than this are skipped from listing/search
+
+
+def _is_junk_name(name):
+    """True for files/dirs to hide by default when exploring a scoped folder: VCS/deps/caches
+    and any dot-entry (.git, .claude, .minimax, .DS_Store, ...)."""
+    return (not name) or name in SKIP_DIRS or name.startswith(".")
+
+
+def _scoped_path(base, rel):
+    """Resolve `rel` inside `base`; returns the absolute path, or None if it escapes the folder."""
+    base_n = os.path.normpath(base or "")
+    if not base_n:
+        return None
+    safe = os.path.normpath(os.path.join(base_n, rel or ""))
+    try:
+        if safe == base_n or os.path.commonpath([safe, base_n]) == base_n:
+            return safe
+    except Exception:
+        pass
+    return None
+
+
+def _search_context(base, query, content=True, max_hits=40):
+    """Filename + (optional) content grep over a scoped folder, junk/big/binary skipped."""
+    ql = (query or "").lower()
+    names, hits = [], []
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if not _is_junk_name(d)]   # prune junk dirs in place
+        for fn in sorted(files):
+            if _is_junk_name(fn):
+                continue
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, base).replace("\\", "/")
+            if ql in fn.lower() and len(names) < max_hits:
+                names.append(rel)
+            if content and len(hits) < max_hits:
+                ext = os.path.splitext(fn)[1].lower()
+                if ext not in TEXT_EXTS:
+                    continue
+                try:
+                    if os.path.getsize(full) > MAX_SCAN_BYTES:
+                        continue
+                    per_file = 0
+                    with open(full, "r", encoding="utf-8", errors="replace") as f:
+                        for i, line in enumerate(f, 1):
+                            if ql in line.lower():
+                                hits.append({"file": rel, "line": i, "text": line.strip()[:200]})
+                                per_file += 1
+                                if per_file >= 3 or len(hits) >= max_hits:
+                                    break
+                except Exception:
+                    pass
+        if len(names) >= max_hits and len(hits) >= max_hits:
+            break
+    return {"ok": True, "query": query, "name_matches": names, "content_matches": hits}
+
+
+def _read_text_file(path, limit=MAX_TEXT_PER_FILE):
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        data = f.read(limit + 1)
+    return data[:limit], len(data) > limit
+
+
+def _extract_pdf(path, limit=MAX_TEXT_PER_FILE):
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return None
+    try:
+        reader = PdfReader(path)
+        out, total = [], 0
+        for page in reader.pages:
+            t = page.extract_text() or ""
+            out.append(t)
+            total += len(t)
+            if total >= limit:
+                break
+        return "\n".join(out)[:limit].strip()
+    except Exception:
+        return None
+
+
+def _extract_docx(path, limit=MAX_TEXT_PER_FILE):
+    try:
+        import docx  # python-docx
+    except Exception:
+        return None
+    try:
+        d = docx.Document(path)
+        return "\n".join(p.text for p in d.paragraphs)[:limit].strip()
+    except Exception:
+        return None
+
+
+def _extract_xlsx(path, limit=MAX_TEXT_PER_FILE, max_rows=200):
+    try:
+        import openpyxl
+    except Exception:
+        return None
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        out = []
+        for ws in wb.worksheets:
+            out.append(f"# Sheet: {ws.title}")
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= max_rows:
+                    out.append("... (truncated)")
+                    break
+                out.append(",".join("" if c is None else str(c) for c in row))
+            if sum(len(x) for x in out) >= limit:
+                break
+        wb.close()
+        return "\n".join(out)[:limit].strip()
+    except Exception:
+        return None
+
+
+def extract_file_text(path):
+    """Extract readable text from a document. Returns (text, truncated). text is None
+    when the file is not text-extractable (an image, or an unsupported/locked binary)."""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext in TEXT_EXTS:
+            return _read_text_file(path)
+        if ext == ".pdf":
+            return (_extract_pdf(path) or None), False
+        if ext == ".docx":
+            return (_extract_docx(path) or None), False
+        if ext in (".xlsx", ".xlsm"):
+            return (_extract_xlsx(path) or None), False
+    except Exception:
+        return None, False
+    return None, False
+
+
+def _binary_part(path, mime, max_bytes=MAX_IMAGE_BYTES):
+    """Load a file as a multimodal BinaryContent part (None if missing / too big)."""
+    try:
+        if os.path.getsize(path) > max_bytes:
+            return None
+        with open(path, "rb") as f:
+            return BinaryContent(data=f.read(), media_type=mime)
+    except Exception:
+        return None
+
+
+def _attachment_paths(attachments):
+    """Normalize the IPC 'attachments' field (list of paths or {path,name}) to
+    [(abs_path, display_name), ...]."""
+    out = []
+    for a in attachments or []:
+        p = a if isinstance(a, str) else (a.get("path") if isinstance(a, dict) else "")
+        if p:
+            name = (a.get("name") if isinstance(a, dict) and a.get("name") else os.path.basename(p))
+            out.append((p, name))
+    return out
+
+
+def _build_user_prompt(message, attachments):
+    """Assemble the prompt for agent.run(). Returns a plain str when there are no
+    binary (image/PDF) parts, else a list [text, BinaryContent, ...] — the shape
+    pydantic-ai accepts for multimodal input. Docs are inlined as labeled text blocks;
+    images/scanned-PDFs are appended as binary parts."""
+    pairs = _attachment_paths(attachments)
+    if not pairs:
+        return message
+    text_blocks, parts, notes, used = [], [], [], 0
+    for path, name in pairs:
+        if not os.path.exists(path):
+            notes.append(f"[not found: {name}]")
+            continue
+        ext = os.path.splitext(path)[1].lower()
+        if ext in IMAGE_MIME:
+            bc = _binary_part(path, IMAGE_MIME[ext])
+            notes.append(f"[image: {name}]" if bc else f"[image '{name}' unreadable or >12MB]")
+            if bc:
+                parts.append(bc)
+            continue
+        text, truncated = extract_file_text(path)
+        if text:
+            budget = max(0, MAX_TEXT_TOTAL - used)
+            chunk = text[:budget]
+            used += len(chunk)
+            suffix = " (truncated)" if (truncated or len(chunk) < len(text)) else ""
+            text_blocks.append(f"--- Attached file: {name}{suffix} ---\n{chunk}\n--- end of {name} ---")
+            notes.append(f"[doc: {name}]")
+        elif ext == ".pdf":
+            bc = _binary_part(path, "application/pdf", max_bytes=MAX_PDF_BYTES)
+            notes.append(f"[pdf: {name}]" if bc else f"[pdf '{name}' unreadable or >20MB]")
+            if bc:
+                parts.append(bc)
+        else:
+            notes.append(f"[unsupported, not sent: {name}]")
+    body = message or ""
+    if notes:
+        body = (body + "\n\n" if body else "") + "Attachments: " + "; ".join(notes)
+    if text_blocks:
+        body += "\n\n" + "\n\n".join(text_blocks)
+    return ([body] + parts) if parts else body
+
+
 # ── The single thread that owns ALL Playwright objects ───────────────────────
 _BROWSER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
 
@@ -137,6 +368,77 @@ async def _bro(fn, *args, **kwargs):
 
 
 # ── Live browser session (every method runs ON the browser thread) ───────────
+
+def _is_closed_error(e):
+    """True if an exception means the page/context/browser died (recoverable by restart)."""
+    s = str(e).lower()
+    return any(k in s for k in (
+        "has been closed", "target page", "target closed", "browser has been closed",
+        "browser has been disconnected", "crashed", "websocket"))
+
+
+def _pytest_summary(text):
+    """Pull the final pytest summary line (e.g. '1 passed in 2.3s' / '1 failed, ...') from output."""
+    hits = re.findall(r"=+\s*(.*?(?:passed|failed|error|skipped|no tests ran).*?)\s*=+", text, re.IGNORECASE)
+    if hits:
+        return hits[-1].strip()[:200]
+    for line in reversed(text.strip().splitlines()):
+        low = line.lower()
+        if any(k in low for k in ("passed", "failed", "error", "skipped", "no tests ran")):
+            return line.strip()[:200]
+    return ""
+
+
+def _delete_test_case(ats_root, flow_id, tc_id):
+    """Remove a test case from a flow: its test_cases.json entry, its test_data.json key, and the
+    @pytest.mark.tc/def block in test_<flow>.py. Mirrors main.js's delete-test handler."""
+    flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
+    if not os.path.isdir(flow_dir):
+        return {"ok": False, "error": f"flow '{flow_id}' not found"}
+    removed, found = [], False
+    tc_file = os.path.join(flow_dir, "test_cases.json")
+    if os.path.isfile(tc_file):
+        tcs = _read_json_file(tc_file, [])
+        if isinstance(tcs, list):
+            kept = [t for t in tcs if not (isinstance(t, dict) and t.get("tc_id") == tc_id)]
+            if len(kept) != len(tcs):
+                found = True
+                with open(tc_file, "w", encoding="utf-8") as f:
+                    json.dump(kept, f, indent=4)
+                removed.append("test_cases.json")
+    data_file = os.path.join(flow_dir, "test_data.json")
+    if os.path.isfile(data_file):
+        data = _read_json_file(data_file, {})
+        if isinstance(data, dict) and tc_id in data:
+            del data[tc_id]
+            with open(data_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+            removed.append("test_data.json")
+    func = "test_" + tc_id.replace("-", "_")
+    pat = re.compile(r'(?:^|\n)(@pytest\.mark\.tc\("' + re.escape(tc_id) + r'"\)[\s\S]*?def '
+                     + re.escape(func) + r'[\s\S]*?(?=\n@pytest|\n\nclass |\n\ndef [a-z]|\Z))', re.M)
+    try:
+        pyfiles = [fn for fn in os.listdir(flow_dir) if fn.startswith("test_") and fn.endswith(".py")]
+    except Exception:
+        pyfiles = []
+    for fn in pyfiles:
+        p = os.path.join(flow_dir, fn)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+        m = pat.search(content)
+        if m:
+            new_content = re.sub(r"\n{3,}", "\n\n", content.replace(m.group(0), ""))
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            removed.append(fn)
+            found = True
+    if not found and not removed:
+        return {"ok": False, "error": f"test case '{tc_id}' not found in flow '{flow_id}'"}
+    return {"ok": True, "tc_id": tc_id, "flow": flow_id, "removed": removed}
+
 
 class BrowserSession:
     """Holds the persistent page the agent drives, the ref->element map from the
@@ -154,14 +456,20 @@ class BrowserSession:
         self.step_id = 0
         self.input_counter = 0
         self.issues = []        # breakage: console errors / JS exceptions / failed requests
+        self._start_args = None  # remembered so restart() can relaunch after a crash/close
 
     # -- lifecycle -----------------------------------------------------------
-    def start(self, start_url="", storage_state=None, headless=True, credentials=None, save_state_path=None):
+    def start(self, start_url="", storage_state=None, headless=True, credentials=None,
+              save_state_path=None, record_first_step=True):
         """Launch the browser, reuse a saved login if present, and — if we still
         land on a login form — log in ONCE from configured credentials and persist
         a fresh storage_state for next time (so the agent never has to log in by
         hand). Returns {url, title, authed} where authed is
         'storage_state' | 'login' | 'session' | 'none'."""
+        # Remember how we were started so restart() can relaunch identically after a crash.
+        self._start_args = dict(start_url=start_url, storage_state=storage_state,
+                                headless=headless, credentials=credentials,
+                                save_state_path=save_state_path)
         from playwright.sync_api import sync_playwright
         self.pw = sync_playwright().start()
         self.browser = self.pw.chromium.launch(
@@ -202,7 +510,9 @@ class BrowserSession:
             else:
                 authed = "storage_state" if storage_state else "session"
             # Record the FIRST step at the post-login landing page (never /login).
-            self._record_navigate(self.page.url)
+            # Skipped on restart() so a mid-recording crash recovery doesn't add a stray step.
+            if record_first_step:
+                self._record_navigate(self.page.url)
         return {"url": self._url(), "title": self._title(), "authed": authed}
 
     def close(self):
@@ -213,6 +523,40 @@ class BrowserSession:
                 fn()
             except Exception:
                 pass
+
+    def _alive(self):
+        """True if there is a live, connected page to drive."""
+        try:
+            return (bool(self.page) and not self.page.is_closed()
+                    and bool(self.browser) and self.browser.is_connected())
+        except Exception:
+            return False
+
+    def restart(self):
+        """Relaunch the browser with the original start args (after the window was closed or
+        the browser crashed). Returns {ok, url, title, authed} or an error dict."""
+        if not self._start_args:
+            return {"ok": False, "error": "browser was never started; cannot restart"}
+        try:
+            self.close()
+        except Exception:
+            pass
+        self.pw = self.browser = self.context = self.page = None
+        self.by_ref = {}  # refs from the old page are stale after a relaunch
+        try:
+            info = self.start(**self._start_args, record_first_step=False)
+        except Exception as e:
+            return {"ok": False, "error": f"restart failed: {str(e)[:160]}"}
+        return {"ok": True, **info}
+
+    def _ensure_alive(self):
+        """Restart the browser if it has died. Returns True if a live page is available."""
+        if self._alive():
+            return True
+        if not self._start_args:
+            return False
+        self.restart()
+        return self._alive()
 
     # -- internals -----------------------------------------------------------
     def _issue(self, kind, text):
@@ -294,17 +638,34 @@ class BrowserSession:
 
     # -- tool bodies ---------------------------------------------------------
     def navigate(self, url):
+        if not self._ensure_alive():
+            return {"ok": False, "error": "browser is closed and could not be restarted; call restart_browser"}
         before = len(self.issues)
         try:
             self._goto(url)
         except Exception as e:
-            return {"ok": False, "error": f"navigation failed: {str(e)[:160]}", "url": self._url()}
+            # Auto-recover once if the browser died mid-navigation.
+            if _is_closed_error(e) and self._ensure_alive():
+                try:
+                    self._goto(url)
+                except Exception as e2:
+                    return {"ok": False, "error": f"navigation failed: {str(e2)[:160]}", "url": self._url()}
+            else:
+                return {"ok": False, "error": f"navigation failed: {str(e)[:160]}", "url": self._url()}
         self._record_navigate(url)
         return {"ok": True, "url": self._url(), "title": self._title(),
                 "new_issues": self.issues[before:]}
 
     def inspect(self, limit=40, include_hidden=False):
-        raw = _comprehensive_snapshot(self.page)
+        if not self._ensure_alive():
+            return {"ok": False, "error": "browser is closed and could not be restarted; call restart_browser"}
+        try:
+            raw = _comprehensive_snapshot(self.page)
+        except Exception as e:
+            if _is_closed_error(e) and self._ensure_alive():
+                raw = _comprehensive_snapshot(self.page)
+            else:
+                return {"ok": False, "error": f"inspect failed: {str(e)[:160]}"}
         models, seen = [], {}
         for el in raw:
             if not isinstance(el, dict):
@@ -348,6 +709,10 @@ class BrowserSession:
         el = self.by_ref.get(ref)
         if not el:
             return {"ok": False, "error": f"ref '{ref}' is not on the current page; call inspect_page first"}
+        if not self._alive():
+            restarted = self._ensure_alive()
+            return {"ok": False, "error": ("browser had closed; restarted -- re-inspect the page (refs are stale) and retry"
+                                           if restarted else "browser is closed; call restart_browser, then re-inspect")}
         loc_str = _locator_str(el["primary"])
         try:
             live = smart_locator(self.page, el["primary"], fallbacks=el.get("fallbacks"),
@@ -424,6 +789,8 @@ class Deps:
     ats_root: str
     project: Optional[dict]
     config: dict = field(default_factory=dict)
+    context_dir: str = ""     # folder of user-supplied context files (read_context_file)
+    memory_path: str = ""     # the agent's durable memory file (read/update_memory)
 
 
 # ── System prompt ──────────────────────────────────────────────────────────
@@ -442,8 +809,14 @@ _SYSTEM = (
     "- To open an item's detail, click its main row or title link — NOT inline per-row action "
     "buttons (invoice, ready, raise ticket, accept, ...) unless the goal explicitly needs them.\n"
     "- Add a checkpoint (add_checkpoint) at each meaningful outcome so the test verifies results.\n"
-    "- When you have done what the user asked, call create_test_case EXACTLY ONCE and then STOP. "
-    "It becomes a normal, runnable, self-healing test case. Use a clear tc_id (TC-<AREA>-NNN) and flow_id.\n\n"
+    "- When you have driven the FULL flow, call create_test_case EXACTLY ONCE (clear tc_id "
+    "TC-<AREA>-NNN + flow_id). Then you MUST VERIFY it: call run_test_case and confirm it PASSES. "
+    "If it fails, read the error (and read_test_file), then clear_recording, re-drive the corrected "
+    "flow, create_test_case again (same id overwrites) and run_test_case again -- repeat until green "
+    "(give up after ~3 tries and report what's failing). NEVER hand the user a test you have not seen "
+    "pass. Use delete_test_case to clean up a stub or a bad test.\n"
+    "- If the browser reports it is closed or crashed and actions keep failing, call restart_browser, "
+    "then inspect_page again (your old refs are stale).\n\n"
     "Using the ATS app itself (as a user, never editing its code):\n"
     "- You CAN read and change the app's Settings: get_settings (environments, the seller/admin "
     "accounts WITH their credentials, execution options, Jira) and update_setting. So when asked to "
@@ -452,6 +825,20 @@ _SYSTEM = (
     "reports / history (list_runs / read_run), and list projects (list_projects).\n"
     "- Note: you usually do NOT need credentials to log in — the session is already authenticated "
     "for you; get_settings is for answering questions and for flows that explicitly need an account.\n\n"
+    "Context about the app (use what you're given — don't ask the user to paste things you can read):\n"
+    "- The user can ATTACH documents and images to a message. Document text is inlined for you and "
+    "images are shown to you visually — read them and act on them.\n"
+    "- The project may have a SCOPED CONTEXT FOLDER (a docs/code tree about the app). It is NOT "
+    "imported — explore it like a repo: search_files(query) to find files by name/content, "
+    "list_context_files(subdir) to browse a directory, read_context_file(name[, start_line, end_line]) "
+    "to read one. Read only what's relevant; don't try to read everything. For an image, ask the user "
+    "to attach it so you can view it.\n"
+    "- If the user's message contains an '@path' token, that is a reference to a file in the context "
+    "folder they want you to look at — read it with read_context_file.\n"
+    "- You have a durable MEMORY FILE (read_memory / update_memory) that is also shown to you at the start "
+    "of every turn. Whenever you learn something durable about the app — stable URLs, where a feature lives, "
+    "a login quirk, a recurring gotcha — SAVE it with update_memory so future sessions start informed. Keep "
+    "it concise and factual; don't store transient run state.\n\n"
     "Stay on task:\n"
     "- You have a limited action budget per turn; spend it efficiently (don't re-inspect when the "
     "page did not change). For open-ended exploration, cover the most important things first, then "
@@ -469,13 +856,29 @@ _SYSTEM = (
 )
 
 
+def _load_playbook():
+    """The permanent operating playbook (engine/agent_playbook.md), appended to the system
+    prompt every session. Human-authored GENERAL procedure (how to work); app-specific facts
+    live in the per-project memory file instead. Edit the .md to update standing behavior."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_playbook.md"),
+                  "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+_PLAYBOOK = _load_playbook()
+
+
 def build_agent(model):
     agent = Agent(
         model,
         deps_type=Deps,
-        system_prompt=_SYSTEM,
+        system_prompt=_SYSTEM + (("\n\n" + _PLAYBOOK) if _PLAYBOOK else ""),
         retries=2,
-        tool_timeout=150,
+        # Generous so a run_test_case verification (a full pytest run) is not cancelled mid-test.
+        tool_timeout=240,
         model_settings={"temperature": 0.2, "max_tokens": 4096},
     )
 
@@ -484,6 +887,14 @@ def build_agent(model):
         """Navigate the browser to a URL (absolute http(s) URL). Returns the resulting URL,
         page title, and any new breakage issues triggered by the load."""
         return await _bro(ctx.deps.session.navigate, url)
+
+    @agent.tool
+    async def restart_browser(ctx: RunContext[Deps]) -> dict:
+        """Relaunch the browser after it has closed or crashed (you saw a 'page/context/browser
+        has been closed' error and navigate/inspect/click keep failing). Reuses the saved login.
+        Your old refs become stale — call inspect_page before acting again. Returns the
+        post-restart url and title."""
+        return await _bro(ctx.deps.session.restart)
 
     @agent.tool
     async def inspect_page(ctx: RunContext[Deps], include_hidden: bool = False) -> dict:
@@ -533,6 +944,96 @@ def build_agent(model):
         Returns the created test's flow/path."""
         return await _bro(ctx.deps.session.create_test, ctx.deps.ats_root, ctx.deps.project,
                           tc_id, flow_id, description, preconditions, expected_result)
+
+    @agent.tool
+    async def run_test_case(ctx: RunContext[Deps], tc_id: str, flow_id: str) -> dict:
+        """Run ONE test case through the REAL pytest runner to VERIFY it actually passes. ALWAYS
+        call this right after create_test_case — never deliver a test you have not seen pass.
+        Runs headless against this project (login handled by the runner). Returns {ok, passed,
+        exit_code, summary, tail}; on failure 'tail' is the end of the pytest output — read it
+        (and read_test_file) to diagnose, then fix and re-run."""
+        ats_root = ctx.deps.ats_root
+        flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
+        if not os.path.isdir(os.path.join(ats_root, "tests")) or not os.path.isdir(flow_dir):
+            return {"ok": False, "error": f"flow '{flow_id}' not found under tests/flows"}
+        underscored = tc_id.replace("-", "_")
+        cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
+               "--tb=short", "-q", "-p", "no:cacheprovider", "--tracing=off"]
+        env = os.environ.copy()
+        env["ATS_ROOT"] = ats_root
+        env["PYTHONPATH"] = ats_root
+        env["PYTHONUNBUFFERED"] = "1"
+        proj = ctx.deps.project or {}
+        if proj.get("id"):
+            env["ATS_PROJECT_ID"] = proj["id"]
+        env.setdefault("ATS_ENV", os.environ.get("ATS_ENV") or "dev")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, cwd=ats_root, env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return {"ok": True, "passed": False,
+                        "error": "test run timed out after 180s (hung or far too slow)"}
+        except Exception as e:
+            return {"ok": False, "error": f"could not start pytest: {str(e)[:160]}"}
+        text = (out or b"").decode("utf-8", "replace")
+        rc = proc.returncode
+        no_tests = (rc == 5) or ("no tests ran" in text.lower())
+        result = {"ok": True, "passed": (rc == 0 and not no_tests),
+                  "exit_code": rc, "summary": _pytest_summary(text)}
+        if no_tests:
+            result["passed"] = False
+            result["error"] = (f"no test matched '{underscored}' in flow '{flow_id}' — confirm "
+                               "create_test_case succeeded and the tc_id/flow_id are right")
+        if not result["passed"]:
+            result["tail"] = text[-2500:]
+        return result
+
+    @agent.tool
+    async def read_test_file(ctx: RunContext[Deps], flow_id: str, tc_id: str) -> dict:
+        """Read the GENERATED test code (the test_<flow>.py function) for a test case so you can
+        diagnose why run_test_case failed. Read-only. To fix: clear_recording, re-drive the
+        corrected flow, and create_test_case again (same tc_id overwrites)."""
+        path = os.path.join(ctx.deps.ats_root, "tests", "flows", flow_id, f"test_{flow_id}.py")
+        if not os.path.isfile(path):
+            return {"ok": False, "error": f"test file for flow '{flow_id}' not found"}
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+        func = "test_" + tc_id.replace("-", "_")
+        m = re.search(r'(\n@pytest\.mark\.tc\("' + re.escape(tc_id) + r'"\)\ndef '
+                      + re.escape(func) + r'\(.*?)(?=\n@pytest\.mark|\Z)', content, re.DOTALL)
+        if m:
+            return {"ok": True, "flow": flow_id, "tc_id": tc_id, "code": m.group(1).strip()[:6000]}
+        return {"ok": True, "flow": flow_id, "tc_id": tc_id, "code": content[:6000],
+                "note": "exact function not found; returning the file head"}
+
+    @agent.tool
+    async def clear_recording(ctx: RunContext[Deps]) -> dict:
+        """Discard the steps/checkpoints recorded so far (KEEPS our conversation). Call this
+        before re-driving a flow you are fixing, so the new recording doesn't append onto the old
+        one; then create_test_case again with the SAME tc_id to overwrite the failing test."""
+        s = ctx.deps.session
+        s.steps = []
+        s.assertions = []
+        s.step_id = 0
+        s.input_counter = 0
+        return {"ok": True, "message": "recorded steps and checkpoints cleared"}
+
+    @agent.tool
+    async def delete_test_case(ctx: RunContext[Deps], tc_id: str, flow_id: str) -> dict:
+        """Delete a test case from a flow — removes it from test_cases.json, test_data.json AND the
+        test_<flow>.py function. Use it to clean up a stub or a test you replaced. Confirm with the
+        user before deleting anything you did not just create yourself."""
+        return _delete_test_case(ctx.deps.ats_root, flow_id, tc_id)
 
     # ── ATS app features: use the tool itself AS A USER (read/change settings,
     # browse the suite, read reports). File-backed — no browser involved. ──
@@ -652,6 +1153,156 @@ def build_agent(model):
                 "projects": [{"id": p.get("id"), "name": p.get("name"), "url": project_store.resolve_base_url(p)}
                              for p in project_store.list_projects(root)]}
 
+    # ── App context: a folder of docs/screenshots + a durable memory file ──
+    # These give the agent reusable knowledge of the app under test. The memory
+    # file is also injected into the prompt each turn (the @agent.instructions
+    # block below) so the agent always starts a turn aware of what it has learned.
+
+    @agent.tool
+    async def list_context_files(ctx: RunContext[Deps], subdir: str = ".") -> dict:
+        """List ONE directory level of the project's SCOPED context FOLDER (a folder you explore
+        like a repo — it is NOT imported, nothing is auto-loaded). Pass `subdir` to descend, e.g.
+        'docs' or 'src/auth'. Junk (.git/node_modules/caches/dot-dirs) is hidden. Returns `dirs`
+        and `files` (name/ext/bytes). Use search_files to find by name/content, read_context_file
+        to read one."""
+        base = ctx.deps.context_dir or ""
+        start = _scoped_path(base, "" if subdir in ("", ".") else subdir)
+        if not start or not os.path.isdir(start):
+            return {"ok": False, "error": f"no such folder: {subdir}", "dir": base}
+        dirs, files = [], []
+        try:
+            for entry in sorted(os.listdir(start)):
+                if _is_junk_name(entry):
+                    continue
+                full = os.path.join(start, entry)
+                rel = os.path.relpath(full, base).replace("\\", "/")
+                if os.path.isdir(full):
+                    dirs.append({"name": rel})
+                else:
+                    try:
+                        size = os.path.getsize(full)
+                    except Exception:
+                        size = 0
+                    files.append({"name": rel, "ext": os.path.splitext(entry)[1].lower(), "bytes": size})
+                if len(dirs) + len(files) >= 300:
+                    break
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160], "dir": base}
+        return {"ok": True, "dir": base, "subdir": subdir, "dirs": dirs, "files": files,
+                "count": len(dirs) + len(files)}
+
+    @agent.tool
+    async def search_files(ctx: RunContext[Deps], query: str, content: bool = True) -> dict:
+        """Search the SCOPED context FOLDER for `query`: matches file NAMES always, plus file
+        CONTENT (text files) when content=true. Junk and big/binary files are skipped. Returns
+        `name_matches` (paths) and `content_matches` (file/line/text snippets). This is how you
+        find the right file in a large folder — then read it with read_context_file."""
+        base = ctx.deps.context_dir or ""
+        if not base or not os.path.isdir(base):
+            return {"ok": False, "error": "no context folder set for this project"}
+        if not (query or "").strip():
+            return {"ok": False, "error": "empty query"}
+        try:
+            return _search_context(base, query, content)
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+
+    @agent.tool
+    async def read_context_file(ctx: RunContext[Deps], name: str,
+                                start_line: int = 0, end_line: int = 0) -> dict:
+        """Read a file from the SCOPED context FOLDER by its path (as listed by list_context_files
+        / search_files). text/markdown/csv/json/code/pdf/docx/xlsx come back as text. For a big
+        file, pass start_line/end_line (1-based) to read just a slice. Images can't be read here —
+        ask the user to attach the image to a message so you can view it."""
+        base = ctx.deps.context_dir or ""
+        safe = _scoped_path(base, name)
+        if not safe:
+            return {"ok": False, "error": "name escapes the context folder"}
+        if not os.path.isfile(safe):
+            return {"ok": False, "error": f"no such context file: {name}"}
+        ext = os.path.splitext(safe)[1].lower()
+        if ext in IMAGE_MIME:
+            return {"ok": False, "error": f"'{name}' is an image — ask the user to attach it "
+                                          "to a message so you can view it."}
+        text, truncated = extract_file_text(safe)
+        if text is None:
+            return {"ok": False, "error": f"could not extract text from '{name}' "
+                                          "(unsupported type or missing extractor)"}
+        if start_line or end_line:
+            lines = text.splitlines()
+            s = max(1, int(start_line or 1))
+            e = int(end_line) if end_line else len(lines)
+            return {"ok": True, "name": name, "start_line": s, "end_line": min(e, len(lines)),
+                    "total_lines": len(lines), "text": "\n".join(lines[s - 1:e])}
+        return {"ok": True, "name": name, "truncated": truncated, "text": text}
+
+    @agent.tool
+    async def read_memory(ctx: RunContext[Deps]) -> dict:
+        """Read your full durable MEMORY FILE for this project (facts you have saved about
+        the app). It is also injected into your context each turn; use this to re-read it."""
+        p = ctx.deps.memory_path
+        try:
+            if p and os.path.isfile(p):
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    return {"ok": True, "path": p, "content": f.read()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+        return {"ok": True, "path": p, "content": "", "note": "memory is empty"}
+
+    @agent.tool
+    async def update_memory(ctx: RunContext[Deps], content: str, mode: str = "append") -> dict:
+        """Save durable knowledge about the app to your MEMORY FILE so future sessions start
+        informed (stable URLs, where features live, login quirks, recurring gotchas).
+        mode='append' (default) adds a timestamped bullet; mode='replace' overwrites the whole
+        file. Keep it concise and factual — do not store transient run state."""
+        p = ctx.deps.memory_path
+        content = (content or "").strip()
+        if not content:
+            return {"ok": False, "error": "empty content"}
+        if mode not in ("append", "replace"):
+            return {"ok": False, "error": "mode must be 'append' or 'replace'"}
+        try:
+            if os.path.dirname(p):
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+            if mode == "replace":
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(content.rstrip() + "\n")
+            else:
+                stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(f"\n- ({stamp}) {content}\n")
+            return {"ok": True, "path": p, "mode": mode, "bytes": os.path.getsize(p)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+
+    @agent.instructions
+    async def _project_memory_and_context(ctx: RunContext[Deps]) -> str:
+        """Injected fresh each turn (instructions are regenerated per run and not stored in
+        history): the memory file's contents + a short listing of available context files."""
+        blocks = []
+        p = ctx.deps.memory_path
+        try:
+            if p and os.path.isfile(p):
+                mem = open(p, "r", encoding="utf-8", errors="replace").read().strip()
+                if mem:
+                    blocks.append("PROJECT MEMORY (durable notes you saved about this app — "
+                                  "trust and extend these):\n" + mem[:8000])
+        except Exception:
+            pass
+        d = ctx.deps.context_dir
+        try:
+            if d and os.path.isdir(d):
+                top = [e for e in sorted(os.listdir(d)) if not _is_junk_name(e)]
+                if top:
+                    preview = ", ".join(top[:20]) + (" ..." if len(top) > 20 else "")
+                    blocks.append(
+                        "SCOPED CONTEXT FOLDER: " + d + "\nTop level: " + preview + "\n"
+                        "It is NOT loaded for you — use search_files / list_context_files / "
+                        "read_context_file to explore and read only what's relevant.")
+        except Exception:
+            pass
+        return "\n\n".join(blocks)
+
     return agent
 
 
@@ -754,6 +1405,8 @@ class AgentRuntime:
         self.model = None
         self.deps = None
         self.history = []        # list[ModelMessage] — conversation memory
+        self.session_id = None   # persisted session this runtime is attached to
+        self.project_id = None
         self.ats_root = os.environ.get("ATS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config = {}
         try:
@@ -773,6 +1426,22 @@ class AgentRuntime:
 
         project_id = cmd.get("project_id") or project_store.get_active_project_id(self.ats_root)
         project = project_store.get_project(self.ats_root, project_id) if project_id else None
+        self.project_id = project_id
+
+        # Resolve the persisted session: resume an existing one (we will load its model
+        # history below) or create a fresh record. The live browser is always relaunched —
+        # it cannot be serialized — so a resumed session reopens the app from scratch.
+        session_id = cmd.get("session_id")
+        resumed = bool(session_id and agent_sessions.read_session(self.ats_root, project_id, session_id))
+        if resumed:
+            self.session_id = session_id
+        else:
+            meta = agent_sessions.create_session(
+                self.ats_root, project_id, title=cmd.get("title") or "",
+                provider=pname, model=model_name, env=(cmd.get("env") or ""),
+                headed=bool(cmd.get("headed")), session_id=session_id)
+            self.session_id = meta["id"]
+
         env = cmd.get("env")
         base_url = project_store.resolve_base_url(project, env) if project else ""
         start_path = cmd.get("start_path") or ""
@@ -794,29 +1463,52 @@ class AgentRuntime:
             return
 
         self.agent = build_agent(model)
-        self.deps = Deps(session=self.session, ats_root=self.ats_root, project=project, config=self.config)
-        self.history = []
+        ctx_dir = project_store.resolve_context_dir(self.ats_root, project_id, project)
+        mem_path = project_store.resolve_memory_path(self.ats_root, project_id)
+        self.deps = Deps(session=self.session, ats_root=self.ats_root, project=project,
+                         config=self.config, context_dir=ctx_dir, memory_path=mem_path)
+        # Restore the model's conversation memory on resume (this is what lets it "continue
+        # from a point"); a fresh session starts empty. Then mark the session running and load
+        # the saved transcript so the window can redraw the visible chat.
+        self.history = agent_sessions.load_messages(self.ats_root, project_id, self.session_id) if resumed else []
+        try:
+            agent_sessions.update_session_meta(self.ats_root, project_id, self.session_id,
+                {"status": "running", "provider": pname, "model": model_name, "env": (cmd.get("env") or "")})
+        except Exception:
+            pass
+        transcript = agent_sessions.load_transcript(self.ats_root, project_id, self.session_id) if resumed else []
         authed = info.get("authed", "none")
         emit({"event": "ready", "url": info.get("url", ""), "title": info.get("title", ""),
               "provider": pname, "model": model_name,
               "auth": authed != "none", "auth_via": authed,
-              "project": (project or {}).get("name") or project_id or None})
+              "project": (project or {}).get("name") or project_id or None,
+              "project_id": project_id,
+              "session_id": self.session_id, "resumed": resumed, "transcript": transcript})
 
     async def chat(self, cmd):
         if not self.agent:
             emit({"event": "error", "message": "agent not initialized — send {action:'init'} first"})
             return
         message = (cmd.get("message") or "").strip()
-        if not message:
+        attachments = cmd.get("attachments") or []
+        if not message and not attachments:
             emit({"event": "error", "message": "empty message"})
             return
+        attachment_names = [name for _p, name in _attachment_paths(attachments)]
+        # Inline document text + attach images as multimodal parts. Falls back to a
+        # plain string when there are no binary parts (so text-only models are unaffected).
+        prompt = _build_user_prompt(
+            message or "Use the attached file(s) as context for the app under test.",
+            attachments)
+        hist_before = len(self.history)
         with capture_run_messages() as messages:
             try:
                 result = await self.agent.run(
-                    message, deps=self.deps, message_history=self.history,
+                    prompt, deps=self.deps, message_history=self.history,
                     event_stream_handler=_stream_handler,
                     usage_limits=UsageLimits(tool_calls_limit=TOOL_BUDGET))
                 self.history = result.all_messages()
+                self._persist_turn(message, attachment_names, result.new_messages())
                 emit({"event": "turn_complete", "text": result.output})
             except UsageLimitExceeded:
                 # Hit the per-turn action budget. Keep the partial history so "continue"
@@ -824,10 +1516,34 @@ class AgentRuntime:
                 # pydantic-ai rejects the next prompt), then summarize findings.
                 if messages:
                     self.history = _trim_dangling_tool_calls(messages)
-                await self._summarize_after_budget()
+                summary = await self._summarize_after_budget()
+                extra = [{"role": "assistant", "text": summary}] if summary else None
+                self._persist_turn(message, attachment_names, self.history[hist_before:], extra_bubbles=extra)
             except Exception as e:
                 emit({"event": "error", "message": f"{type(e).__name__}: {e}"})
                 log(traceback.format_exc())
+
+    def _persist_turn(self, message, attachment_names, new_msgs, extra_bubbles=None):
+        """Persist one completed turn: append its bubbles to the transcript, save the model
+        history (for resume), and bump session meta (count, title-on-first-turn). Never raises
+        — a disk hiccup must not fail a live turn."""
+        if not self.session_id:
+            return
+        try:
+            bubbles = [agent_sessions.user_bubble(message, attachment_names)]
+            bubbles += agent_sessions.bubbles_from_messages(new_msgs, include_user=False)
+            if extra_bubbles:
+                bubbles += extra_bubbles
+            agent_sessions.append_bubbles(self.ats_root, self.project_id, self.session_id, bubbles)
+            agent_sessions.save_messages(self.ats_root, self.project_id, self.session_id, self.history)
+            patch = {"message_count": len(self.history), "status": "idle"}
+            meta = agent_sessions.read_session(self.ats_root, self.project_id, self.session_id) or {}
+            title = (meta.get("title") or "").strip()
+            if message and (not title or title == "New session"):
+                patch["title"] = message.strip()[:80]
+            agent_sessions.update_session_meta(self.ats_root, self.project_id, self.session_id, patch)
+        except Exception as e:
+            log(f"[agent] persist failed: {e}")
 
     async def _summarize_after_budget(self):
         """After the tool budget is hit, produce a findings summary (a tool-less run
@@ -855,6 +1571,7 @@ class AgentRuntime:
         note = (f"(Paused after {TOOL_BUDGET} exploration steps — my per-turn budget. I've kept "
                 f"everything I found, so just say \"continue\" to keep going, or tell me what to focus on.)")
         emit({"event": "turn_complete", "text": (summary + "\n\n" + note) if summary else note})
+        return summary
 
     def reset(self):
         self.history = []
@@ -863,9 +1580,20 @@ class AgentRuntime:
             self.session.assertions = []
             self.session.step_id = 0
             self.session.input_counter = 0
+        if self.session_id:
+            try:
+                agent_sessions.clear_session(self.ats_root, self.project_id, self.session_id)
+            except Exception:
+                pass
         emit({"event": "reset_ok"})
 
     async def shutdown(self):
+        if self.session_id:
+            try:
+                agent_sessions.update_session_meta(
+                    self.ats_root, self.project_id, self.session_id, {"status": "idle"})
+            except Exception:
+                pass
         if self.session:
             await _bro(self.session.close)
         emit({"event": "bye"})
@@ -932,9 +1660,12 @@ def _selftest():
     agent = build_agent(TestModel())
     sess = BrowserSession()
     # Isolate file writes: TestModel calls EVERY tool with dummy args, incl.
-    # update_setting — point ats_root at a throwaway dir so the real config.json
-    # is never touched.
-    deps = Deps(session=sess, ats_root=tempfile.mkdtemp(prefix="ats_selftest_"), project=None, config={})
+    # update_setting and update_memory — point ats_root (and the context/memory
+    # paths) at a throwaway dir so the real config.json / memory are never touched.
+    root = tempfile.mkdtemp(prefix="ats_selftest_")
+    deps = Deps(session=sess, ats_root=root, project=None, config={},
+                context_dir=project_store.resolve_context_dir(root, None),
+                memory_path=project_store.resolve_memory_path(root, None))
     tools = sorted(agent._function_toolset.tools.keys()) if hasattr(agent, "_function_toolset") else []
     print("agent built OK; tools:", tools)
 
