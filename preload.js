@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('ats', {
   getFlows: () => ipcRenderer.invoke('get-test-flows'),
@@ -26,15 +26,44 @@ contextBridge.exposeInMainWorld('ats', {
   synthesizeTests: (opts) => ipcRenderer.invoke('synthesize-tests', opts),
   agentRecord: (opts) => ipcRenderer.invoke('agent-record', opts),
   captureLogin: (opts) => ipcRenderer.invoke('capture-login', opts),
-  // ── Conversational AI agent (agent_chat.py): persistent chat process ──
-  agentStart: (opts) => ipcRenderer.invoke('agent-start', opts),
-  agentSend: (opts) => ipcRenderer.invoke('agent-send', opts),
-  agentReset: () => ipcRenderer.invoke('agent-reset'),
-  agentStop: () => ipcRenderer.invoke('agent-stop'),
+  // ── Conversational AI agent (agent_chat.py): concurrent persisted sessions ──
+  // Each call carries a sessionId; events arrive on 'agent-event' tagged with sessionId.
+  agentOpenWindow: () => ipcRenderer.invoke('agent-open-window'),
+  agentDock: () => ipcRenderer.invoke('agent-dock'),                     // from the floating window: dock into the IDE
+  onAgentDockRequest: (callback) => {                                    // main window: react to a dock request
+    const handler = () => callback();
+    ipcRenderer.on('agent-dock-request', handler);
+    return () => ipcRenderer.removeListener('agent-dock-request', handler);
+  },
+  agentStart: (opts) => ipcRenderer.invoke('agent-start', opts),         // {sessionId, projectId, provider, headed, env, title}
+  agentSend: (opts) => ipcRenderer.invoke('agent-send', opts),           // {sessionId, message, attachments}
+  agentReset: (opts) => ipcRenderer.invoke('agent-reset', opts),         // {sessionId}
+  agentStop: (opts) => ipcRenderer.invoke('agent-stop', opts),           // {sessionId}
+  // Session management (sidebar): list/new/rename/delete + transcript redraw
+  agentListSessions: (opts) => ipcRenderer.invoke('agent-list-sessions', opts),       // {projectId}
+  agentNewSession: (opts) => ipcRenderer.invoke('agent-new-session', opts),           // {projectId, title}
+  agentRenameSession: (opts) => ipcRenderer.invoke('agent-rename-session', opts),     // {projectId, sessionId, title}
+  agentDeleteSession: (opts) => ipcRenderer.invoke('agent-delete-session', opts),     // {projectId, sessionId}
+  agentSessionTranscript: (opts) => ipcRenderer.invoke('agent-session-transcript', opts), // {projectId, sessionId}
   onAgentEvent: (callback) => {
     const handler = (_, data) => callback(data);
     ipcRenderer.on('agent-event', handler);
     return () => ipcRenderer.removeListener('agent-event', handler);
+  },
+  // ── AI agent file context: per-message attachments, context folder, memory ──
+  agentPickFiles: () => ipcRenderer.invoke('agent-pick-files'),
+  agentContextList: (opts) => ipcRenderer.invoke('agent-context-list', opts),     // {projectId, subdir} → {dir,dirs,files}
+  agentContextFiles: (opts) => ipcRenderer.invoke('agent-context-files', opts),    // {projectId} → flat paths for @-mention
+  agentContextAdd: (opts) => ipcRenderer.invoke('agent-context-add', opts),
+  agentContextSetFolder: (opts) => ipcRenderer.invoke('agent-context-set-folder', opts), // attach a folder as project context_dir
+  agentContextOpen: (opts) => ipcRenderer.invoke('agent-context-open', opts),
+  agentMemoryGet: (opts) => ipcRenderer.invoke('agent-memory-get', opts),
+  agentMemoryOpen: (opts) => ipcRenderer.invoke('agent-memory-open', opts),
+  // Resolve a dropped File's absolute path (sandbox/contextIsolation-safe); falls
+  // back to the legacy File.path if webUtils is unavailable.
+  getPathForFile: (file) => {
+    try { return webUtils && webUtils.getPathForFile ? webUtils.getPathForFile(file) : ((file && file.path) || ''); }
+    catch (e) { return (file && file.path) || ''; }
   },
   onAutopilotProgress: (callback) => {
     const handler = (_, data) => callback(data);
@@ -42,6 +71,7 @@ contextBridge.exposeInMainWorld('ats', {
     return () => ipcRenderer.removeListener('autopilot-progress', handler);
   },
   getRunCheckpoints: (runId) => ipcRenderer.invoke('get-run-checkpoints', runId),
+  getRunNetwork: (runId) => ipcRenderer.invoke('get-run-network', runId),
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   recordTest: (options) => ipcRenderer.invoke('record-test', options),

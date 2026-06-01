@@ -175,19 +175,20 @@ class CheckpointRunner:
                 self._first_critical_error = e
             tag = "FAIL" if sev == "critical" else f"WARN[{sev}]"
             print(f"[{self.tc_id}] {tag} {name}: {str(e)[:200]}", flush=True)
+        cp_entry["ts"] = int(time.time() * 1000)   # step end — used to bucket network calls per step
         self.checkpoints.append(cp_entry)
         _write_checkpoints(self.tc_id, self.checkpoints)
         return cp_entry["status"] == "PASS"
 
     def mark_passed(self, name):
         """Directly record a passed checkpoint."""
-        self.checkpoints.append({"name": name, "status": "PASS", "error": None, "severity": "critical"})
+        self.checkpoints.append({"name": name, "status": "PASS", "error": None, "severity": "critical", "ts": int(time.time() * 1000)})
         print(f"[{self.tc_id}] OK {name}", flush=True)
         _write_checkpoints(self.tc_id, self.checkpoints)
 
     def mark_failed(self, name, error_msg="Assertion Failed"):
         """Directly record a hard (critical) failure and raise immediately."""
-        self.checkpoints.append({"name": name, "status": "FAIL", "error": error_msg, "severity": "critical"})
+        self.checkpoints.append({"name": name, "status": "FAIL", "error": error_msg, "severity": "critical", "ts": int(time.time() * 1000)})
         print(f"[{self.tc_id}] FAIL {name}: {error_msg}", flush=True)
         if self._first_error is None:
             self._first_error = AssertionError(error_msg)
@@ -198,7 +199,7 @@ class CheckpointRunner:
 
     def skip(self, name, reason="Skipped"):
         """Record a skipped checkpoint (e.g. optional feature not present)."""
-        self.checkpoints.append({"name": name, "status": "SKIP", "error": reason, "severity": "minor"})
+        self.checkpoints.append({"name": name, "status": "SKIP", "error": reason, "severity": "minor", "ts": int(time.time() * 1000)})
         print(f"[{self.tc_id}] SKIP {name}: {reason}", flush=True)
         _write_checkpoints(self.tc_id, self.checkpoints)
 
@@ -636,12 +637,18 @@ def seller_page(page, seller_login_state, seller_url):
 
 
 @pytest.fixture
-def admin_page(browser, browser_context_args, admin_login_state, admin_url, request, results_dir, ats_config):
+def admin_page(browser, browser_context_args, admin_login_state, admin_url, request, results_dir, ats_config, capture_network):
     """Per-test page logged into admin panel. Own browser context so it can
     coexist with seller_page in the same test."""
     has_cookies = len(admin_login_state.get("cookies", [])) > 0
     print(f"[FIXTURE] admin_page: login_state_valid={has_cookies}, admin_url={admin_url}", flush=True)
     context = browser.new_context(**browser_context_args)
+    # Feed admin-context API calls into the same per-test network recorder (best-effort).
+    try:
+        if capture_network is not None:
+            capture_network.attach(context)
+    except Exception:
+        pass
     page = context.new_page()
     page.set_default_timeout(30000)
     page.set_default_navigation_timeout(30000)
@@ -710,6 +717,134 @@ def manage_trace(page, request, results_dir, ats_config):
         else:
             name = f"{tc_id}_seller"
     _finalize_trace(page.context, save, os.path.join(results_dir, "traces", f"{name}.zip"))
+
+
+# ── Network capture: store the API calls (method/url/payload/response/timing) each test made,
+# so run History can show the step-wise log WITH the request/response behind each step. Mirrors
+# the trace fixture's shape; fully fail-safe (a capture problem must never fail/slow a test) and
+# config-gated (config.json "network" or ATS_NETWORK). One JSON per test: network/<tc_id>.json.
+class _NetworkRecorder:
+    def __init__(self, cfg):
+        self.calls = []
+        self.api_only = bool(cfg.get("api_only", True))
+        self.max_body = int(cfg.get("max_body_kb", 20)) * 1024
+        self._start = {}   # request -> started epoch ms
+
+    def _is_api(self, req):
+        try:
+            if req.resource_type in ("xhr", "fetch"):
+                return True
+            u = (req.url or "").lower()
+            return ("/api/" in u) or ("/graphql" in u) or u.endswith(".json")
+        except Exception:
+            return False
+
+    def attach(self, context):
+        context.on("request", self._on_request)
+        context.on("requestfailed", self._on_failed)
+        context.on("response", self._on_response)
+
+    def _cap(self, s):
+        if s is None:
+            return None
+        return s if len(s) <= self.max_body else s[:self.max_body] + "...(truncated)"
+
+    def _post(self, req):
+        try:
+            return self._cap(req.post_data)
+        except Exception:
+            return None
+
+    def _on_request(self, req):
+        try:
+            if not self.api_only or self._is_api(req):
+                self._start[req] = int(time.time() * 1000)
+        except Exception:
+            pass
+
+    def _on_failed(self, req):
+        st = self._start.pop(req, None)
+        if st is None:
+            return
+        try:
+            self.calls.append({"method": req.method, "url": req.url, "resource_type": req.resource_type,
+                               "status": None, "ok": False, "failure": str(getattr(req, "failure", ""))[:200],
+                               "request_body": self._post(req), "response_body": None,
+                               "started_ms": st, "duration_ms": int(time.time() * 1000) - st})
+        except Exception:
+            pass
+
+    def _on_response(self, resp):
+        try:
+            req = resp.request
+        except Exception:
+            return
+        st = self._start.pop(req, None)
+        if st is None:
+            return
+        body = None
+        try:
+            ctype = (resp.headers.get("content-type") or "").lower()
+            if any(k in ctype for k in ("json", "text", "xml", "javascript")) or self._is_api(req):
+                raw = resp.body()
+                if raw:
+                    body = self._cap(raw.decode("utf-8", "replace"))
+        except Exception:
+            body = None
+        try:
+            self.calls.append({"method": req.method, "url": req.url, "resource_type": req.resource_type,
+                               "status": resp.status, "ok": resp.ok, "request_body": self._post(req),
+                               "response_body": body, "started_ms": st,
+                               "duration_ms": int(time.time() * 1000) - st})
+        except Exception:
+            pass
+
+    def write(self, path):
+        if not self.calls:
+            return
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self.calls.sort(key=lambda c: c.get("started_ms") or 0)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"calls": self.calls}, f, indent=2, default=str)
+        except Exception:
+            pass
+
+
+def _network_enabled(ats_config):
+    on = (os.environ.get("ATS_NETWORK") or "").lower()
+    if on == "on":
+        return True
+    if on == "off":
+        return False
+    return bool(((ats_config or {}).get("network", {}) or {}).get("capture", True))
+
+
+def _start_network(context, ats_config):
+    """Attach a recorder to a context (returns it, or None if disabled / on error)."""
+    if not _network_enabled(ats_config):
+        return None
+    try:
+        rec = _NetworkRecorder(((ats_config or {}).get("network", {}) or {}))
+        rec.attach(context)
+        return rec
+    except Exception:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def capture_network(page, request, results_dir, ats_config):
+    """Record the API/XHR calls (request payload + response body + timing) of the default
+    browser context to results/<ts>/network/<tc_id>.json. admin_page attaches its own context
+    to the SAME recorder (it requests this fixture), so one file covers the whole test."""
+    rec = _start_network(page.context, ats_config)
+    yield rec
+    try:
+        if rec is not None:
+            tc_id = _tc_id_with_variant(request.node)
+            rec.write(os.path.join(results_dir, "network", f"{tc_id}.json"))
+    except Exception:
+        pass
 
 
 @pytest.fixture

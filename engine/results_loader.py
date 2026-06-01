@@ -102,6 +102,7 @@ def load_run_results(results_dir, flaky_ids=None):
     cp_dir = os.path.join(results_dir, "checkpoints")
     heal_dir = os.path.join(results_dir, "heals")
     trace_dir = os.path.join(results_dir, "traces")
+    net_dir = os.path.join(results_dir, "network")
 
     tests = []
     counts = {"total": 0, "passed": 0, "failed": 0, "skipped": 0,
@@ -128,6 +129,8 @@ def load_run_results(results_dir, flaky_ids=None):
         heal = _read_json(_first_existing(heal_dir, [key, tc_id], ".json") or "")
         heal_count = len(heal.get("heals", []))
         trace_path = _first_existing(trace_dir, [key, tc_id], ".zip")
+        net = _read_json(_first_existing(net_dir, [key, tc_id], ".json") or "")
+        network_count = len(net.get("calls", []))
 
         flaky = status == "pass" and (key in flaky_ids or tc_id in flaky_ids)
 
@@ -154,6 +157,7 @@ def load_run_results(results_dir, flaky_ids=None):
             "warnings": warnings,
             "heal_count": heal_count,
             "has_trace": bool(trace_path),
+            "network_count": network_count,
             "checkpoints": checkpoints,
             "criteria": criteria,
         })
