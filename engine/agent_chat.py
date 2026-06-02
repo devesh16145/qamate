@@ -66,11 +66,11 @@ import project_store
 import agent_sessions
 from app_explorer import _comprehensive_snapshot, element_to_model, _label
 from dom_inspector import DESTRUCTIVE_KEYWORDS
-from smart_locator import smart_locator, SelfHealError
+from smart_locator import smart_locator, SelfHealError, to_locator
 from recorder_parser import generate_from_review
 from agent_recorder import _locator_str, _q  # reuse the proven codegen helpers
 
-from pydantic_ai import Agent, RunContext, capture_run_messages, BinaryContent
+from pydantic_ai import Agent, RunContext, capture_run_messages, BinaryContent, ToolReturn
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
@@ -82,6 +82,13 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
 # full history and summarize findings so the user can say "continue". Override
 # with ATS_AGENT_TOOL_BUDGET.
 TOOL_BUDGET = int(os.environ.get("ATS_AGENT_TOOL_BUDGET") or 30)
+
+# Per-request OUTPUT cap (max_tokens) — NOT the context window. A model's context length (MiMo's
+# ~1M) is how much it can READ; max_tokens only bounds how much it WRITES per turn. The old fixed
+# 4096 truncated reasoning models mid-thought. Default 0 = DO NOT cap output: omit max_tokens so the
+# model uses its own (large) output limit. Set ATS_AGENT_MAX_TOKENS or a per-provider "max_tokens"
+# in config.json to impose an explicit ceiling (e.g. for cost/latency control).
+AGENT_MAX_TOKENS = int(os.environ.get("ATS_AGENT_MAX_TOKENS") or 0)
 
 
 # ── stdout: JSON lines, ASCII-only (the Electron runner pipes through a cp1252
@@ -387,6 +394,47 @@ def _pytest_summary(text):
         if any(k in low for k in ("passed", "failed", "error", "skipped", "no tests ran")):
             return line.strip()[:200]
     return ""
+
+
+def _find_failure_artifacts(results_dir):
+    """Locate the FAILED.png screenshot + captured ERRORS.txt from a verify run's results dir
+    (conftest's capture_screenshot_on_failure writes both). Returns (screenshot_path|None, err_text|None)."""
+    import glob
+    shot, err = None, None
+    sdir = os.path.join(results_dir or "", "screenshots")
+    try:
+        pngs = sorted(glob.glob(os.path.join(sdir, "*_FAILED.png")), key=os.path.getmtime, reverse=True)
+        if pngs:
+            shot = pngs[0]
+        txts = sorted(glob.glob(os.path.join(sdir, "*_ERRORS.txt")), key=os.path.getmtime, reverse=True)
+        if txts:
+            with open(txts[0], "r", encoding="utf-8", errors="replace") as f:
+                err = f.read()
+    except Exception:
+        pass
+    return shot, err
+
+
+# Values that look DYNAMIC (ids / dates / times / order numbers / uuids) — asserting on these
+# makes a test fail the next run; the lint nudges the agent to assert on stable structure instead.
+_DYNAMIC_RE = re.compile(r"(\b\d{4,}\b|\d{4}-\d{2}-\d{2}|\b\d{1,2}:\d{2}(:\d{2})?\b|[0-9a-fA-F]{8}-[0-9a-fA-F]{4})")
+
+
+def _lint_recording(steps, assertions):
+    """Quality warnings on a recorded flow, surfaced to the agent so it can improve BEFORE
+    delivering — the cheap half of one-shot accuracy (the verify loop is the other half)."""
+    warns = []
+    checks = assertions or []
+    if not checks:
+        warns.append("No verification checkpoints — the test only clicks through without asserting any "
+                     "outcome. Add at least one add_checkpoint at a meaningful result so it can actually fail.")
+    for a in checks:
+        val = str(a.get("value") or "")
+        if val and _DYNAMIC_RE.search(val):
+            warns.append(f"Checkpoint asserts on '{val[:40]}', which looks DYNAMIC (id/date/number) and will "
+                         f"likely differ next run -> assert on stable text/structure instead (a heading, label, "
+                         f"status, or that a row simply exists).")
+    return warns
 
 
 def _delete_test_case(ats_root, flow_id, tc_id):
@@ -705,6 +753,31 @@ class BrowserSession:
                 "element_count": len(models), "hidden_count": hidden_total,
                 "elements": compact, "issues": self.issues[-8:]}
 
+    def _record_strategy(self, el):
+        """Pick the locator to RECORD so the generated test hits exactly the intended element on a
+        COLD run. If the primary matches >1 element it is ambiguous (SmartLocator would silently take
+        .first) — upgrade to the element's test-id when that's unique, else keep it but warn the agent.
+        Returns (strategy, locator_str, warning|None). Never raises (record-time best effort)."""
+        prim = el.get("primary") or {}
+        def _count(strat):
+            try:
+                loc = to_locator(self.page, strat)
+                return loc.count() if loc is not None else 0
+            except Exception:
+                return -1
+        n = _count(prim)
+        if n < 2:                                    # unique (1), none yet (0), or uncountable (-1) -> keep
+            return prim, _locator_str(prim), None
+        tid = (el.get("test_id") or "").strip()      # ambiguous (>=2) -> try the element's test-id
+        if tid:
+            ts = {"by": "test_id", "value": tid}
+            if _count(ts) == 1:
+                return ts, _locator_str(ts), None
+        warn = (f"This locator matches {n} elements on the page, so the test will act on the FIRST "
+                f"one. If that is not the element you meant, pick a more uniquely identifiable element "
+                f"(distinct text/label, or one exposing a test id).")
+        return prim, _locator_str(prim), warn
+
     def act(self, kind, ref, value=None):
         el = self.by_ref.get(ref)
         if not el:
@@ -713,9 +786,9 @@ class BrowserSession:
             restarted = self._ensure_alive()
             return {"ok": False, "error": ("browser had closed; restarted -- re-inspect the page (refs are stale) and retry"
                                            if restarted else "browser is closed; call restart_browser, then re-inspect")}
-        loc_str = _locator_str(el["primary"])
+        strat, loc_str, warning = self._record_strategy(el)
         try:
-            live = smart_locator(self.page, el["primary"], fallbacks=el.get("fallbacks"),
+            live = smart_locator(self.page, strat, fallbacks=el.get("fallbacks"),
                                  fingerprint=el.get("fingerprint")).resolve()
         except SelfHealError as e:
             return {"ok": False, "error": f"could not resolve '{ref}': {str(e)[:140]}"}
@@ -748,8 +821,11 @@ class BrowserSession:
             self.step_id -= 1
             return {"ok": False, "error": f"{kind} failed on '{ref}': {str(e)[:160]}"}
         self._settle()
-        return {"ok": True, "url": self._url(), "title": self._title(),
-                "new_issues": self.issues[before:]}
+        result = {"ok": True, "url": self._url(), "title": self._title(),
+                  "new_issues": self.issues[before:]}
+        if warning:
+            result["warning"] = warning
+        return result
 
     def add_checkpoint(self, name, assert_type, value):
         after = self.steps[-1]["id"] if self.steps else 0
@@ -778,6 +854,9 @@ class BrowserSession:
         res = generate_from_review(payload, ats_root)
         res = res if isinstance(res, dict) else {"status": "success", "result": str(res)}
         res.update({"recorded_steps": len(self.steps), "checkpoints": len(self.assertions)})
+        warns = _lint_recording(self.steps, self.assertions)
+        if warns:
+            res["lint_warnings"] = warns   # nudge the agent to fix weak/dynamic assertions before delivering
         return res
 
 
@@ -791,6 +870,7 @@ class Deps:
     config: dict = field(default_factory=dict)
     context_dir: str = ""     # folder of user-supplied context files (read_context_file)
     memory_path: str = ""     # the agent's durable memory file (read/update_memory)
+    vision: bool = False      # model can see images -> run_test_case returns failure screenshots
 
 
 # ── System prompt ──────────────────────────────────────────────────────────
@@ -871,7 +951,11 @@ def _load_playbook():
 _PLAYBOOK = _load_playbook()
 
 
-def build_agent(model):
+def build_agent(model, max_tokens=None):
+    mt = int(max_tokens if max_tokens is not None else AGENT_MAX_TOKENS)
+    settings = {"temperature": 0.2}
+    if mt > 0:                       # 0/unset => omit max_tokens so the model uses its own output max
+        settings["max_tokens"] = mt
     agent = Agent(
         model,
         deps_type=Deps,
@@ -879,7 +963,7 @@ def build_agent(model):
         retries=2,
         # Generous so a run_test_case verification (a full pytest run) is not cancelled mid-test.
         tool_timeout=240,
-        model_settings={"temperature": 0.2, "max_tokens": 4096},
+        model_settings=settings,
     )
 
     @agent.tool
@@ -946,53 +1030,92 @@ def build_agent(model):
                           tc_id, flow_id, description, preconditions, expected_result)
 
     @agent.tool
-    async def run_test_case(ctx: RunContext[Deps], tc_id: str, flow_id: str) -> dict:
-        """Run ONE test case through the REAL pytest runner to VERIFY it actually passes. ALWAYS
-        call this right after create_test_case — never deliver a test you have not seen pass.
-        Runs headless against this project (login handled by the runner). Returns {ok, passed,
-        exit_code, summary, tail}; on failure 'tail' is the end of the pytest output — read it
-        (and read_test_file) to diagnose, then fix and re-run."""
+    async def run_test_case(ctx: RunContext[Deps], tc_id: str, flow_id: str):
+        """Run ONE test case through the REAL pytest runner to VERIFY it passes — call this right
+        after create_test_case; never deliver a test you have not seen pass. To be sure it is
+        RELIABLE (not flaky) it runs the test TWICE and only reports passed when BOTH runs are green.
+        On failure it returns the pytest tail AND (for vision models) the FAILURE SCREENSHOT — LOOK at
+        the screenshot to see what actually went wrong (acted on the wrong element, a blocking
+        modal/overlay, an empty state, an error toast), then fix the flow and re-run. Returns
+        {passed, flaky?, summary, tail, error_detail?}."""
         ats_root = ctx.deps.ats_root
         flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
         if not os.path.isdir(os.path.join(ats_root, "tests")) or not os.path.isdir(flow_dir):
             return {"ok": False, "error": f"flow '{flow_id}' not found under tests/flows"}
         underscored = tc_id.replace("-", "_")
-        cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
-               "--tb=short", "-q", "-p", "no:cacheprovider", "--tracing=off"]
-        env = os.environ.copy()
-        env["ATS_ROOT"] = ats_root
-        env["PYTHONPATH"] = ats_root
-        env["PYTHONUNBUFFERED"] = "1"
+        base_env = os.environ.copy()
+        base_env["ATS_ROOT"] = ats_root
+        base_env["PYTHONPATH"] = ats_root
+        base_env["PYTHONUNBUFFERED"] = "1"
         proj = ctx.deps.project or {}
         if proj.get("id"):
-            env["ATS_PROJECT_ID"] = proj["id"]
-        env.setdefault("ATS_ENV", os.environ.get("ATS_ENV") or "dev")
+            base_env["ATS_PROJECT_ID"] = proj["id"]
+        base_env.setdefault("ATS_ENV", os.environ.get("ATS_ENV") or "dev")
+        verify_root = os.path.join(ats_root, "results", "_agent_verify")
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=ats_root, env=env,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            import shutil
+            shutil.rmtree(verify_root, ignore_errors=True)   # keep only the latest attempt's artifacts
+        except Exception:
+            pass
+
+        async def _one(idx):
+            rdir = os.path.join(verify_root, f"{underscored}_{idx}")
+            env = dict(base_env)
+            env["ATS_RESULTS_DIR"] = rdir   # known dir so we can find the failure screenshot
+            cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
+                   "--tb=short", "-q", "-p", "no:cacheprovider", "--tracing=off"]
             try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, cwd=ats_root, env=env,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
             except asyncio.TimeoutError:
                 try:
                     proc.kill()
                 except Exception:
                     pass
-                return {"ok": True, "passed": False,
-                        "error": "test run timed out after 180s (hung or far too slow)"}
-        except Exception as e:
-            return {"ok": False, "error": f"could not start pytest: {str(e)[:160]}"}
-        text = (out or b"").decode("utf-8", "replace")
-        rc = proc.returncode
-        no_tests = (rc == 5) or ("no tests ran" in text.lower())
-        result = {"ok": True, "passed": (rc == 0 and not no_tests),
-                  "exit_code": rc, "summary": _pytest_summary(text)}
-        if no_tests:
-            result["passed"] = False
-            result["error"] = (f"no test matched '{underscored}' in flow '{flow_id}' — confirm "
-                               "create_test_case succeeded and the tc_id/flow_id are right")
-        if not result["passed"]:
-            result["tail"] = text[-2500:]
+                return {"passed": False, "rc": -1, "text": "test run timed out after 180s (hung or far too slow)", "rdir": rdir, "no_tests": False}
+            except Exception as e:
+                return {"passed": False, "rc": -2, "text": f"could not start pytest: {str(e)[:160]}", "rdir": rdir, "no_tests": False}
+            text = (out or b"").decode("utf-8", "replace")
+            rc = proc.returncode
+            no_tests = (rc == 5) or ("no tests ran" in text.lower())
+            return {"passed": (rc == 0 and not no_tests), "rc": rc, "text": text, "rdir": rdir, "no_tests": no_tests}
+
+        r1 = await _one(1)
+        if r1["no_tests"]:
+            return {"ok": True, "passed": False, "exit_code": r1["rc"],
+                    "error": (f"no test matched '{underscored}' in flow '{flow_id}' — confirm "
+                              "create_test_case succeeded and the tc_id/flow_id are right")}
+        runs = [r1]
+        verify_runs = int(os.environ.get("ATS_VERIFY_RUNS") or 2)
+        if r1["passed"] and verify_runs >= 2:
+            runs.append(await _one(2))   # flakiness gate: only "passed" if it passes CONSISTENTLY
+        passed_all = all(r["passed"] for r in runs)
+        flaky = (not passed_all) and any(r["passed"] for r in runs)
+        result = {"ok": True, "passed": passed_all, "runs": len(runs), "exit_code": runs[-1]["rc"],
+                  "summary": _pytest_summary(runs[-1]["text"]) or _pytest_summary(r1["text"])}
+        if flaky:
+            result["flaky"] = True
+            result["note"] = ("passed on one run but FAILED on another -> FLAKY, not reliable. Add an "
+                              "explicit wait for the result or a more robust assertion, then re-run.")
+        if passed_all:
+            return result
+        failed = next((r for r in runs if not r["passed"]), runs[-1])
+        result["tail"] = (failed["text"] or "")[-2500:]
+        shot, err = _find_failure_artifacts(failed["rdir"])
+        if err:
+            result["error_detail"] = err[:800]
+        # Vision: hand the model the actual failure screenshot so it can SEE the problem and fix it.
+        if shot and ctx.deps.vision:
+            img = _binary_part(shot, "image/png", max_bytes=8_000_000)
+            if img is not None:
+                head = {k: v for k, v in result.items() if k != "tail"}
+                txt = ("run_test_case verdict: " + json.dumps(head, ensure_ascii=True, default=str) +
+                       "\nThe image below is the FAILURE SCREENSHOT of the running test — look at it to see "
+                       "what actually went wrong (wrong element, a blocking modal/overlay, an empty state, an "
+                       "error toast), then fix the flow and re-run.\n\npytest tail:\n" + result["tail"])
+                return ToolReturn(return_value=result, content=[txt, img])
         return result
 
     @agent.tool
@@ -1407,6 +1530,9 @@ class AgentRuntime:
         self.history = []        # list[ModelMessage] — conversation memory
         self.session_id = None   # persisted session this runtime is attached to
         self.project_id = None
+        self.max_tokens = AGENT_MAX_TOKENS   # effective per-turn output cap (set in init)
+        self.session_tokens = {"input": 0, "output": 0, "total": 0}  # cumulative token usage
+        self.ready_info = None   # the 'ready' payload, re-emitted on reattach
         self.ats_root = os.environ.get("ATS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config = {}
         try:
@@ -1462,15 +1588,27 @@ class AgentRuntime:
             emit({"event": "error", "message": f"browser failed to start: {e}"})
             return
 
-        self.agent = build_agent(model)
+        prov_cfg = ((self.config.get("llm", {}) or {}).get("providers", {}) or {}).get(pname, {}) or {}
+        self.max_tokens = int(prov_cfg.get("max_tokens") or AGENT_MAX_TOKENS)
+        self.agent = build_agent(model, self.max_tokens)
+        # Vision-capable? -> run_test_case can hand failure SCREENSHOTS back to the model.
+        _vis = (os.environ.get("ATS_AGENT_VISION") or "").lower()
+        vision = (_vis == "on") if _vis in ("on", "off") else (pname in ("mimo", "openai"))
         ctx_dir = project_store.resolve_context_dir(self.ats_root, project_id, project)
         mem_path = project_store.resolve_memory_path(self.ats_root, project_id)
         self.deps = Deps(session=self.session, ats_root=self.ats_root, project=project,
-                         config=self.config, context_dir=ctx_dir, memory_path=mem_path)
+                         config=self.config, context_dir=ctx_dir, memory_path=mem_path, vision=vision)
         # Restore the model's conversation memory on resume (this is what lets it "continue
         # from a point"); a fresh session starts empty. Then mark the session running and load
         # the saved transcript so the window can redraw the visible chat.
         self.history = agent_sessions.load_messages(self.ats_root, project_id, self.session_id) if resumed else []
+        if resumed:
+            _t = (agent_sessions.read_session(self.ats_root, project_id, self.session_id) or {}).get("tokens") or {}
+            self.session_tokens = {"input": int(_t.get("input", 0) or 0),
+                                   "output": int(_t.get("output", 0) or 0),
+                                   "total": int(_t.get("total", 0) or 0)}
+        else:
+            self.session_tokens = {"input": 0, "output": 0, "total": 0}
         try:
             agent_sessions.update_session_meta(self.ats_root, project_id, self.session_id,
                 {"status": "running", "provider": pname, "model": model_name, "env": (cmd.get("env") or "")})
@@ -1478,12 +1616,13 @@ class AgentRuntime:
             pass
         transcript = agent_sessions.load_transcript(self.ats_root, project_id, self.session_id) if resumed else []
         authed = info.get("authed", "none")
-        emit({"event": "ready", "url": info.get("url", ""), "title": info.get("title", ""),
-              "provider": pname, "model": model_name,
-              "auth": authed != "none", "auth_via": authed,
-              "project": (project or {}).get("name") or project_id or None,
-              "project_id": project_id,
-              "session_id": self.session_id, "resumed": resumed, "transcript": transcript})
+        self.ready_info = {"url": info.get("url", ""), "title": info.get("title", ""),
+                           "provider": pname, "model": model_name,
+                           "auth": authed != "none", "auth_via": authed,
+                           "project": (project or {}).get("name") or project_id or None,
+                           "project_id": project_id, "session_id": self.session_id}
+        emit({"event": "ready", **self.ready_info, "resumed": resumed,
+              "transcript": transcript, "tokens": self.session_tokens})
 
     async def chat(self, cmd):
         if not self.agent:
@@ -1508,6 +1647,7 @@ class AgentRuntime:
                     event_stream_handler=_stream_handler,
                     usage_limits=UsageLimits(tool_calls_limit=TOOL_BUDGET))
                 self.history = result.all_messages()
+                self._add_usage(result)
                 self._persist_turn(message, attachment_names, result.new_messages())
                 emit({"event": "turn_complete", "text": result.output})
             except UsageLimitExceeded:
@@ -1520,8 +1660,58 @@ class AgentRuntime:
                 extra = [{"role": "assistant", "text": summary}] if summary else None
                 self._persist_turn(message, attachment_names, self.history[hist_before:], extra_bubbles=extra)
             except Exception as e:
-                emit({"event": "error", "message": f"{type(e).__name__}: {e}"})
+                msg = f"{type(e).__name__}: {e}"
+                low = str(e).lower()
+                if "token limit" in low or "max_tokens" in low:
+                    if self.max_tokens and self.max_tokens > 0:
+                        msg += (f"  (Hit the per-turn output cap of {self.max_tokens}. Raise it via "
+                                f"ATS_AGENT_MAX_TOKENS / a higher 'max_tokens' for this provider in config.json, "
+                                f"or set it to 0 to uncap, then Stop + restart the session.)")
+                    else:
+                        msg += ("  (Hit the model's OWN output-token limit on a single turn — separate from its "
+                                "much larger context window. Break the request into smaller turns, or use a "
+                                "provider/model that allows more output per response.)")
+                emit({"event": "error", "message": msg})
                 log(traceback.format_exc())
+
+    async def reattach(self):
+        """Re-emit `ready` (+ current transcript + token total) so a reopened window/dock reconnects
+        to this STILL-RUNNING session without restarting its browser or losing memory."""
+        if not self.session_id or not self.ready_info:
+            emit({"event": "error", "message": "no active session to reattach"})
+            return
+        transcript = agent_sessions.load_transcript(self.ats_root, self.project_id, self.session_id)
+        emit({"event": "ready", **self.ready_info, "resumed": True,
+              "transcript": transcript, "tokens": self.session_tokens})
+
+    def _add_usage(self, result):
+        """Accumulate this turn's token usage into the session total and emit a live counter
+        ({event:'usage', input, output, total, estimated} — cumulative for the session). If the
+        provider reports no usage (some OpenAI-compatible endpoints omit it), fall back to a rough
+        ~4-chars/token estimate so the counter still moves instead of being stuck at 0."""
+        inp = out = tot = 0
+        try:
+            u = result.usage()
+            inp = int(getattr(u, "input_tokens", 0) or 0)
+            out = int(getattr(u, "output_tokens", 0) or 0)
+            tot = int(getattr(u, "total_tokens", 0) or 0)
+        except Exception:
+            pass
+        estimated = bool(self.session_tokens.get("estimated"))
+        if tot <= 0:
+            try:
+                chars = sum(len(str(getattr(pt, "content", "") or ""))
+                            for m in result.new_messages() for pt in getattr(m, "parts", []))
+            except Exception:
+                chars = len(str(getattr(result, "output", "") or ""))
+            out = max(out, max(1, chars // 4))
+            tot = inp + out
+            estimated = True
+        self.session_tokens["input"] += inp
+        self.session_tokens["output"] += out
+        self.session_tokens["total"] += tot
+        self.session_tokens["estimated"] = estimated
+        emit({"event": "usage", **self.session_tokens})
 
     def _persist_turn(self, message, attachment_names, new_msgs, extra_bubbles=None):
         """Persist one completed turn: append its bubbles to the transcript, save the model
@@ -1536,7 +1726,7 @@ class AgentRuntime:
                 bubbles += extra_bubbles
             agent_sessions.append_bubbles(self.ats_root, self.project_id, self.session_id, bubbles)
             agent_sessions.save_messages(self.ats_root, self.project_id, self.session_id, self.history)
-            patch = {"message_count": len(self.history), "status": "idle"}
+            patch = {"message_count": len(self.history), "status": "idle", "tokens": dict(self.session_tokens)}
             meta = agent_sessions.read_session(self.ats_root, self.project_id, self.session_id) or {}
             title = (meta.get("title") or "").strip()
             if message and (not title or title == "New session"):
@@ -1636,6 +1826,8 @@ async def main_loop():
             await rt.init(cmd)
         elif action == "chat":
             await rt.chat(cmd)
+        elif action == "reattach":
+            await rt.reattach()
         elif action == "reset":
             rt.reset()
         elif action in ("shutdown", "quit", "exit"):

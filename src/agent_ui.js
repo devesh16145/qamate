@@ -36,7 +36,7 @@
     try { return Object.entries(a).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', '); }
     catch (e) { return String(a); }
   };
-  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '' }; }
+  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '', usage: null }; }
   function finalizeStreaming(prev) {
     const last = prev[prev.length - 1];
     if (last && last.role === 'assistant' && last.streaming) return [...prev.slice(0, -1), { ...last, streaming: false }];
@@ -45,6 +45,7 @@
   function bubbleFromTranscript(b, id) {
     return { id, role: b.role, text: b.text || '', tool: b.tool, args: b.args, attachments: b.attachments };
   }
+  const fmtTok = (n) => { n = n || 0; if (n < 1000) return '' + n; if (n < 1e6) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k'; return (n / 1e6).toFixed(2) + 'M'; };
 
   /* Reduce one streamed agent-event into a session's runtime state. */
   function applyEvent(rt, msg, nextId) {
@@ -61,8 +62,9 @@
       const authTxt = msg.auth ? ` · authenticated (${msg.auth_via})` : ' · NOT logged in — set credentials in settings';
       msgs = [...msgs, { id: nextId(), role: 'system',
         text: `Connected to ${msg.provider} (${msg.model})${msg.project ? ' · ' + msg.project : ''}${authTxt}. Browser open${msg.url ? ' at ' + msg.url : ''}.${msg.resumed ? ' Resumed from saved memory.' : ''}` }];
-      return set({ status: 'ready', info, messages: msgs });
+      return set({ status: 'ready', info, messages: msgs, usage: msg.tokens || rt.usage });
     }
+    if (ev === 'usage') return set({ usage: { input: msg.input || 0, output: msg.output || 0, total: msg.total || 0, estimated: !!msg.estimated } });
     if (ev === 'text') {
       const delta = msg.delta || '';
       const last = messages[messages.length - 1];
@@ -97,9 +99,9 @@
     return 'var(--text-3)';
   }
 
-  /* ── Session sidebar (window mode) ───────────────────────────────────────── */
+  /* ── Session list (left sidebar in window mode; full-width "page 1" when docked) ── */
   function SessionSidebar({ projects, projectId, setProjectId, sessions, activeId, runtimeMap,
-                            onSelect, onNew, onRename, onDelete }) {
+                            onSelect, onNew, onRename, onDelete, full, onUndock, onClose }) {
     const [search, setSearch] = useState('');
     const [editing, setEditing] = useState(null);
     const [editText, setEditText] = useState('');
@@ -111,10 +113,13 @@
     }, [sessions, search]);
 
     return (
-      <aside className="ses-sidebar">
+      <aside className={'ses-sidebar' + (full ? ' full' : '')}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px' }}>
           <Ic.MessageSquare size={16} style={{ color: 'var(--accent)' }} />
           <b style={{ fontSize: 13 }}>AI Agent</b>
+          <span style={{ flex: 1 }}></span>
+          {onUndock && <button className="rv-cta" onClick={onUndock} title="Pop out to its own window"><Ic.ExternalLink size={12} /></button>}
+          {onClose && <button className="rv-cta" onClick={onClose} title="Close the agent panel"><Ic.X size={12} /></button>}
         </div>
         <div style={{ padding: '0 12px 8px' }}>
           <label style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Project</label>
@@ -159,7 +164,7 @@
                       title={s.title}>{s.title || 'Untitled'}</div>
                   )}
                   <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
-                    {live ? 'running' : (s.message_count ? s.message_count + ' msgs' : 'new')}{s.updated_at ? ' · ' + relTime(s.updated_at) : ''}
+                    {live ? 'running' : (s.message_count ? s.message_count + ' msgs' : 'new')}{s.updated_at ? ' · ' + relTime(s.updated_at) : ''}{(s.tokens && s.tokens.total) ? ' · ' + fmtTok(s.tokens.total) + ' tok' : ''}
                   </div>
                 </div>
                 {confirmDel === s.id ? (
@@ -179,32 +184,24 @@
     );
   }
 
-  /* ── Compact session switcher (docked mode) ──────────────────────────────── */
-  function CompactBar({ projects, projectId, setProjectId, sessions, activeId, onSelect, onNew, onUndock, onClose }) {
+  /* ── "No session selected" placeholder (window mode, chat column) ─────────── */
+  function NoSession() {
     return (
-      <div className="agent-embed-bar">
-        <Ic.MessageSquare size={14} style={{ color: 'var(--accent)' }} />
-        <b style={{ fontSize: 12 }}>AI Agent</b>
-        <select value={activeId || ''} onChange={(e) => onSelect(e.target.value || null)} title="Session"
-          style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '3px 5px' }}>
-          {!sessions.length && <option value="">No sessions yet</option>}
-          {sessions.map((s) => <option key={s.id} value={s.id}>{(s.live ? '● ' : '') + (s.title || 'Untitled')}</option>)}
-        </select>
-        <button className="rv-cta" onClick={onNew} title="New session"><Ic.Plus size={12} /></button>
-        <select value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)} title="Project"
-          style={{ fontSize: 10.5, padding: '3px 4px', maxWidth: 90 }}>
-          <option value="">Default</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
-        </select>
-        {onUndock && <button className="rv-cta" onClick={onUndock} title="Pop out to its own window"><Ic.ExternalLink size={12} /></button>}
-        {onClose && <button className="rv-cta" onClick={onClose} title="Close the agent panel"><Ic.X size={12} /></button>}
+      <div className="agent-pane" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, padding: 16 }}>
+          <Ic.MessageSquare size={28} style={{ color: 'var(--accent)', marginBottom: 10 }} />
+          <h2 style={{ fontSize: 15, margin: '0 0 6px', color: 'var(--text-1)' }}>No session selected</h2>
+          <p style={{ fontSize: 12, lineHeight: 1.5 }}>Create a <b>New session</b> or pick one from the list.
+          Each session drives its own browser, keeps memory, and can run alongside others.</p>
+        </div>
       </div>
     );
   }
 
-  /* ── Active session chat ─────────────────────────────────────────────────── */
+  /* ── Active session chat (ALWAYS rendered with a real session — no conditional
+     hooks; the "no session" case is handled by AgentApp, never here) ────────── */
   function SessionChat({ session, rt, provider, setProvider, headed, setHeaded,
-                         onStart, onSend, onStop, onReset, setInput, setAttachments, projectId, toast }) {
+                         onStart, onSend, onStop, onReset, setInput, setAttachments, projectId, toast, onBack }) {
     const scrollRef = useRef(null);
     const taRef = useRef(null);
     const caretRef = useRef(null);
@@ -219,19 +216,6 @@
     const [atQuery, setAtQuery] = useState('');
     const [atIndex, setAtIndex] = useState(0);
     useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [rt && rt.messages, rt && rt.status]);
-
-    if (!session || !rt) {
-      return (
-        <div className="agent-pane" style={{ alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, padding: 16 }}>
-            <Ic.MessageSquare size={28} style={{ color: 'var(--accent)', marginBottom: 10 }} />
-            <h2 style={{ fontSize: 15, margin: '0 0 6px', color: 'var(--text-1)' }}>No session selected</h2>
-            <p style={{ fontSize: 12, lineHeight: 1.5 }}>Create a <b>New session</b> or pick one.
-            Each session drives its own browser, keeps memory, and can run alongside others.</p>
-          </div>
-        </div>
-      );
-    }
 
     const status = rt.status;
     const info = rt.info;
@@ -374,9 +358,16 @@
 
     return (
       <div className="agent-pane">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderBottom: '1px solid var(--accent-bg)', position: 'relative', flexWrap: 'wrap' }}>
-          <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }} title={session.title}>{session.title || 'Untitled session'}</b>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--accent-bg)', position: 'relative', flexWrap: 'wrap' }}>
+          {onBack && <button className="rv-cta" onClick={onBack} title="Back to sessions"><Ic.ChevronLeft size={13} /></button>}
+          <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }} title={session.title}>{session.title || 'Untitled session'}</b>
           {info && <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>{info.model}{info.auth ? ' · ' + (info.auth_via || 'auth') : ' · no auth'}</span>}
+          {connected && (
+            <span title={`Tokens this session${(rt.usage && rt.usage.estimated) ? ' (estimated — the model provider did not report usage)' : ''} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, total ${(rt.usage && rt.usage.total) || 0}`}
+              style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'var(--mono)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Ic.Activity size={10} />{(rt.usage && rt.usage.estimated) ? '~' : ''}{fmtTok((rt.usage && rt.usage.total) || 0)} tok
+            </span>
+          )}
           <span style={{ flex: 1 }}></span>
           {busy && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}><span className="live-dot"></span> {status === 'starting' ? 'starting' : 'working'}…</span>}
           <button className="rv-cta" onClick={toggleCtx} title="Scoped project folder the agent explores"><Ic.Folder size={12} /> Context</button>
@@ -602,32 +593,28 @@
 
     const activeSession = sessions.find((s) => s.id === activeId) || null;
     const activeRt = activeId ? (runtime[activeId] || emptyRuntime()) : null;
-    const chat = (
+    const renderChat = (onBack) => (
       <SessionChat session={activeSession} rt={activeRt}
         provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
         onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset}
         setInput={(v) => patchRt(activeId, { input: v })}
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
-        projectId={projectId} toast={toast} />
+        projectId={projectId} toast={toast} onBack={onBack} />
+    );
+    const list = (
+      <SessionSidebar projects={projects} projectId={projectId} setProjectId={setProjectId}
+        sessions={sessions} activeId={activeId} runtimeMap={runtime}
+        onSelect={setActiveId} onNew={onNew} onRename={onRename} onDelete={onDelete}
+        full={embedded} onUndock={embedded ? onUndock : undefined} onClose={embedded ? onClose : undefined} />
     );
 
     return (
       <div className={'agent-shell' + (embedded ? ' embedded' : '')}>
-        {embedded ? (
-          <React.Fragment>
-            <CompactBar projects={projects} projectId={projectId} setProjectId={setProjectId}
-              sessions={sessions} activeId={activeId} onSelect={setActiveId} onNew={onNew}
-              onUndock={onUndock} onClose={onClose} />
-            {chat}
-          </React.Fragment>
-        ) : (
-          <React.Fragment>
-            <SessionSidebar projects={projects} projectId={projectId} setProjectId={setProjectId}
-              sessions={sessions} activeId={activeId} runtimeMap={runtime}
-              onSelect={setActiveId} onNew={onNew} onRename={onRename} onDelete={onDelete} />
-            {chat}
-          </React.Fragment>
-        )}
+        {embedded
+          /* Docked = 2 pages: page 1 is the session list, page 2 is the opened session (with Back). */
+          ? (activeSession ? renderChat(() => setActiveId(null)) : list)
+          /* Window = list sidebar + chat (or a placeholder when nothing is selected). */
+          : (<React.Fragment>{list}{activeSession ? renderChat(null) : <NoSession />}</React.Fragment>)}
         <div style={{ position: 'fixed', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 80 }}>
           {toasts.map((t) => (
             <div key={t.id} style={{ background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent)', borderRadius: 8, padding: '7px 12px', fontSize: 12, boxShadow: '0 6px 18px rgba(0,0,0,0.2)' }}>{t.msg}</div>

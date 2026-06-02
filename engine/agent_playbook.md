@@ -39,7 +39,9 @@ single biggest failure mode. Verify, fix, re-run, and only then deliver.
 3. Call `create_test_case` ONCE, with a clear id (TC-<AREA>-NNN) and the correct flow_id.
 4. VERIFY: immediately call `run_test_case(tc_id, flow_id)`.
 5. If it does not PASS:
-   - Read the error tail. Call `read_test_file` to see the exact generated code.
+   - Read the error tail AND, when `run_test_case` returns a FAILURE SCREENSHOT, LOOK at it first —
+     it shows what actually went wrong (wrong element, a blocking modal/overlay, an empty state, an
+     error toast) far faster than the stack trace. Call `read_test_file` to see the generated code.
    - Diagnose the real cause: wrong/overspecific locator? acted on the wrong element (an
      action button instead of the row link)? a step missing? a value the app rejected? not
      actually logged in for that flow?
@@ -49,6 +51,22 @@ single biggest failure mode. Verify, fix, re-run, and only then deliver.
 6. Repeat until it PASSES. Then tell the user it is verified green (mention the run result).
 7. If you cannot get it green in about 3 attempts, STOP. Report exactly what is failing
    (the error), what you tried, and ask the user — do not keep flailing or hand over a red test.
+
+## Authoring for one-shot accuracy (locators & assertions)
+The goal is a test that PASSES cold, first try. While you drive, the app is in one known state and
+you are looking at one element; the generated test runs later with no agent and maybe different
+data. Close that gap:
+- **Locators.** Prefer elements that are uniquely identifiable — a test id, or a control with a
+  distinct accessible name/label. If a `click`/`fill` returns a `warning` that the locator matches
+  several elements, DO NOT ignore it: the test would act on the FIRST match, which may be the wrong
+  element. Pick a more specific element (distinct text/label, or one exposing a test id) and re-drive.
+- **Assertions.** Add a checkpoint at every meaningful outcome, and assert on STABLE things — a
+  heading, a label, a status, a URL, or simply that an expected row/section exists. NEVER assert on
+  dynamic values (order numbers, dates/times, generated ids); they differ next run. If
+  `create_test_case` returns `lint_warnings`, fix them before you deliver.
+- **Reliability.** `run_test_case` runs the test TWICE and only reports `passed` when both runs are
+  green. If it comes back `flaky` (passed once, failed once), the flow has a timing race — add a
+  checkpoint/wait for the expected result at that point, then re-run. "Works once" is not "works".
 
 ## History and reports are authoritative
 - `list_runs` / `read_run` return the real run history. If a run is listed, it EXISTS — do not
