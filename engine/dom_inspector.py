@@ -81,6 +81,7 @@ INTERACTIVE_DOM_JS = r"""() => {
                 name: el.getAttribute('name') || '',
                 type: el.getAttribute('type') || '',
                 id: el.id || '',
+                test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
                 value: el.value || '',
                 checked: !!el.checked,
                 disabled: !!el.disabled,

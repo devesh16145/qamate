@@ -409,7 +409,10 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
   if (!fs.existsSync(VENV_PYTHON)) return { status: 'error', message: `Python not found at ${VENV_PYTHON}` };
   const sessionId = opts.sessionId;
   if (!sessionId) return { status: 'error', message: 'sessionId required' };
-  if (agentProcs.has(sessionId)) return { status: 'success', already: true };  // already running
+  if (agentProcs.has(sessionId)) {
+    _agentWrite(sessionId, { action: 'reattach' });  // already running -> reconnect (re-emit ready)
+    return { status: 'success', reattached: true };
+  }
   if (agentProcs.size >= AGENT_MAX_SESSIONS) {
     return { status: 'error', message: `Too many concurrent sessions (max ${AGENT_MAX_SESSIONS}). Stop one before starting another.` };
   }
