@@ -17,18 +17,36 @@ function createWindow() {
     width: 1400,
     height: 900,
     autoHideMenuBar: true,
+    // Frameless: the app's own .titlebar IS the window title bar (DataGrip-style) — the
+    // app toolbar lives in the same row as the native min/max/close, shown as an overlay
+    // on the top-right. Overlay height matches .titlebar (44px); colors track the theme
+    // via the 'set-titlebar-theme' IPC below.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#ffffff', symbolColor: '#45454d', height: 44 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
     title: "Agrim ATS - Automated Testing System",
-    backgroundColor: '#0f0f1a',
+    backgroundColor: '#ffffff',
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   mainWindow.webContents.openDevTools();
 }
+
+// Recolor the native window-control overlay (min/max/close) when the app theme flips,
+// so they match the light/dark titlebar instead of staying white on a dark bar.
+ipcMain.handle('set-titlebar-theme', (e, { theme } = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  try {
+    mainWindow.setTitleBarOverlay(theme === 'dark'
+      ? { color: '#2b2d30', symbolColor: '#dfe1e5', height: 44 }
+      : { color: '#ffffff', symbolColor: '#45454d', height: 44 });
+    return true;
+  } catch (_) { return false; }
+});
 
 app.whenReady().then(createWindow);
 
@@ -161,6 +179,7 @@ ipcMain.handle('run-tests', async (event, options) => {
     try {
       if (fs.existsSync(RESULTS_DIR)) {
         const dirs = fs.readdirSync(RESULTS_DIR)
+          .filter(f => /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(f))  // real runs only — skip _helper dirs that sort first
           .filter(f => { try { return fs.lstatSync(path.join(RESULTS_DIR, f)).isDirectory(); } catch { return false; } })
           .sort().reverse().slice(0, 3);
         for (const d of dirs) {
@@ -265,9 +284,6 @@ ipcMain.handle('open-trace', async (event, tracePath) => {
 // synthesize (L3). Mirrors the analyze-coverage spawn+stream pattern.
 // ════════════════════════════════════════════════════════════════
 const PROJECT_STORE = path.join(__dirname, 'engine', 'project_store.py');
-const APP_EXPLORER = path.join(__dirname, 'engine', 'app_explorer.py');
-const PRD_EXTRACTOR = path.join(__dirname, 'engine', 'prd_extractor.py');
-const TEST_SYNTH = path.join(__dirname, 'engine', 'test_synthesizer.py');
 const AGENT_RECORDER = path.join(__dirname, 'engine', 'agent_recorder.py');
 const SECRETS_PATH = path.join(app.getPath('userData'), 'ats_secrets.json');
 
@@ -763,61 +779,6 @@ ipcMain.handle('set-active-project', async (e, { projectId }) =>
   runEngine(e, [PROJECT_STORE, 'set-active', projectId], null));
 ipcMain.handle('delete-project', async (e, { projectId }) =>
   runEngine(e, [PROJECT_STORE, 'delete', projectId], null));
-ipcMain.handle('get-app-model', async (e, { projectId }) => {
-  try { const p = path.join(__dirname, 'projects', projectId, 'app_model.json'); return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null; }
-  catch (err) { return null; }
-});
-ipcMain.handle('get-requirements', async (e, { projectId }) => {
-  try { const p = path.join(__dirname, 'projects', projectId, 'requirements.json'); return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null; }
-  catch (err) { return null; }
-});
-
-// Pipeline (stream progress to 'autopilot-progress')
-ipcMain.handle('explore-app', async (e, { projectId, maxPages, maxDepth, headed }) => {
-  const args = [APP_EXPLORER, projectId];
-  if (maxPages) args.push('--max-pages', String(maxPages));
-  if (maxDepth) args.push('--max-depth', String(maxDepth));
-  if (headed) args.push('--headed');
-  return runEngine(e, args, 'autopilot-progress', _llmEnv());
-});
-ipcMain.handle('extract-requirements', async (e, { projectId, prdText, prdPath, provider }) => {
-  let pth = prdPath;
-  if (!pth && prdText != null) {
-    pth = path.join(app.getPath('temp'), `ats_prd_${Date.now()}.md`);
-    fs.writeFileSync(pth, prdText, 'utf8');
-  }
-  if (!pth) return { status: 'error', message: 'no PRD provided' };
-  const args = [PRD_EXTRACTOR, pth, '--project', projectId];
-  if (provider) args.push('--provider', provider);
-  return runEngine(e, args, 'autopilot-progress', _llmEnv());
-});
-ipcMain.handle('synthesize-tests', async (e, { projectId, flowId, provider }) => {
-  const args = [TEST_SYNTH, projectId];
-  if (flowId) args.push('--flow', flowId);
-  if (provider) args.push('--provider', provider);
-  return runEngine(e, args, 'autopilot-progress', _llmEnv());
-});
-
-// Autonomous record: the LLM drives the browser to accomplish a goal and emits
-// an ordinary test case via the existing recorder pipeline. Credentials (if
-// given) are folded into the goal so the agent logs in first.
-ipcMain.handle('agent-record', async (e, { projectId, goal, username, password, startPath, provider, maxSteps, tcId, flowId, headed }) => {
-  let fullGoal = (goal && goal.trim()) || 'Explore the app and exercise its main happy-path flow, verifying the key results along the way.';
-  if (username) {
-    fullGoal = `First, log in with username "${username}" and password "${password || ''}". Then: ${fullGoal}`;
-  }
-  const args = [AGENT_RECORDER, projectId, '--goal', fullGoal,
-    '--tc', tcId || ('TC-AUTO-' + String(Date.now()).slice(-6)),
-    '--flow', flowId || 'autopilot'];
-  if (startPath) args.push('--start', startPath);
-  if (provider) args.push('--provider', provider);
-  if (maxSteps) args.push('--max-steps', String(maxSteps));
-  if (headed) args.push('--headed');
-  return runEngine(e, args, 'autopilot-progress', _llmEnv());
-});
-
-// Capture a project's login once (Playwright codegen --save-storage). The
-// generated code is discarded; we only keep the storage_state for reuse.
 ipcMain.handle('capture-login', async (e, { projectId, url }) => {
   return new Promise((resolve) => {
     try {
@@ -840,6 +801,11 @@ ipcMain.handle('get-run-history', async () => {
 
   const runs = fs.readdirSync(RESULTS_DIR)
     .filter(f => {
+      // Only real run folders, which are timestamped YYYY-MM-DD_HH-MM-SS. This excludes
+      // helper dirs (_coverage, _agent_verify, _agent_eval, …) that have no run_metadata
+      // and — because '_' sorts ABOVE digits — would otherwise top the list as empty
+      // 0·0 / 0.0s history cards.
+      if (!/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(f)) return false;
       try { return fs.lstatSync(path.join(RESULTS_DIR, f)).isDirectory(); }
       catch { return false; }
     })

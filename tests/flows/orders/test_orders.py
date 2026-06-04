@@ -8,7 +8,6 @@ import re
 import pytest
 from playwright.sync_api import expect, Page
 
-
 @pytest.mark.tc("TC-ORDERS-001")
 def test_TC_ORDERS_001(page: Page, tc_data, base_url, admin_url, checkpoints):
     """Create Inv PO
@@ -133,3 +132,97 @@ def test_TC_ORDERS_001(page: Page, tc_data, base_url, admin_url, checkpoints):
 
     checkpoints.mark_passed("Flow executed successfully")
 
+@pytest.mark.tc("TC-ORDERS-002")
+def test_TC_ORDERS_002(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Orders page loads with status tabs, filtering by New tab, keyword search, and expanded More filters
+
+    Preconditions: User is logged in to Agrim Seller Dashboard
+
+    Expected Result: Orders page loads with all status tabs visible (All Orders, New, Accepted, Packed, Ready for Dispatch, Picked Up, Dispatched, Rejected, Cancelled). Clicking New tab filters to new orders with Accept/Reject buttons. Search filters orders by keyword. More filter expands to show Warehouses, Payment Status, and Doc Status options.
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/
+    page.goto(base_url + "")
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    # Step 2: Click Click Orders
+    page.get_by_role("link", name="Orders").click()
+    page.wait_for_timeout(500)
+    # Step 3: Click Click 2
+    page.get_by_role("button", name="2").click()
+    page.wait_for_timeout(500)
+    # Step 4: Click Click Clear All
+    page.get_by_role("button", name="Clear All").click()
+    page.wait_for_timeout(500)
+    # Step 5: Click Click New
+    page.get_by_role("button", name="New").click()
+    page.wait_for_timeout(500)
+    # Verify: New orders tab active and filtered
+    expect(page.locator("body")).to_contain_text("New", timeout=10000)
+    # Step 6: Enter "PO" in Enter "PO" in search-product-name-sku-brand
+    page.get_by_placeholder("Search Product Name, SKU, Brand").fill(tc_data.get("input_1", ""))
+    # Verify: Search results filtered by keyword
+    expect(page.locator("body")).to_contain_text("PO", timeout=10000)
+    # Step 7: Click Click More
+    page.get_by_role("button", name="More").click()
+    page.wait_for_timeout(500)
+    # Verify: More filters expand showing additional options
+    expect(page.locator("body")).to_contain_text("Warehouses", timeout=10000)
+    # Step 8: Enter "" in Enter "" in search-product-name-sku-brand
+    page.get_by_placeholder("Search Product Name, SKU, Brand").fill(tc_data.get("input_2", ""))
+    # Step 9: Click Click All Orders
+    page.get_by_role("button", name="All Orders").click()
+    page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("All 3 verification(s) passed")
+
+@pytest.mark.tc("TC-ORDERS-003")
+def test_TC_ORDERS_003(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Full PO Lifecycle - New to Picked Up: Accept a new order, pack it, mark ready, and mark picked up through all seller-actionable stages
+
+    Preconditions: Seller is logged in. At least one New order exists.
+
+    Expected Result: Order progresses through New → Accepted → Packed → Ready for Dispatch → Picked Up stages with correct action buttons visible at each stage.
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    page.goto(base_url + "orders")
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    # Verify: Orders page loaded
+    expect(page.locator("body")).to_contain_text("All Orders", timeout=10000)
+    # Step 2: Click Click New
+    page.get_by_role("button", name="New").click()
+    page.wait_for_timeout(500)
+    # Verify: New orders tab active with Accept/Reject buttons
+    expect(page.locator("body")).to_contain_text("Reject", timeout=10000)
+    # Step 3: Click Click Accept
+    page.get_by_role("button", name="Accept").click()
+    page.wait_for_timeout(500)
+    # Verify: Order accepted - Accepted tab with Pack buttons
+    expect(page.locator("body")).to_contain_text("Pack", timeout=10000)
+    # Step 4: Click Click Pack
+    page.get_by_role("button", name="Pack").click()
+    page.wait_for_timeout(500)
+    # Verify: Order packed - Packed tab with Ready Proof and Ready buttons
+    expect(page.locator("body")).to_contain_text("Ready Proof", timeout=10000)
+    # Step 5: Click Click Ready
+    page.get_by_role("button", name="Ready").click()
+    page.wait_for_timeout(500)
+    # Verify: Order Ready for Dispatch - Picked Up button available
+    expect(page.locator("body")).to_contain_text("Picked Up", timeout=10000)
+    # Step 6: Click Click Picked Up
+    page.get_by_role("button", name="Picked Up").click()
+    page.wait_for_timeout(500)
+    # Verify: Order Picked Up - final seller stage with Invoice upload available
+    expect(page.locator("body")).to_contain_text("Invoice", timeout=10000)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("All 6 verification(s) passed")

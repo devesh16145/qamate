@@ -15,6 +15,7 @@ import json
 import re
 import time
 import sys
+import contextlib
 
 # Self-healing locator engine (engine/smart_locator.py). Added to sys.path so it
 # imports under both the Electron runner (PYTHONPATH=ats_root) and bare pytest.
@@ -179,6 +180,33 @@ class CheckpointRunner:
         self.checkpoints.append(cp_entry)
         _write_checkpoints(self.tc_id, self.checkpoints)
         return cp_entry["status"] == "PASS"
+
+    @contextlib.contextmanager
+    def step(self, name, severity=None):
+        """Context manager wrapping ONE recorded step. Records `name` as a checkpoint —
+        PASS if the block completes, FAIL (with the exception text) if it raises — then
+        re-raises so the test still fails at that step. This is what gives generated /
+        recorded tests a per-step execution timeline (instead of 'No step checkpoints
+        recorded') when they die mid-flow."""
+        sev = severity if severity in _SEVERITIES else self._default_severity()
+        print(f"[{self.tc_id}] >> {name}", flush=True)
+        try:
+            yield
+        except Exception as e:
+            self.checkpoints.append({"name": name, "status": "FAIL", "error": str(e)[:500],
+                                     "severity": sev, "ts": int(time.time() * 1000)})
+            if self._first_error is None:
+                self._first_error = e
+            if sev == "critical" and self._first_critical_error is None:
+                self._first_critical_error = e
+            print(f"[{self.tc_id}] FAIL {name}: {str(e)[:200]}", flush=True)
+            _write_checkpoints(self.tc_id, self.checkpoints)
+            raise
+        else:
+            self.checkpoints.append({"name": name, "status": "PASS", "error": None,
+                                     "severity": sev, "ts": int(time.time() * 1000)})
+            print(f"[{self.tc_id}] OK {name}", flush=True)
+            _write_checkpoints(self.tc_id, self.checkpoints)
 
     def mark_passed(self, name):
         """Directly record a passed checkpoint."""
@@ -357,14 +385,18 @@ def _do_platform_login(browser, ats_config, platform_name):
     print(f"[{platform_name.upper()} LOGIN] Page loaded. URL: {page.url}", flush=True)
 
     # Generic login: works for both seller app and admin panel
-    # Try multiple selectors in priority order
+    # Try multiple selectors in priority order.
+    # NOTE: the dev seller login page renders TWO copies of the form (one hidden,
+    # a responsive duplicate). A bare .first can resolve to the HIDDEN copy, so we
+    # fill an empty form and the submit silently no-ops ("Still on login page after
+    # submit"). Scope every control to the VISIBLE one with .filter(visible=True).
     email_field = page.locator(
         'input[name="username"], input[type="email"], input[placeholder*="Email"], input[placeholder*="email"]'
-    ).first
-    password_field = page.locator('input[type="password"]').first
+    ).filter(visible=True).first
+    password_field = page.locator('input[type="password"]').filter(visible=True).first
     submit_btn = page.locator(
         'button[type="submit"], button:has-text("Sign In"), button:has-text("Sign in"), button:has-text("Log In"), button:has-text("Login")'
-    ).first
+    ).filter(visible=True).first
 
     # Wait for form with generous timeout (SPA may take time to render)
     print(f"[{platform_name.upper()} LOGIN] Waiting for login form...", flush=True)

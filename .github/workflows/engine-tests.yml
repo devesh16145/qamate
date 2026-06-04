@@ -1,0 +1,39 @@
+name: engine-tests
+
+# Offline regression net for the agent engine (engine/agent_chat.py, agent_eval.py …).
+# Pure / file-backed logic only — no browser, no LLM, no app under test — so it runs
+# fast on a stock runner with just `pip install -r requirements.txt` (no `playwright install`).
+
+on:
+  push:
+    paths:
+      - "engine/**"
+      - "requirements.txt"
+      - ".github/workflows/engine-tests.yml"
+  pull_request:
+    paths:
+      - "engine/**"
+      - "requirements.txt"
+  workflow_dispatch: {}
+
+jobs:
+  engine-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Module wiring (selftests)
+        run: |
+          python engine/agent_chat.py --selftest
+          python engine/agent_eval.py --selftest
+
+      - name: Engine unit suite
+        run: python -m pytest engine/tests -q

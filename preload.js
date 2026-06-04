@@ -12,19 +12,14 @@ contextBridge.exposeInMainWorld('ats', {
   openFile: (path) => ipcRenderer.invoke('open-file', path),
   openTrace: (path) => ipcRenderer.invoke('open-trace', path),
   getRunArtifacts: (runId) => ipcRenderer.invoke('get-run-artifacts', runId),
-  // ── Autonomous pipeline (projects, explore, PRD, synthesize) ──
+  setTitlebarTheme: (theme) => ipcRenderer.invoke('set-titlebar-theme', { theme }),
+  // ── Projects & secrets ──
   setSecret: (opts) => ipcRenderer.invoke('set-secret', opts),
   getSecretStatus: () => ipcRenderer.invoke('get-secret-status'),
   listProjects: () => ipcRenderer.invoke('list-projects'),
   createProject: (opts) => ipcRenderer.invoke('create-project', opts),
   setActiveProject: (opts) => ipcRenderer.invoke('set-active-project', opts),
   deleteProject: (opts) => ipcRenderer.invoke('delete-project', opts),
-  getAppModel: (opts) => ipcRenderer.invoke('get-app-model', opts),
-  getRequirements: (opts) => ipcRenderer.invoke('get-requirements', opts),
-  exploreApp: (opts) => ipcRenderer.invoke('explore-app', opts),
-  extractRequirements: (opts) => ipcRenderer.invoke('extract-requirements', opts),
-  synthesizeTests: (opts) => ipcRenderer.invoke('synthesize-tests', opts),
-  agentRecord: (opts) => ipcRenderer.invoke('agent-record', opts),
   captureLogin: (opts) => ipcRenderer.invoke('capture-login', opts),
   // ── Conversational AI agent (agent_chat.py): concurrent persisted sessions ──
   // Each call carries a sessionId; events arrive on 'agent-event' tagged with sessionId.
@@ -64,11 +59,6 @@ contextBridge.exposeInMainWorld('ats', {
   getPathForFile: (file) => {
     try { return webUtils && webUtils.getPathForFile ? webUtils.getPathForFile(file) : ((file && file.path) || ''); }
     catch (e) { return (file && file.path) || ''; }
-  },
-  onAutopilotProgress: (callback) => {
-    const handler = (_, data) => callback(data);
-    ipcRenderer.on('autopilot-progress', handler);
-    return () => ipcRenderer.removeListener('autopilot-progress', handler);
   },
   getRunCheckpoints: (runId) => ipcRenderer.invoke('get-run-checkpoints', runId),
   getRunNetwork: (runId) => ipcRenderer.invoke('get-run-network', runId),

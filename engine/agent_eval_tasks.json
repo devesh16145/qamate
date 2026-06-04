@@ -1,0 +1,9 @@
+{
+  "_note": "Task list for agent_eval.py — the tests whose reliability we track. Each runs K times against the live app (target env must be reachable + project must have a captured login). Edit freely; add the tests the agent delivers. Run: venv\\Scripts\\python engine\\agent_eval.py --tasks engine\\agent_eval_tasks.json --runs 3",
+  "tasks": [
+    { "flow_id": "sign_in", "tc_id": "TC-SIGNIN-001" },
+    { "flow_id": "catalog", "tc_id": "TC-CATALOG-001" },
+    { "flow_id": "catalog", "tc_id": "TC-CATALOG-002" },
+    { "flow_id": "catalog", "tc_id": "TC-CATALOG-003" }
+  ]
+}

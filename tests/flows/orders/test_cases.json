@@ -2,5 +2,214 @@
     {
         "tc_id": "TC-ORDERS-001",
         "description": "Create Inv PO"
+    },
+    {
+        "tc_id": "TC-ORDERS-002",
+        "description": "Verify Orders page loads with status tabs, filtering by New tab, keyword search, and expanded More filters",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"link\", name=\"Orders\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"Orders\")",
+                "targetDescription": "Click Orders",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 3,
+                "rawLine": "page.get_by_role(\"button\", name=\"2\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"2\")",
+                "targetDescription": "Click 2",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 4,
+                "rawLine": "page.get_by_role(\"button\", name=\"Clear All\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Clear All\")",
+                "targetDescription": "Click Clear All",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 5,
+                "rawLine": "page.get_by_role(\"button\", name=\"New\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"New\")",
+                "targetDescription": "Click New",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 6,
+                "rawLine": "page.get_by_placeholder(\"Search Product Name, SKU, Brand\").fill(\"PO\")",
+                "type": "fill",
+                "target": "page.get_by_placeholder(\"Search Product Name, SKU, Brand\")",
+                "targetDescription": "Enter \"PO\" in search-product-name-sku-brand",
+                "value": "PO",
+                "varName": "input_1"
+            },
+            {
+                "id": 7,
+                "rawLine": "page.get_by_role(\"button\", name=\"More\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"More\")",
+                "targetDescription": "Click More",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 8,
+                "rawLine": "page.get_by_placeholder(\"Search Product Name, SKU, Brand\").fill(\"\")",
+                "type": "fill",
+                "target": "page.get_by_placeholder(\"Search Product Name, SKU, Brand\")",
+                "targetDescription": "Enter \"\" in search-product-name-sku-brand",
+                "value": "",
+                "varName": "input_2"
+            },
+            {
+                "id": 9,
+                "rawLine": "page.get_by_role(\"button\", name=\"All Orders\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"All Orders\")",
+                "targetDescription": "Click All Orders",
+                "value": "",
+                "varName": ""
+            }
+        ],
+        "preconditions": "User is logged in to Agrim Seller Dashboard",
+        "expected_result": "Orders page loads with all status tabs visible (All Orders, New, Accepted, Packed, Ready for Dispatch, Picked Up, Dispatched, Rejected, Cancelled). Clicking New tab filters to new orders with Accept/Reject buttons. Search filters orders by keyword. More filter expands to show Warehouses, Payment Status, and Doc Status options.",
+        "assertions": [
+            {
+                "type": "page_contains_text",
+                "value": "New",
+                "afterStep": 5,
+                "description": "New orders tab active and filtered"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "PO",
+                "afterStep": 6,
+                "description": "Search results filtered by keyword"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Warehouses",
+                "afterStep": 7,
+                "description": "More filters expand showing additional options"
+            }
+        ]
+    },
+    {
+        "tc_id": "TC-ORDERS-003",
+        "description": "Full PO Lifecycle - New to Picked Up: Accept a new order, pack it, mark ready, and mark picked up through all seller-actionable stages",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/orders\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/orders",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/orders",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"button\", name=\"New\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"New\")",
+                "targetDescription": "Click New",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 3,
+                "rawLine": "page.get_by_role(\"button\", name=\"Accept\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Accept\")",
+                "targetDescription": "Click Accept",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 4,
+                "rawLine": "page.get_by_role(\"button\", name=\"Pack\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Pack\")",
+                "targetDescription": "Click Pack",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 5,
+                "rawLine": "page.get_by_role(\"button\", name=\"Ready\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Ready\")",
+                "targetDescription": "Click Ready",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 6,
+                "rawLine": "page.get_by_role(\"button\", name=\"Picked Up\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Picked Up\")",
+                "targetDescription": "Click Picked Up",
+                "value": "",
+                "varName": ""
+            }
+        ],
+        "preconditions": "Seller is logged in. At least one New order exists.",
+        "expected_result": "Order progresses through New \u2192 Accepted \u2192 Packed \u2192 Ready for Dispatch \u2192 Picked Up stages with correct action buttons visible at each stage.",
+        "assertions": [
+            {
+                "type": "page_contains_text",
+                "value": "All Orders",
+                "afterStep": 1,
+                "description": "Orders page loaded"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Reject",
+                "afterStep": 2,
+                "description": "New orders tab active with Accept/Reject buttons"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Pack",
+                "afterStep": 3,
+                "description": "Order accepted - Accepted tab with Pack buttons"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Ready Proof",
+                "afterStep": 4,
+                "description": "Order packed - Packed tab with Ready Proof and Ready buttons"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Picked Up",
+                "afterStep": 5,
+                "description": "Order Ready for Dispatch - Picked Up button available"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Invoice",
+                "afterStep": 6,
+                "description": "Order Picked Up - final seller stage with Invoice upload available"
+            }
+        ]
     }
 ]
