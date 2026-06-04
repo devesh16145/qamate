@@ -9,8 +9,9 @@ def test_TC_SIGNIN_001_page_loads(page: Page, base_url):
     """Verify Sign In page loads with email and password fields."""
     page.goto(base_url + "login", wait_until="domcontentloaded")
 
-    email_field = page.locator('input[type="email"], input[placeholder*="Email"]').first
-    password_field = page.locator('input[type="password"]').first
+    # The dev login page renders two copies of the form (one hidden); target the visible one.
+    email_field = page.locator('input[type="email"], input[placeholder*="Email"]').filter(visible=True).first
+    password_field = page.locator('input[type="password"]').filter(visible=True).first
 
     expect(email_field).to_be_visible(timeout=15000)
     expect(password_field).to_be_visible(timeout=5000)
@@ -21,7 +22,7 @@ def test_TC_SIGNIN_002_button_disabled(page: Page, base_url):
     """Verify Sign In button is disabled when fields are empty."""
     page.goto(base_url + "login", wait_until="domcontentloaded")
 
-    sign_in_button = page.locator('button:has-text("Sign In"), button[type="submit"]').first
+    sign_in_button = page.locator('button:has-text("Sign In"), button[type="submit"]').filter(visible=True).first
     # Wait for the button to be present in DOM first
     sign_in_button.wait_for(state="visible", timeout=15000)
     expect(sign_in_button).to_be_disabled()

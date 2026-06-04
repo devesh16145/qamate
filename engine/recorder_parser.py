@@ -102,6 +102,11 @@ def _describe_css(sel):
 
 def _step_comment(stype, desc, value=""):
     """Generate a human-readable comment for a step."""
+    # Comments must be single-line; collapse any newlines/tabs in the description/value
+    # (a multi-line label like "New\n100" would otherwise split the comment and indent
+    # the stray text -> IndentationError).
+    desc = re.sub(r"\s+", " ", str(desc)).strip()
+    value = re.sub(r"\s+", " ", str(value)).strip()
     if stype == "navigate":
         return f"Navigate to {desc}"
     elif stype == "fill":
@@ -643,6 +648,16 @@ def generate_from_review(payload, ats_root):
 
     flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
     os.makedirs(flow_dir, exist_ok=True)
+    # Every flow must be a Python package (like the hand-written flows) so pytest imports
+    # it consistently when collecting the whole tests/ tree, not just when pointed at the
+    # one folder. The agent used to skip this, leaving agent flows without __init__.py.
+    init_py = os.path.join(flow_dir, "__init__.py")
+    if not os.path.exists(init_py):
+        try:
+            with open(init_py, "w", encoding="utf-8") as _f:
+                _f.write("")
+        except Exception:
+            pass
 
     # ── Edit mode: only update JSON metadata, don't regenerate test code ──
     edit_mode = payload.get("editMode", False)
@@ -718,6 +733,14 @@ def generate_from_review(payload, ats_root):
         stype = step.get("type", "other")
         raw = step.get("rawLine", "")
         desc = step.get("targetDescription", "")
+        # A recorded element name/value can contain literal newlines/tabs — e.g. a tab
+        # label stacked over a count badge gives the accessible name "New\n100". Emitting
+        # that raw into the .py puts a literal newline INSIDE a string literal == a
+        # SyntaxError, and ONE bad test file aborts pytest collection for the WHOLE suite
+        # (every test then "runs in 2s with no browser"). Escape control chars in the code
+        # line so it stays valid; collapse them to single spaces in the human comment.
+        raw = raw.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+        desc = re.sub(r"\s+", " ", desc).strip()
 
         # ── Handle "select all" collapsed runs ──
         run_info = select_all_runs.get(sid)
@@ -859,7 +882,12 @@ def generate_from_review(payload, ats_root):
                 raw = raw.replace('.dblclick()', '.dblclick(force=True)')
 
         # ── Comment ──
-        test_lines.append(f"    # Step {sid}: {_step_comment(stype, desc, step.get('value', ''))}")
+        _cp_label = f"Step {sid}: {_step_comment(stype, desc, step.get('value', ''))}"
+        test_lines.append(f"    # {_cp_label}")
+        # Capture the lines this step emits so they can be wrapped in a per-step
+        # checkpoint at the end of the iteration — the execution timeline then shows a
+        # row per step (PASS, or FAIL+error) even when the flow dies mid-way.
+        _emit_start = len(test_lines)
 
         # ── Generate code ──
         if stype == "scroll":
@@ -868,7 +896,14 @@ def generate_from_review(payload, ats_root):
             test_lines.append("    page.wait_for_timeout(500)")
         elif stype == "navigate":
             test_lines.append(f"    {raw}")
-            test_lines.append('    page.wait_for_load_state("networkidle")')
+            # Settle briefly, but NEVER block on full network idle: SPAs (this app
+            # included) hold connections open, so a bare wait_for_load_state("networkidle")
+            # can hang for the entire timeout. Bound it and swallow timeouts; the
+            # web-first expect(...) assertions below do the real waiting.
+            test_lines.append('    try:')
+            test_lines.append('        page.wait_for_load_state("networkidle", timeout=5000)')
+            test_lines.append('    except Exception:')
+            test_lines.append('        pass')
         else:
             # Check if this is a click followed by a file upload
             is_file_chooser_trigger = False
@@ -1036,10 +1071,21 @@ def generate_from_review(payload, ats_root):
         # Per-step assertions
         for a in assertions_by_step.get(sid, []):
             a_code = _generate_assertion_code(a)
-            a_desc = a.get("description", a.get("type", "assertion"))
+            a_desc = re.sub(r"\s+", " ", str(a.get("description", a.get("type", "assertion")))).strip()
             test_lines.append(f"    # Verify: {a_desc}")
             for a_line in a_code.split('\n'):
                 test_lines.append(f"    {a_line}")
+
+        # Wrap everything this step emitted (its actions + verifies) in a per-step
+        # checkpoint so the execution timeline records the step — PASS, or FAIL with the
+        # error — even when the test dies mid-flow. (Special multi-line emits like download
+        # with-blocks / select-all loops `continue` earlier and are intentionally not wrapped.)
+        _body = test_lines[_emit_start:]
+        if any(_l.strip() for _l in _body):
+            del test_lines[_emit_start:]
+            test_lines.append("    with checkpoints.step(" + json.dumps(_cp_label) + "):")
+            for _l in _body:
+                test_lines.append(("    " + _l) if _l.strip() else _l)
 
     # Final wait before ending the test
     test_lines.append("")
@@ -1052,7 +1098,7 @@ def generate_from_review(payload, ats_root):
         test_lines.append("    # ── Success / Failure Criteria ──")
         for c in criteria:
             c_code = _generate_assertion_code(c)
-            c_desc = c.get("description", c.get("type", "criteria"))
+            c_desc = re.sub(r"\s+", " ", str(c.get("description", c.get("type", "criteria")))).strip()
             test_lines.append(f"    # {c_desc}")
             for c_line in c_code.split('\n'):
                 test_lines.append(f"    {c_line}")
@@ -1061,8 +1107,27 @@ def generate_from_review(payload, ats_root):
     underscored_id = tc_id.replace("-", "_")
     func_name = f"test_{underscored_id}"
 
+    # Use an AUTHENTICATED page fixture so generated tests log in like the hand-written
+    # ones do. The agent never records login steps (auth is the runner's job), and raw
+    # `page` only gets a possibly-stale captured storage_state -> it lands on the login
+    # screen ("opens the app but never logs in"). seller_page / admin_page perform a fresh
+    # login with the configured creds and return an authenticated page, which we alias to
+    # `page` so the recorded body is unchanged.
+    _flow_blob = " ".join((str(s.get("rawLine", "")) + " " + str(s.get("target", ""))) for s in steps)
+    # If the recording INCLUDES its own login (navigates to /login and/or types a
+    # password), keep raw `page` so it logs itself in. Otherwise hand back an already
+    # authenticated page (the runner's job) via seller_page / admin_page.
+    _records_login = ("password" in _flow_blob.lower()) or bool(re.search(r"goto\([^)]*login", _flow_blob))
+    if _records_login:
+        page_fixture = "page"
+    elif ("admin-dev" in _flow_blob or "admin-staging" in _flow_blob
+          or "admin_url" in _flow_blob or "//admin" in _flow_blob):
+        page_fixture = "admin_page"
+    else:
+        page_fixture = "seller_page"
+
     func_code = f'\n\n@pytest.mark.tc("{tc_id}")\n'
-    func_code += f'def {func_name}(page: Page, tc_data, base_url, admin_url, checkpoints):\n'
+    func_code += f'def {func_name}({page_fixture}: Page, tc_data, base_url, admin_url, checkpoints):\n'
     docstring = f'    """{description}'
     if preconditions:
         docstring += f'\n\n    Preconditions: {preconditions}'
@@ -1070,10 +1135,15 @@ def generate_from_review(payload, ats_root):
         docstring += f'\n\n    Expected Result: {expected_result}'
     docstring += '\n    """'
     
-    full_func = func_code + docstring + "\n" + "\n".join(test_lines)
+    # Alias the authenticated fixture to `page` so the recorded steps (page.goto/click/…)
+    # run on the logged-in page without rewriting the whole body.
+    page_alias = f"    page = {page_fixture}\n" if page_fixture != "page" else ""
+    full_func = func_code + docstring + "\n" + page_alias + "\n".join(test_lines)
     
-    # Register that the main flow passed
-    full_func += "\n    checkpoints.mark_passed(\"Flow executed successfully\")\n"
+    # Each recorded step is now its own checkpoint (checkpoints.step above), so the
+    # per-step timeline IS the record. Close with a final marker — only reached when the
+    # flow ran all the way through (every step passed).
+    full_func += '\n    checkpoints.mark_passed("Flow completed - all steps passed")\n'
 
     # Write to test file
     test_py = os.path.join(flow_dir, f"test_{flow_id}.py")
@@ -1095,7 +1165,13 @@ def generate_from_review(payload, ats_root):
             r'\(.*?)(?=\n\n@pytest\.mark|\Z)'
         )
         new_func = full_func.rstrip()
-        existing = re.sub(pattern, new_func, existing, flags=re.DOTALL)
+        # IMPORTANT: pass the replacement as a FUNCTION, not a string. A string
+        # replacement makes re.sub interpret backslashes (\n -> newline, \1 -> group
+        # ref, \g<..> etc.) inside the generated code — which would turn an escaped
+        # name like "New\n100" back into a real newline (re-breaking the file) and
+        # corrupt regex assertions like re.compile(...). A function replacement is
+        # inserted literally.
+        existing = re.sub(pattern, lambda _m: new_func, existing, flags=re.DOTALL)
         with open(test_py, "w", encoding="utf-8") as f:
             f.write(existing)
     else:

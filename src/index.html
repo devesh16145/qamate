@@ -921,7 +921,9 @@ function DataBridge() {
                     skipped: h.skipped || 0,
                     flaky: h.flaky || 0,
                     warnings: h.warnings || 0,
-                    duration: parseFloat(h.duration) || 0,
+                    // Prefer the numeric duration_s; h.duration is a display string like
+                    // "2m 13s" and parseFloat would wrongly yield 2.0s for a 133s run.
+                    duration: (typeof h.duration_s === 'number' ? h.duration_s : parseFloat(h.duration)) || 0,
                     // run_metadata.status is "Completed"/"Stopped"; derive pass/fail from counts
                     status: h.status === 'Stopped' ? 'fail' : (failedN > 0 ? 'fail' : (passedN > 0 ? 'pass' : 'fail')),
                     // Authoritative per-test results embedded by the runner (JUnit-derived)
@@ -981,11 +983,10 @@ function App() {
   useEffect(() => { window.openTabGlobal = openTab; }, [openTab]);
   useEffect(() => { window.openCoverageTab = openCoverageTab; }, [openCoverageTab]);
   useEffect(() => { window.openReviewTab = openReviewTab; }, [openReviewTab]);
-  useEffect(() => { window.openAutopilotTab = openAutopilotTab; }, [openAutopilotTab]);
   useEffect(() => { window.showSaveToast = toast; }, [toast]);
   // Theme
   const [theme, setTheme] = useState('light');
-  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => { document.documentElement.dataset.theme = theme; if (window.ats && window.ats.setTitlebarTheme) window.ats.setTitlebarTheme(theme); }, [theme]);
 
   // Layout / tool windows
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -1121,15 +1122,6 @@ function App() {
   }, []);
 
   // Open the Autopilot (autonomous pipeline) tab — one per active project
-  const openAutopilotTab = useCallback((projectId, projectName) => {
-    const id = 'autopilot';
-    setTabs(prev => {
-      if (prev.find(t => t.id === id)) return prev.map(t => t.id === id ? { ...t, projectId, projectName } : t);
-      return [...prev, { kind: 'autopilot', id, projectId: projectId || null, projectName }];
-    });
-    setActiveTab(id);
-  }, []);
-
   const closeTab = useCallback((tabId) => {
     setTabs(prev => {
       const idx = prev.findIndex(t => t.id === tabId);
@@ -1570,9 +1562,6 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
       <div className="tb-group" style={{ marginLeft: 4 }}>
         <button className="tb-icon-btn" title="Search everywhere ⌘K" onClick={onOpenCmd}>
           <I.Search size={15} />
-        </button>
-        <button className="tb-icon-btn" title="Autopilot — explore your app + PRD → self-healing tests" onClick={() => window.openAutopilotTab ? window.openAutopilotTab(null) : toast('Autopilot unavailable')}>
-          <I.Sparkle size={15} />
         </button>
         <button className="tb-icon-btn" title="AI Agent — dock/undock the agent panel on the right (persistent, resumable sessions)" onClick={() => { if (window.toggleAgentDock) window.toggleAgentDock(); }}>
           <I.MessageSquare size={15} />
@@ -2150,241 +2139,6 @@ window.nowTs = nowTs;
 /* ──────────────────────────────────────────────────────────────
    Editor Area — tabs + content
    ────────────────────────────────────────────────────────────── */
-/* ──────────────────────────────────────────────────────────────
-   Autopilot — the autonomous pipeline (Explore → PRD → Synthesize → Run)
-   for one Project. Opened as a workspace tab.
-   ────────────────────────────────────────────────────────────── */
-function AutopilotView({ projectId, toast }) {
-  const [projects, setProjects] = React.useState([]);
-  const [active, setActive] = React.useState(null);
-  const [stage, setStage] = React.useState('');          // '' | 'explore' | 'prd' | 'synth' | 'run'
-  const [log, setLog] = React.useState([]);
-  const [appModel, setAppModel] = React.useState(null);
-  const [requirements, setRequirements] = React.useState(null);
-  const [synth, setSynth] = React.useState(null);
-  const [prdText, setPrdText] = React.useState('');
-  const [provider, setProvider] = React.useState('mimo');
-  const [newName, setNewName] = React.useState('');
-  const [newUrl, setNewUrl] = React.useState('');
-  const [goal, setGoal] = React.useState('');
-  const [username, setUsername] = React.useState('');
-  const [password, setPassword] = React.useState('');
-  const [agentResult, setAgentResult] = React.useState(null);
-  const [headed, setHeaded] = React.useState(false);  // show the browser while exploring
-
-  const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'flow';
-  const logLine = (m) => setLog(prev => [...prev.slice(-200), m]);
-
-  const loadArtifacts = React.useCallback(async (pid) => {
-    if (!pid) return;
-    setAppModel(await window.ats.getAppModel({ projectId: pid }));
-    setRequirements(await window.ats.getRequirements({ projectId: pid }));
-  }, []);
-
-  const refreshProjects = React.useCallback(async (preferId) => {
-    const res = await window.ats.listProjects();
-    const list = (res && res.projects) || [];
-    setProjects(list);
-    const pick = list.find(p => p.id === (preferId || projectId || (res && res.active))) || list[0] || null;
-    setActive(pick);
-    if (pick) loadArtifacts(pick.id);
-  }, [projectId, loadArtifacts]);
-
-  React.useEffect(() => { refreshProjects(); }, [refreshProjects]);
-  React.useEffect(() => {
-    const off = window.ats.onAutopilotProgress(d => logLine(d.message));
-    return () => { if (off) off(); };
-  }, []);
-
-  const createProject = async () => {
-    if (!newName.trim() || !newUrl.trim()) { toast && toast('Enter a name and URL'); return; }
-    const res = await window.ats.createProject({ name: newName.trim(), baseUrl: newUrl.trim() });
-    if (res && res.project) { setNewName(''); setNewUrl(''); await window.ats.setActiveProject({ projectId: res.project.id }); refreshProjects(res.project.id); toast && toast('Project created'); }
-    else toast && toast('Could not create project');
-  };
-  const pickProject = async (id) => { await window.ats.setActiveProject({ projectId: id }); setSynth(null); refreshProjects(id); };
-
-  const runStage = async (name, fn, after) => {
-    setStage(name); setLog([]);
-    try { const res = await fn(); if (res && res.status === 'error') { toast && toast(res.message || 'failed'); } else if (after) await after(res); }
-    catch (e) { toast && toast(String(e)); }
-    finally { setStage(''); }
-  };
-  const doExplore = () => runStage('explore', () => window.ats.exploreApp({ projectId: active.id, maxPages: 40, maxDepth: 2, headed }), () => loadArtifacts(active.id));
-  const doExtract = () => runStage('prd', () => window.ats.extractRequirements({ projectId: active.id, prdText, provider }), () => loadArtifacts(active.id));
-  const doSynth = () => runStage('synth', () => window.ats.synthesizeTests({ projectId: active.id, flowId: slug(active.name), provider }), (res) => setSynth(res));
-  const doAgentRecord = () => runStage('agent',
-    () => window.ats.agentRecord({ projectId: active.id, goal, username, password, provider, flowId: slug(active.name), maxSteps: 14, headed }),
-    (res) => { setAgentResult(res); if (res && res.status === 'success') toast && toast(`Recorded ${res.tc_id} — reload to see it in the test tree, or Run it.`); });
-  const runAgentTest = () => {
-    if (agentResult && agentResult.tc_id) {
-      window.ats.runTests({ tc_ids: [agentResult.tc_id], project_id: active.id, mode: 'headless', env: 'dev' });
-      toast && toast('Running — watch the Live Log / Results');
-    }
-  };
-  const doRun = async () => {
-    if (!synth || !synth.tc_ids || !synth.tc_ids.length) return;
-    await window.ats.runTests({ tc_ids: synth.tc_ids, project_id: active.id, mode: 'headless', env: 'dev' });
-    toast && toast(`Running ${synth.tc_ids.length} test(s) — watch the Live Log / Results`);
-  };
-
-  const busy = (s) => stage === s;
-  const anyBusy = !!stage;
-
-  // ── No project yet: create / pick ──
-  if (!active) {
-    return (
-      <div className="results-view"><div className="results-content" style={{ maxWidth: 720 }}>
-        <header className="rv-hero"><div className="rv-hero-l">
-          <h1 className="rv-hero-title" style={{ fontSize: 22 }}>Autopilot</h1>
-          <div className="rv-hero-meta"><span className="rv-meta">Point the tool at your app, give it a PRD, get self-healing tests.</span></div>
-        </div></header>
-        <section className="rv-block">
-          <div className="rv-block-head"><h3 className="rv-block-title">New project</h3></div>
-          <div className="field"><label>Name</label><input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Acme App" /></div>
-          <div className="field"><label>Base URL</label><input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://app.acme.com" /></div>
-          <button className="rv-cta primary" onClick={createProject}><I.Plus size={13} /> Create project</button>
-        </section>
-        {projects.length > 0 && (
-          <section className="rv-block">
-            <div className="rv-block-head"><h3 className="rv-block-title">Existing projects</h3><span className="rv-block-count">{projects.length}</span></div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {projects.map(p => (
-                <button key={p.id} className="rv-tl-row" onClick={() => pickProject(p.id)}>
-                  <I.Box size={13} /><span className="tc-id">{p.id}</span>
-                  <span className="rv-tl-title">{p.name}</span><span style={{ flex: 1 }}></span>
-                  <span className="rv-tl-mod">{(p.environments && p.environments[p.default_environment]) || ''}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-      </div></div>
-    );
-  }
-
-  const StageCard = ({ n, title, done, children }) => (
-    <section className="rv-block">
-      <div className="rv-block-head">
-        <h3 className="rv-block-title"><span style={{ color: 'var(--accent)', fontFamily: 'var(--mono)', marginRight: 8 }}>{n}</span>{title}</h3>
-        {done && <span className="rv-block-count" style={{ background: 'var(--accent-bg)', color: 'var(--accent)' }}>✓</span>}
-      </div>
-      {children}
-    </section>
-  );
-
-  return (
-    <div className="results-view"><div className="results-content">
-      <header className="rv-hero"><div className="rv-hero-l">
-        <div className="rv-hero-eyebrow"><span className="rv-status-pill pass"><span className="dot"></span>Autopilot</span></div>
-        <h1 className="rv-hero-title" style={{ fontSize: 22 }}>{active.name}</h1>
-        <div className="rv-hero-meta">
-          <span className="rv-meta"><I.GitMerge size={12} /> {(active.environments && active.environments[active.default_environment]) || ''}</span>
-          <span className="rv-meta"><I.Box size={12} /> {active.id}</span>
-          {projects.length > 1 && (
-            <select value={active.id} onChange={e => pickProject(e.target.value)} style={{ fontSize: 11, padding: '2px 6px' }}>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          )}
-          <select value={provider} onChange={e => setProvider(e.target.value)} title="LLM provider" style={{ fontSize: 11, padding: '2px 6px' }}>
-            <option value="mimo">Xiaomi MiMo</option><option value="anthropic">Claude</option><option value="openai">OpenAI</option><option value="ollama">Local</option><option value="mock">No LLM (scaffold)</option>
-          </select>
-        </div>
-        <div className="rv-hero-actions">
-          <button className="rv-cta" onClick={() => window.ats.captureLogin({ projectId: active.id, url: (active.environments && active.environments[active.default_environment]) })}><I.User size={13} /> Capture login</button>
-          <button className="rv-cta" onClick={() => { setActive(null); }}><I.Folder size={13} /> Switch project</button>
-        </div>
-      </div></header>
-
-      <section className="rv-block" style={{ borderColor: 'var(--accent)' }}>
-        <div className="rv-block-head">
-          <h3 className="rv-block-title"><span style={{ color: 'var(--accent)', marginRight: 8 }}>★</span>Autonomous record — AI drives the app</h3>
-          {agentResult && agentResult.status === 'success' && <span className="rv-block-count" style={{ background: 'var(--accent-bg)', color: 'var(--accent)' }}>✓</span>}
-        </div>
-        <p style={{ fontSize: 11.5, color: 'var(--text-2)', margin: '0 0 8px' }}>
-          The AI logs in, explores, and records a real test case into the <b>{slug(active.name)}</b> flow — same format as a manual recording, runnable + traceable + variant-ready. No PRD required.
-        </p>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Login username (optional)" style={{ flex: 1 }} />
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password (optional)" style={{ flex: 1 }} />
-        </div>
-        <textarea value={goal} onChange={e => setGoal(e.target.value)}
-          placeholder="What should it test? e.g. 'Create a new product and verify it appears in the catalog'. Leave blank to exercise the main happy-path flow."
-          style={{ width: '100%', minHeight: 60, fontFamily: 'var(--mono)', fontSize: 11.5, padding: 8, marginBottom: 8 }} />
-        <button className="rv-cta primary" disabled={anyBusy} onClick={doAgentRecord}>{busy('agent') ? 'Recording…' : '▶ Explore & Record'}</button>
-        <label style={{ marginLeft: 12, fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none' }}>
-          <input type="checkbox" checked={headed} onChange={e => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
-          Watch live (show the browser)
-        </label>
-        {agentResult && agentResult.status === 'success' && (
-          <span style={{ marginLeft: 12, fontSize: 11.5, color: 'var(--text-2)' }}>
-            Recorded <span className="tc-id">{agentResult.tc_id}</span> · {agentResult.recorded_steps} steps · {agentResult.checkpoints} checkpoint(s)
-            <button className="rv-cta" style={{ marginLeft: 10 }} onClick={runAgentTest}><I.Play size={12} /> Run it</button>
-          </span>
-        )}
-        {agentResult && agentResult.status === 'error' && <span style={{ marginLeft: 12, fontSize: 11.5, color: 'var(--fail)' }}>{agentResult.message}</span>}
-      </section>
-
-      <p style={{ fontSize: 10.5, color: 'var(--text-3)', margin: '4px 2px' }}>Or use the PRD-driven path below (explore → extract requirements → synthesize):</p>
-
-      <StageCard n="1" title="Explore the app" done={!!appModel}>
-        <p style={{ fontSize: 11.5, color: 'var(--text-2)', margin: '0 0 8px' }}>Crawl the app and build a self-healing element map. Capture a login first if it needs auth.</p>
-        <button className="rv-cta primary" disabled={anyBusy} onClick={doExplore}>{busy('explore') ? 'Exploring…' : (appModel ? 'Re-explore' : 'Explore app')}</button>
-        {appModel && (
-          <span style={{ marginLeft: 12, fontSize: 11.5, color: 'var(--text-2)' }}>
-            {appModel.page_count} pages · {appModel.element_count} elements
-            {appModel.hidden_count > 0 && <span> · {appModel.hidden_count} hidden</span>}
-            {appModel.issues_count > 0 && <span style={{ color: 'var(--fail)' }}> · ⚠ {appModel.issues_count} breakage issue(s)</span>}
-          </span>
-        )}
-      </StageCard>
-
-      <StageCard n="2" title="Requirements from PRD" done={!!(requirements && requirements.count)}>
-        <textarea value={prdText} onChange={e => setPrdText(e.target.value)} placeholder="Paste your PRD (markdown). Leave blank to re-use a previously imported one."
-          style={{ width: '100%', minHeight: 90, fontFamily: 'var(--mono)', fontSize: 11.5, padding: 8, marginBottom: 8 }} />
-        <button className="rv-cta primary" disabled={anyBusy} onClick={doExtract}>{busy('prd') ? 'Extracting…' : 'Extract requirements'}</button>
-        {requirements && requirements.count > 0 && (
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{requirements.count} requirement(s) · refined by {requirements.refined_by}</span>
-            {(requirements.requirements || []).slice(0, 12).map(r => (
-              <div key={r.id} style={{ display: 'flex', gap: 8, fontSize: 11.5, alignItems: 'baseline' }}>
-                <span className="tc-id" style={{ minWidth: 120 }}>{r.id}</span>
-                <span style={{ fontSize: 9.5, color: 'var(--accent)' }}>{r.priority}</span>
-                <span style={{ color: 'var(--text-1)' }}>{r.statement}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </StageCard>
-
-      <StageCard n="3" title="Synthesize self-healing tests" done={!!synth}>
-        <p style={{ fontSize: 11.5, color: 'var(--text-2)', margin: '0 0 8px' }}>Map requirements onto real elements and generate tests that survive UI drift.</p>
-        <button className="rv-cta primary" disabled={anyBusy || !appModel || !(requirements && requirements.count)} onClick={doSynth}>{busy('synth') ? 'Synthesizing…' : 'Synthesize tests'}</button>
-        {synth && (
-          <div style={{ marginTop: 10 }}>
-            <span style={{ fontSize: 11.5, color: 'var(--text-2)' }}>{synth.count} test(s) generated{synth.coverage_gaps && synth.coverage_gaps.length ? ` · ${synth.coverage_gaps.length} coverage gap(s)` : ''}{synth.llm ? '' : ' · scaffold (no LLM key)'}</span>
-            <div style={{ marginTop: 8 }}>
-              <button className="rv-cta primary" disabled={anyBusy} onClick={doRun}><I.Play size={13} /> Run {synth.tc_ids ? synth.tc_ids.length : ''} test(s)</button>
-            </div>
-          </div>
-        )}
-      </StageCard>
-
-      {(anyBusy || log.length > 0) && (
-        <section className="rv-block">
-          <div className="rv-block-head"><h3 className="rv-block-title">Activity</h3>{anyBusy && <span className="live-dot"></span>}</div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--text-2)', maxHeight: 200, overflow: 'auto', background: 'var(--bg-2, var(--bg))', padding: 8, borderRadius: 4 }}>
-            {log.slice(-80).map((l, i) => <div key={i}>{l}</div>)}
-          </div>
-        </section>
-      )}
-    </div></div>
-  );
-}
-
-
-
-
 function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLines, running, execMode, headless, runProgress, onOpenCmd, onRun, toast, checkedCount, history, trend, onCreateBug, openTab, openCoverageTab, openReviewTab }) {
   const active = tabs.find(t => t.id === activeTab) || tabs[0];
 
@@ -2413,17 +2167,6 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
                 <span className={`status-dot ${run ? run.status : 'pass'}`}></span>
                 <I.BarChart size={12} className="ic" />
                 <span>{label}</span>
-                <button className="close" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>
-                  <I.X size={10} />
-                </button>
-              </div>
-            );
-          }
-          if (t.kind === 'autopilot') {
-            return (
-              <div key={t.id} className={`tab${isActive ? ' active' : ''}`} onClick={() => setActiveTab(t.id)}>
-                <I.Zap size={12} className="ic" style={{ color: 'var(--accent)' }} />
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>Autopilot{t.projectName ? ` — ${t.projectName}` : ''}</span>
                 <button className="close" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>
                   <I.X size={10} />
                 </button>
@@ -2480,9 +2223,6 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
         )}
         {active && active.kind === 'tc' && (
           <TestCaseView tabId={active.id} view={active.view} setTabView={setTabView} toast={toast} openCoverageTab={openCoverageTab} openReviewTab={openReviewTab} />
-        )}
-        {active && active.kind === 'autopilot' && (
-          <AutopilotView projectId={active.projectId} toast={toast} />
         )}
         {active && active.kind === 'coverage' && (
           <CoverageModal tcId={active.tcId} flowId={active.flowId} description={active.description} onClose={() => closeTab(active.id)} toast={toast} isTab={true} />

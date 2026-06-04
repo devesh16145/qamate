@@ -430,17 +430,17 @@
   --text-2: #45454d;
   --text-3: #76767e;
   --text-4: #a3a3aa;
-  --accent: oklch(48% 0.18 285);
+  --accent: oklch(50% 0.132 280);
   --accent-bg: oklch(96% 0.025 285);
-  --accent-bd: oklch(85% 0.08 285);
-  --pass: oklch(55% 0.13 145);
+  --accent-bd: oklch(86% 0.06 280);
+  --pass: oklch(56% 0.105 150);
   --pass-bg: oklch(94% 0.05 145);
-  --fail: oklch(55% 0.20 28);
+  --fail: oklch(57% 0.145 27);
   --fail-bg: oklch(94% 0.06 28);
-  --skip: oklch(65% 0.10 75);
+  --skip: oklch(66% 0.085 78);
   --skip-bg: oklch(94% 0.05 75);
-  --warn: oklch(68% 0.14 60);
-  --pin: oklch(65% 0.16 50);
+  --warn: oklch(69% 0.115 65);
+  --pin: oklch(66% 0.125 52);
   --selection: oklch(85% 0.08 235);
   --selection-bd: oklch(70% 0.14 235);
   --font: "Inter Tight", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -465,9 +465,9 @@
   --text-2: #a9abaf;
   --text-3: #7c7e83;
   --text-4: #5b5d62;
-  --accent: oklch(72% 0.14 285);
+  --accent: oklch(73% 0.108 280);
   --accent-bg: oklch(32% 0.08 285);
-  --accent-bd: oklch(42% 0.12 285);
+  --accent-bd: oklch(44% 0.09 280);
   --pass-bg: oklch(28% 0.08 145);
   --fail-bg: oklch(28% 0.12 28);
   --skip-bg: oklch(28% 0.06 75);
@@ -484,6 +484,7 @@ body {
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   overflow: hidden;
   letter-spacing: -0.01em;
   padding: 0;
@@ -513,7 +514,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .titlebar {
   display: flex; align-items: center; gap: 0;
   height: 44px;
-  padding: 0 4px;
+  /* Right space reserved for the native min/max/close overlay (Windows ~140px); the
+     left stays tight. The titlebar IS the OS title-bar row now (titleBarStyle:hidden). */
+  padding: 0 140px 0 4px;
   background: var(--tool);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -576,7 +579,7 @@ input, select, textarea { font: inherit; color: inherit; }
   width: 22px; height: 22px;
   border-radius: 5px;
   background: var(--accent); color: white;
-  display: grid; place-items: center; font-weight: 700;
+  display: grid; place-items: center; font-weight: 600;
   font-size: 11px;
   letter-spacing: -0.02em;
 }
@@ -650,7 +653,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--tool);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .runbar .run-config {
   display: flex; align-items: center; gap: 6px;
@@ -690,7 +693,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--accent);
 }
 .runbar .progress-mini .txt {
-  font-family: var(--mono); font-size: 10.5px; color: var(--text-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-2);
   font-variant-numeric: tabular-nums;
   min-width: 36px;
 }
@@ -879,7 +882,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--pass);
   color: white;
   border-radius: 5px;
-  font-size: 11.5px; font-weight: 600;
+  font-size: 12px; font-weight: 600;
   border: none;
   margin-right: 2px;
   cursor: pointer;
@@ -1016,7 +1019,7 @@ input, select, textarea { font: inherit; color: inherit; }
   color: var(--text);
 }
 .mod-count {
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1086,7 +1089,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--border-2);
 }
 .tc-row.version .tc-title {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
 }
 .tc-row.version.active .tc-title { color: var(--text); font-weight: 500; }
@@ -1094,7 +1097,7 @@ input, select, textarea { font: inherit; color: inherit; }
   display: inline-grid; place-items: center;
   width: 14px; height: 14px;
   font-family: var(--mono); font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   border-radius: 3px;
   flex-shrink: 0;
 }
@@ -1129,10 +1132,10 @@ input, select, textarea { font: inherit; color: inherit; }
 .tc-body { flex: 1; min-width: 0; overflow: hidden; }
 .tc-line1 {
   display: flex; align-items: center; gap: 5px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .tc-id {
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   color: var(--text-2);
   font-weight: 500;
   letter-spacing: -0.3px;
@@ -1145,7 +1148,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .tc-row.active .tc-title { font-weight: 500; }
 .tc-dur { font-family: var(--mono); font-size: 10px; color: var(--text-4); flex-shrink: 0; }
 .tc-tag {
-  font-size: 9.5px; font-family: var(--mono);
+  font-size: 10px; font-family: var(--mono);
   padding: 0 4px; border-radius: 2px;
   background: var(--tool-hd);
   color: var(--text-2);
@@ -1193,7 +1196,7 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 0 10px 0 12px;
   height: 30px;
   border-right: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
@@ -1277,7 +1280,7 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 6px 10px 12px;
   background: var(--editor);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.7;
 }
 .log-row {
@@ -1286,7 +1289,7 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 1px 0;
   color: var(--text-2);
 }
-.log-time { color: var(--text-4); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.log-time { color: var(--text-4); font-size: 11px; font-variant-numeric: tabular-nums; }
 .log-marker { width: 6px; height: 6px; border-radius: 99px; margin: 5px auto 0; }
 .log-text {}
 .log-row.info .log-marker { background: var(--text-4); }
@@ -1317,7 +1320,7 @@ input, select, textarea { font: inherit; color: inherit; }
   color: var(--text-3);
 }
 .empty-log h3 { font-size: 13px; color: var(--text); font-weight: 600; }
-.empty-log p { font-size: 11.5px; max-width: 340px; line-height: 1.5; }
+.empty-log p { font-size: 12px; max-width: 340px; line-height: 1.5; }
 .empty-log .kbd-hint {
   display: inline-flex; align-items: center; gap: 4px;
   margin-top: 2px;
@@ -1352,13 +1355,13 @@ input, select, textarea { font: inherit; color: inherit; }
   flex-shrink: 0;
 }
 .tc-head-row h3 {
-  font-size: 12.5px; font-weight: 500;
+  font-size: 13px; font-weight: 500;
   color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0;
 }
 .tc-head-row .tc-tag {
-  font-size: 9.5px; font-family: var(--mono);
+  font-size: 10px; font-family: var(--mono);
   padding: 1px 5px; border-radius: 2px;
   background: var(--tool-2);
   color: var(--text-2);
@@ -1377,7 +1380,7 @@ input, select, textarea { font: inherit; color: inherit; }
   display: inline-flex; align-items: center; gap: 5px;
   padding: 3px 10px;
   border-radius: 4px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   background: transparent;
   border: none;
@@ -1400,7 +1403,7 @@ input, select, textarea { font: inherit; color: inherit; }
   height: 26px; padding: 0 10px;
   background: var(--pass); color: white;
   border-radius: 5px;
-  font-size: 11.5px; font-weight: 600;
+  font-size: 12px; font-weight: 600;
   border: none;
   cursor: pointer;
 }
@@ -1436,7 +1439,7 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 7px 10px;
   border: none; background: transparent;
   border-radius: 5px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text);
   text-align: left;
   cursor: pointer;
@@ -1494,7 +1497,7 @@ input, select, textarea { font: inherit; color: inherit; }
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px 3px 8px;
   border-radius: 99px;
-  font-size: 10.5px; font-weight: 600;
+  font-size: 11px; font-weight: 600;
   letter-spacing: 0.4px;
   text-transform: uppercase;
 }
@@ -1505,7 +1508,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: currentColor;
 }
 .rv-hero-time {
-  font-family: var(--mono); font-size: 11.5px;
+  font-family: var(--mono); font-size: 12px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1561,7 +1564,7 @@ input, select, textarea { font: inherit; color: inherit; }
   width: 140px; height: 140px;
 }
 .rv-donut-num {
-  font-family: var(--mono); font-size: 14px; font-weight: 700;
+  font-family: var(--mono); font-size: 14px; font-weight: 600;
   fill: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -1575,7 +1578,7 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .rv-legend-item {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11.5px; color: var(--text-2);
+  font-size: 12px; color: var(--text-2);
 }
 .rv-legend-item .sw {
   width: 10px; height: 10px; border-radius: 2px;
@@ -1627,7 +1630,7 @@ input, select, textarea { font: inherit; color: inherit; }
   color: var(--accent);
 }
 .rv-mod-name {
-  font-size: 12.5px; font-weight: 600;
+  font-size: 13px; font-weight: 600;
   color: var(--text);
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1649,7 +1652,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .rv-mod-bar .b-skip { background: var(--skip); }
 .rv-mod-stats {
   display: flex; gap: 10px;
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .rv-mod-stats .p { color: var(--pass); font-weight: 600; }
@@ -1736,7 +1739,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .rv-tl-row:last-child { border-bottom: none; }
 .rv-tl-row:hover { background: var(--tool-2); color: var(--text); }
 .rv-tl-num {
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   color: var(--text-4);
   width: 22px; text-align: right;
   flex-shrink: 0;
@@ -1753,12 +1756,12 @@ input, select, textarea { font: inherit; color: inherit; }
   color: var(--text);
 }
 .rv-tl-mod {
-  font-size: 10.5px; color: var(--text-3);
+  font-size: 11px; color: var(--text-3);
   font-family: var(--mono);
 }
 .rv-tl-status {
-  font-family: var(--mono); font-size: 9.5px;
-  font-weight: 700;
+  font-family: var(--mono); font-size: 10px;
+  font-weight: 600;
   letter-spacing: 0.4px;
   padding: 2px 7px;
   border-radius: 3px;
@@ -1794,7 +1797,7 @@ input, select, textarea { font: inherit; color: inherit; }
   letter-spacing: -0.01em;
 }
 .hp-count {
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   margin-right: auto;
@@ -1833,18 +1836,18 @@ input, select, textarea { font: inherit; color: inherit; }
 .hp-row .dot.skip { background: var(--skip); }
 .hp-row .info { min-width: 0; }
 .hp-row .when {
-  font-family: var(--mono); font-size: 11.5px;
+  font-family: var(--mono); font-size: 12px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .hp-row .meta {
-  font-size: 10.5px; color: var(--text-3);
+  font-size: 11px; color: var(--text-3);
   margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .hp-row .stats {
   display: flex; align-items: center; gap: 4px;
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .hp-row .stats .p { color: var(--pass); font-weight: 600; }
@@ -1879,7 +1882,7 @@ input, select, textarea { font: inherit; color: inherit; }
   flex-shrink: 0;
 }
 .rv-failure-title {
-  font-size: 12.5px; color: var(--text);
+  font-size: 13px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0;
 }
@@ -1939,16 +1942,16 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 3px;
 }
-.dataset-bar label { font-size: 10.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.dataset-bar label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
 .dataset-bar select {
   background: var(--editor); border: 1px solid var(--border); border-radius: 3px;
-  padding: 3px 6px; font-size: 11.5px;
+  padding: 3px 6px; font-size: 12px;
   outline: none;
   flex: 1; max-width: 220px;
 }
 .dataset-bar .acts { display: flex; gap: 1px; margin-left: auto; }
 .dataset-bar .acts button {
-  font-size: 10.5px; padding: 3px 7px; border-radius: 3px; color: var(--text-2);
+  font-size: 11px; padding: 3px 7px; border-radius: 3px; color: var(--text-2);
   display: inline-flex; align-items: center; gap: 4px;
   border: 1px solid transparent;
 }
@@ -1956,7 +1959,7 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .json-editor {
   width: 100%;
-  font-family: var(--mono); font-size: 11.5px;
+  font-family: var(--mono); font-size: 12px;
   background: var(--editor);
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -2000,7 +2003,7 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: flex-start; gap: 8px;
   padding: 6px 4px;
   border-bottom: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: 12px;
   position: relative;
 }
 .step-row:last-child { border-bottom: none; }
@@ -2014,7 +2017,7 @@ input, select, textarea { font: inherit; color: inherit; }
   border-right: 1px solid var(--border);
 }
 .step-action {
-  font-family: var(--mono); font-size: 9.5px;
+  font-family: var(--mono); font-size: 10px;
   background: var(--accent-bg); color: var(--accent);
   padding: 1px 5px; border-radius: 2px;
   text-transform: uppercase; letter-spacing: 0.3px; font-weight: 600;
@@ -2022,7 +2025,7 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .step-action.assert { background: var(--pass-bg); color: var(--pass); }
 .step-text { color: var(--text); flex: 1; line-height: 1.5; }
-.step-detail { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
+.step-detail { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-top: 2px; }
 
 /* ─── Right tool window: Results ─── */
 .results-body {
@@ -2040,7 +2043,7 @@ input, select, textarea { font: inherit; color: inherit; }
   margin-bottom: 10px;
 }
 .lrc-when { font-family: var(--mono); font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
-.lrc-when .label { font-size: 9.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; margin-right: 6px; font-family: var(--font); }
+.lrc-when .label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; margin-right: 6px; font-family: var(--font); }
 .lrc-badge {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 1px 7px; border-radius: 2px;
@@ -2070,7 +2073,7 @@ input, select, textarea { font: inherit; color: inherit; }
   line-height: 1.1;
 }
 .lrc-stat .lbl {
-  font-size: 9.5px; color: var(--text-3);
+  font-size: 10px; color: var(--text-3);
   text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
   margin-top: 1px;
 }
@@ -2094,7 +2097,7 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .lrc-meta {
   display: flex; align-items: center; gap: 10px;
-  font-size: 10.5px; color: var(--text-3);
+  font-size: 11px; color: var(--text-3);
   margin-bottom: 8px;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
@@ -2122,7 +2125,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .tw-section-head {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 12px;
-  font-size: 10.5px; color: var(--text-3);
+  font-size: 11px; color: var(--text-3);
   text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600;
   background: var(--tool-2);
   border-bottom: 1px solid var(--border);
@@ -2135,7 +2138,7 @@ input, select, textarea { font: inherit; color: inherit; }
   margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
-.tw-section-head .count.fail { color: var(--fail); font-weight: 700; }
+.tw-section-head .count.fail { color: var(--fail); font-weight: 600; }
 .tw-section-head .caret {
   width: 12px; height: 12px;
   display: grid; place-items: center;
@@ -2158,9 +2161,9 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; gap: 6px;
 }
 .failure-line .ic { color: var(--fail); flex-shrink: 0; }
-.failure-title { font-size: 11.5px; color: var(--text); line-height: 1.4; }
+.failure-title { font-size: 12px; color: var(--text); line-height: 1.4; }
 .failure-error {
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   color: var(--fail);
   background: var(--fail-bg);
   padding: 4px 6px;
@@ -2170,7 +2173,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .failure-actions { display: flex; gap: 2px; }
 .failure-actions button {
   display: inline-flex; align-items: center; gap: 3px;
-  font-size: 10.5px; color: var(--text-2);
+  font-size: 11px; color: var(--text-2);
   padding: 2px 6px; border-radius: 2px;
 }
 .failure-actions button:hover { background: var(--hover); color: var(--text); }
@@ -2186,12 +2189,12 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8px;
 }
-.trend-head .title { font-size: 10.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.6px; }
+.trend-head .title { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.6px; }
 .trend-head .rate {
-  font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums;
+  font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums;
   display: flex; align-items: center; gap: 4px;
 }
-.trend-head .rate .delta { font-size: 10.5px; font-weight: 500; }
+.trend-head .rate .delta { font-size: 11px; font-weight: 500; }
 .trend-head .rate .delta.up { color: var(--pass); }
 .trend-head .rate .delta.down { color: var(--fail); }
 .spark {
@@ -2214,7 +2217,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .spark-bar:hover { opacity: 0.75; }
 .trend-axis {
   display: flex; justify-content: space-between;
-  font-size: 9.5px; color: var(--text-4);
+  font-size: 10px; color: var(--text-4);
   margin-top: 4px;
   font-family: var(--mono);
 }
@@ -2237,7 +2240,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .history-row .dot.skip { background: var(--skip); }
 .history-row .info { min-width: 0; }
 .history-row .when { font-family: var(--mono); font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; }
-.history-row .tcs { font-size: 10.5px; color: var(--text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-row .tcs { font-size: 11px; color: var(--text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-row .stats { font-family: var(--mono); font-size: 10px; color: var(--text-2); white-space: nowrap; }
 .history-row .stats .p { color: var(--pass); }
 .history-row .stats .f { color: var(--fail); }
@@ -2324,16 +2327,16 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; gap: 10px;
   padding: 6px 10px;
   border-radius: 3px;
-  font-size: 12.5px; color: var(--text-2);
+  font-size: 13px; color: var(--text-2);
   cursor: pointer;
 }
 .cmd-item:hover, .cmd-item.focused { background: var(--accent-bg); color: var(--text); }
 .cmd-item .icn { color: var(--text-3); width: 16px; display: grid; place-items: center; flex-shrink: 0; }
 .cmd-item.focused .icn { color: var(--accent); }
 .cmd-item .lbl { flex: 1; }
-.cmd-item .grp { font-size: 10.5px; color: var(--text-3); font-family: var(--mono); }
+.cmd-item .grp { font-size: 11px; color: var(--text-3); font-family: var(--mono); }
 .cmd-item .sc {
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 11px;
   background: var(--bg); border: 1px solid var(--border);
   padding: 1px 5px; border-radius: 3px;
   color: var(--text-3);
@@ -2343,9 +2346,9 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 6px 14px;
   border-top: 1px solid var(--border);
   background: var(--tool);
-  font-size: 10.5px; color: var(--text-3);
+  font-size: 11px; color: var(--text-3);
 }
-.cmd-foot kbd { font-family: var(--mono); font-size: 9.5px; background: var(--editor); border: 1px solid var(--border); padding: 1px 4px; border-radius: 2px; }
+.cmd-foot kbd { font-family: var(--mono); font-size: 10px; background: var(--editor); border: 1px solid var(--border); padding: 1px 4px; border-radius: 2px; }
 
 /* ─── Toast ─── */
 .toast-stack {
@@ -2358,7 +2361,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--text); color: var(--bg);
   padding: 7px 11px;
   border-radius: 3px;
-  font-size: 11.5px;
+  font-size: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   display: flex; align-items: center; gap: 8px;
   animation: toastIn 0.18s ease-out;
@@ -2402,16 +2405,16 @@ input, select, textarea { font: inherit; color: inherit; }
 .sheet-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
 .sheet-section { margin-bottom: 20px; }
 .sheet-section h3 {
-  font-size: 10.5px; color: var(--text-3); text-transform: uppercase;
+  font-size: 11px; color: var(--text-3); text-transform: uppercase;
   letter-spacing: 0.6px; font-weight: 600;
   padding-bottom: 6px; margin-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
 .field { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: center; margin-bottom: 6px; }
-.field label { font-size: 11.5px; color: var(--text-2); }
+.field label { font-size: 12px; color: var(--text-2); }
 .field input, .field select {
   background: var(--editor); border: 1px solid var(--border); border-radius: 3px;
-  padding: 4px 7px; font-size: 11.5px; outline: none;
+  padding: 4px 7px; font-size: 12px; outline: none;
 }
 .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg); }
 .cred-row {
@@ -2419,7 +2422,7 @@ input, select, textarea { font: inherit; color: inherit; }
   gap: 4px; align-items: center;
   padding: 4px 0;
 }
-.cred-row .name { font-size: 11.5px; font-weight: 500; color: var(--text); }
+.cred-row .name { font-size: 12px; font-weight: 500; color: var(--text); }
 .cred-row input { padding: 4px 6px; font-size: 11px; background: var(--editor); border: 1px solid var(--border); border-radius: 3px; outline: none; }
 .sheet-foot {
   padding: 10px 16px;
@@ -2442,7 +2445,7 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .shortcut-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-radius: 3px; }
 .shortcut-row:hover { background: var(--hover); }
-.shortcut-row .lbl { font-size: 11.5px; color: var(--text); }
+.shortcut-row .lbl { font-size: 12px; color: var(--text); }
 .shortcut-row .keys { display: flex; gap: 2px; }
 .shortcut-row .keys kbd {
   font-family: var(--mono); font-size: 10px;
@@ -2462,11 +2465,11 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .dd-menu button {
   display: block; width: 100%; text-align: left;
-  padding: 5px 8px; border-radius: 3px; font-size: 11.5px;
+  padding: 5px 8px; border-radius: 3px; font-size: 12px;
   color: var(--text);
 }
 .dd-menu button:hover { background: var(--hover); }
-.dd-menu .sub { font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+.dd-menu .sub { font-size: 11px; color: var(--text-3); margin-top: 1px; }
 .dd-menu .div { height: 1px; background: var(--border); margin: 3px 0; }
 
 /* Misc */

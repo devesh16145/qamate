@@ -38,3 +38,7 @@ test_spawn.js
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Claude session scratch
+_backups/
+scratch/
