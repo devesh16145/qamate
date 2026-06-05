@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('ats', {
   openFile: (path) => ipcRenderer.invoke('open-file', path),
   openTrace: (path) => ipcRenderer.invoke('open-trace', path),
   getRunArtifacts: (runId) => ipcRenderer.invoke('get-run-artifacts', runId),
+  getTcArtifacts: (opts) => ipcRenderer.invoke('get-tc-artifacts', opts), // {tcId, runFolder?} → {videos, screenshots, folder}
   setTitlebarTheme: (theme) => ipcRenderer.invoke('set-titlebar-theme', { theme }),
   // ── Projects & secrets ──
   setSecret: (opts) => ipcRenderer.invoke('set-secret', opts),
@@ -98,4 +99,14 @@ contextBridge.exposeInMainWorld('ats', {
   testJiraConnection: () => ipcRenderer.invoke('test-jira-connection'),
   createJiraBug: (options) => ipcRenderer.invoke('create-jira-bug', options),
   createJiraStory: (options) => ipcRenderer.invoke('create-jira-story', options),
+  // Bug & Story store + raise/comment/status
+  jiraItemsList: () => ipcRenderer.invoke('jira-items-list'),
+  jiraItemSave: (item) => ipcRenderer.invoke('jira-item-save', item),
+  jiraItemDelete: (id) => ipcRenderer.invoke('jira-item-delete', { id }),
+  jiraItemRaise: (id) => ipcRenderer.invoke('jira-item-raise', { id }),
+  jiraIssueStatus: (key) => ipcRenderer.invoke('jira-issue-status', { key }),
+  jiraAddComment: (opts) => ipcRenderer.invoke('jira-add-comment', opts), // {key, body, attachments, tcId, runFolder}
+  pickFiles: () => ipcRenderer.invoke('agent-pick-files'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  bugsOpenWindow: () => ipcRenderer.invoke('bugs-open-window'),
 });

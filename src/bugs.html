@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <title>Agrim ATS — Bug & Story Manager</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body, #root { height: 100%; margin: 0; }
+    body { background: var(--tool); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Vendor libraries (shared with the IDE window) -->
+  <script src="vendor/react.development.js"></script>
+  <script src="vendor/react-dom.development.js"></script>
+  <script src="vendor/babel.min.js"></script>
+  <script src="vendor/icons.js"></script>
+
+  <!-- Bug & Story Manager UI (IIFE exposing window.BugManagerApp) -->
+  <script type="text/babel" src="bugs_ui.js"></script>
+
+  <script type="text/babel">
+    ReactDOM.createRoot(document.getElementById('root')).render(<window.BugManagerApp />);
+  </script>
+</body>
+</html>

@@ -114,29 +114,22 @@
 
     return (
       <aside className={'ses-sidebar' + (full ? ' full' : '')}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px' }}>
-          <Ic.MessageSquare size={16} style={{ color: 'var(--accent)' }} />
-          <b style={{ fontSize: 13 }}>AI Agent</b>
+        <div className="ses-head">
+          <Ic.MessageSquare size={15} style={{ color: 'var(--accent)' }} />
+          <b>AI Agent</b>
           <span style={{ flex: 1 }}></span>
-          {onUndock && <button className="rv-cta" onClick={onUndock} title="Pop out to its own window"><Ic.ExternalLink size={12} /></button>}
-          {onClose && <button className="rv-cta" onClick={onClose} title="Close the agent panel"><Ic.X size={12} /></button>}
+          {onUndock && <button className="ses-hbtn" onClick={onUndock} title="Pop out to its own window"><Ic.ExternalLink size={14} /></button>}
+          {onClose && <button className="ses-hbtn" onClick={onClose} title="Close the agent panel"><Ic.X size={15} /></button>}
         </div>
-        <div style={{ padding: '0 12px 8px' }}>
-          <label style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Project</label>
-          <select value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)}
-            style={{ width: '100%', fontSize: 11.5, padding: '4px 6px', marginTop: 3 }}>
+        <div className="ses-controls">
+          <select className="ses-proj" value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)} title="Project">
             <option value="">Default (no project)</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
           </select>
-        </div>
-        <div style={{ padding: '0 12px 8px', display: 'flex', gap: 6 }}>
-          <button className="rv-cta primary" style={{ flex: 1, justifyContent: 'center' }} onClick={onNew}>
-            <Ic.Plus size={13} /> New session
-          </button>
-        </div>
-        <div style={{ padding: '0 12px 8px' }}>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions…"
-            style={{ width: '100%', fontSize: 11.5, padding: '4px 7px' }} />
+          <div className="ses-row2">
+            <input className="ses-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions…" />
+            <button className="rv-cta primary ses-new" onClick={onNew} title="New session"><Ic.Plus size={14} /> New</button>
+          </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 8px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
           {filtered.length === 0 && (
@@ -201,7 +194,7 @@
   /* ── Active session chat (ALWAYS rendered with a real session — no conditional
      hooks; the "no session" case is handled by AgentApp, never here) ────────── */
   function SessionChat({ session, rt, provider, setProvider, headed, setHeaded,
-                         onStart, onSend, onStop, onReset, setInput, setAttachments, projectId, toast, onBack }) {
+                         onStart, onSend, onStop, onReset, onOpenBrowser, setInput, setAttachments, projectId, toast, onBack }) {
     const scrollRef = useRef(null);
     const taRef = useRef(null);
     const caretRef = useRef(null);
@@ -328,7 +321,7 @@
 
     const bubble = (m) => {
       if (m.role === 'user') return (
-        <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: '82%', background: 'var(--accent-bg)', color: 'var(--text-1)', padding: '8px 12px', borderRadius: 10, fontSize: 12.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: '82%', background: 'var(--editor)', color: 'var(--text)', border: '1px solid var(--border)', padding: '8px 11px', borderRadius: 8, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {m.text}
           {m.attachments && m.attachments.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: m.text ? 6 : 0 }}>
@@ -340,7 +333,7 @@
         </div>
       );
       if (m.role === 'assistant') return (
-        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent-bg)', padding: '8px 12px', borderRadius: 10, fontSize: 12.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-1)' }}>{m.text}{m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}</div>
+        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '94%', background: 'transparent', padding: '2px 0', fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text)' }}>{m.text}{m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}</div>
       );
       if (m.role === 'tool') return (
         <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
@@ -477,11 +470,12 @@
                 </div>
               )}
               <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images" style={{ alignSelf: 'flex-end' }}><Ic.Upload size={14} /></button>
+              <button className="rv-cta" onClick={onOpenBrowser} title="Open the app under test in your browser" style={{ alignSelf: 'flex-end' }}><Ic.ExternalLink size={14} /></button>
               <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
                 onBlur={() => setTimeout(() => setAtOpen(false), 120)}
                 placeholder={status === 'ready' ? 'Tell the agent what to do… (Enter to send) · @ to reference a file · attach or drop files' : 'Agent is working…'}
                 disabled={status !== 'ready'}
-                style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 12, padding: 8, fontFamily: 'inherit' }} />
+                style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '9px 10px', fontFamily: 'inherit', background: 'var(--editor)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', outline: 'none' }} />
               <button className="rv-cta primary" onClick={onSend} disabled={status !== 'ready' || (!(rt.input || '').trim() && !attachments.length)} style={{ alignSelf: 'flex-end' }}><Ic.Play size={13} /> Send</button>
             </div>
           </div>
@@ -491,6 +485,39 @@
   }
 
   /* ── Root ────────────────────────────────────────────────────────────────── */
+  /* ── Chat initiator: compose a first message to start a brand-new session ──── */
+  function StartComposer({ onStart, headed, setHeaded, onOpenBrowser }) {
+    const [text, setText] = useState('');
+    const [atts, setAtts] = useState([]);
+    const go = () => { const t = text.trim(); if (!t && !atts.length) return; onStart(t, atts); setText(''); setAtts([]); };
+    const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } };
+    const addFiles = async () => { const r = await window.ats.agentPickFiles(); const files = (r && r.files) || []; if (files.length) setAtts((a) => [...a, ...files]); };
+    return (
+      <div className="ses-initiator">
+        {atts.length > 0 && (
+          <div className="ses-init-atts">
+            {atts.map((a, i) => (
+              <span key={i} className="att-chip"><Ic.File size={10} /><span className="nm">{a.name}</span>
+                <button onClick={() => setAtts((x) => x.filter((_, j) => j !== i))}><Ic.X size={10} /></button></span>
+            ))}
+          </div>
+        )}
+        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
+          className="ses-init-ta"
+          placeholder={'Message the agent to start a new session… e.g. "log in, open Orders, and write a test for the order lifecycle." (Enter to send)'} />
+        <div className="ses-init-bar">
+          <button className="rv-cta sm" onClick={addFiles} title="Attach documents or images"><Ic.Upload size={13} /></button>
+          <button className="rv-cta sm" onClick={onOpenBrowser} title="Open the app under test in your browser"><Ic.ExternalLink size={13} /></button>
+          <label className="ses-headed" title="Show the automation browser window while the agent works">
+            <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} /> Watch live
+          </label>
+          <span style={{ flex: 1 }}></span>
+          <button className="rv-cta primary sm" onClick={go} disabled={!text.trim() && !atts.length}><Ic.Play size={13} /> Start</button>
+        </div>
+      </div>
+    );
+  }
+
   function AgentApp({ embedded, onUndock, onClose }) {
     const [projects, setProjects] = useState([]);
     const [projectId, setProjectId] = useState(null);
@@ -505,6 +532,8 @@
     const toast = (msg) => { const id = Date.now() + Math.random(); setToasts((t) => [...t, { id, msg }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2400); };
     const pidRef = useRef(projectId);
     useEffect(() => { pidRef.current = projectId; }, [projectId]);
+    const runtimeRef = useRef(runtime);
+    useEffect(() => { runtimeRef.current = runtime; }, [runtime]);
 
     const refreshSessions = useCallback(async (pid) => {
       try {
@@ -538,6 +567,17 @@
         if (msg.event === 'ready' || msg.event === 'turn_complete' || msg.event === 'exited' || msg.event === 'reset_ok') {
           refreshSessions(pidRef.current);
         }
+        // "Compose to start": once a freshly-created session is ready, fire its first queued message.
+        if (msg.event === 'ready') {
+          const rt0 = runtimeRef.current[sid];
+          if (rt0 && rt0.pendingSend) {
+            const ps = rt0.pendingSend;
+            patchRt(sid, { pendingSend: null, status: 'busy' });
+            window.ats.agentSend({ sessionId: sid, message: ps.text, attachments: (ps.atts || []).map((a) => a.path) }).then((res) => {
+              if (res && res.status === 'error') patchRt(sid, (c) => ({ status: 'ready', messages: [...c.messages, { id: nextId(), role: 'error', text: res.message }] }));
+            });
+          }
+        }
       });
       return () => { if (off) off(); };
     }, [refreshSessions]);
@@ -570,6 +610,37 @@
       const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, title: sess.title || '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
+    // Compose-to-start: create a session, start it, and queue the first message (sent on 'ready').
+    const startWithMessage = async (text, atts) => {
+      const r = await window.ats.agentNewSession({ projectId, title: '' });
+      if (!r || !r.session) { toast('Could not start a session'); return; }
+      const sid = r.session.id;
+      setSessions((prev) => [{ ...r.session, _placeholder: true }, ...prev]);
+      setActiveId(sid);
+      setRuntime((prev) => ({ ...prev, [sid]: { ...emptyRuntime(), status: 'starting', pendingSend: { text, atts: atts || [] },
+        messages: [
+          ...(text ? [{ id: nextId(), role: 'user', text, attachments: (atts || []).map((a) => a.name) }] : []),
+          { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' },
+        ] } }));
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, title: '' });
+      if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
+    };
+    // Open the app under test (the agent's current page, else the seller URL from config) in the system browser.
+    const openBrowser = async () => {
+      const rt = activeId ? runtime[activeId] : null;
+      let url = rt && rt.info && rt.info.url;
+      if (!url) {
+        try {
+          const cfg = await window.ats.getConfig();
+          const envs = (cfg && cfg.environments) || {};
+          const env = Object.keys(envs).find((k) => envs[k] && envs[k].is_default) || 'dev';
+          const su = cfg && cfg.platforms && cfg.platforms.seller && cfg.platforms.seller.urls;
+          url = su && (su[env] || su.dev);
+        } catch (e) { /* ignore */ }
+      }
+      if (url && window.ats.openExternal) window.ats.openExternal(url);
+      else toast('No app URL configured');
+    };
     const onSend = async () => {
       const sid = activeId; if (!sid) return;
       const cur = runtime[sid]; if (!cur) return;
@@ -596,10 +667,21 @@
     const renderChat = (onBack) => (
       <SessionChat session={activeSession} rt={activeRt}
         provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
-        onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset}
+        onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset} onOpenBrowser={openBrowser}
         setInput={(v) => patchRt(activeId, { input: v })}
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
         projectId={projectId} toast={toast} onBack={onBack} />
+    );
+    const initiator = <StartComposer onStart={startWithMessage} headed={headed} setHeaded={setHeaded} onOpenBrowser={openBrowser} />;
+    const noSessionPane = (
+      <div className="agent-pane no-ses">
+        <div className="no-ses-msg">
+          <Ic.MessageSquare size={28} style={{ color: 'var(--accent)', marginBottom: 10 }} />
+          <h2>Start the agent</h2>
+          <p>Type a message below to start a new session — or pick one from the list. Each session drives its own browser and keeps its own memory.</p>
+        </div>
+        {initiator}
+      </div>
     );
     const list = (
       <SessionSidebar projects={projects} projectId={projectId} setProjectId={setProjectId}
@@ -611,10 +693,10 @@
     return (
       <div className={'agent-shell' + (embedded ? ' embedded' : '')}>
         {embedded
-          /* Docked = 2 pages: page 1 is the session list, page 2 is the opened session (with Back). */
-          ? (activeSession ? renderChat(() => setActiveId(null)) : list)
-          /* Window = list sidebar + chat (or a placeholder when nothing is selected). */
-          : (<React.Fragment>{list}{activeSession ? renderChat(null) : <NoSession />}</React.Fragment>)}
+          /* Docked = 2 pages: page 1 is the session list + a chat initiator at the bottom, page 2 is the opened session (with Back). */
+          ? (activeSession ? renderChat(() => setActiveId(null)) : <React.Fragment>{list}{initiator}</React.Fragment>)
+          /* Window = list sidebar + chat (or the start pane + initiator when nothing is selected). */
+          : (<React.Fragment>{list}{activeSession ? renderChat(null) : noSessionPane}</React.Fragment>)}
         <div style={{ position: 'fixed', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 80 }}>
           {toasts.map((t) => (
             <div key={t.id} style={{ background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent)', borderRadius: 8, padding: '7px 12px', fontSize: 12, boxShadow: '0 6px 18px rgba(0,0,0,0.2)' }}>{t.msg}</div>

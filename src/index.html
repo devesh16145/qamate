@@ -775,7 +775,57 @@ function CoverageModal({ tcId, flowId, description, onClose, toast, isTab }) {
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    JiraModal
    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-function JiraModal({ tcId, flowId, description, initialType, onClose, onSubmit, toast }) {
+// Pick screenshots/videos from a test's latest run (+ arbitrary files) to attach to Jira.
+function ArtifactPicker({ tcId, selected, onChange }) {
+  const [arts, setArts] = useState({ videos: [], screenshots: [] });
+  const [extra, setExtra] = useState([]);
+  useEffect(() => {
+    if (!tcId) return;
+    let live = true;
+    window.ats.getTcArtifacts({ tcId }).then(r => { if (live) setArts(r || { videos: [], screenshots: [] }); });
+    return () => { live = false; };
+  }, [tcId]);
+  const items = [
+    ...(arts.screenshots || []).map(a => ({ ...a, kind: 'img' })),
+    ...(arts.videos || []).map(a => ({ ...a, kind: 'vid' })),
+    ...extra.map(a => ({ ...a, kind: 'file' })),
+  ];
+  const sel = selected || [];
+  const toggle = (p) => { const s = new Set(sel); s.has(p) ? s.delete(p) : s.add(p); onChange([...s]); };
+  const addFiles = async () => {
+    const res = await window.ats.pickFiles();
+    const metas = (res && res.files) ? res.files : [];
+    const added = metas.map(f => (typeof f === 'string' ? f : f.path)).filter(Boolean);
+    if (!added.length) return;
+    setExtra(e => [...e, ...added.map(p => ({ name: p.split(/[\\/]/).pop(), path: p }))]);
+    onChange([...sel, ...added]);
+  };
+  return (
+    <div className="art-picker">
+      <div className="art-head">
+        <span>Attach{tcId ? ` (${tcId})` : ''}{sel.length ? ` · ${sel.length} selected` : ''}</span>
+        <button className="art-add" onClick={addFiles}><I.Upload size={12} /> Add file…</button>
+      </div>
+      {items.length === 0 ? (
+        <div className="art-empty">No screenshots/videos for this test yet — run it, or add a file.</div>
+      ) : (
+        <div className="art-grid">
+          {items.map(a => {
+            const on = sel.includes(a.path);
+            const Icon = a.kind === 'vid' ? I.Video : a.kind === 'file' ? I.File : I.FileText;
+            return (
+              <button key={a.path} className={`art-chip${on ? ' on' : ''}`} onClick={() => toggle(a.path)} title={a.name}>
+                <Icon size={12} /><span className="nm">{a.name}</span>{on && <I.Check size={11} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JiraModal({ tcId, flowId, description, initialType, isTab, onClose, toast }) {
   const startType = initialType === 'Story' ? 'Story' : 'Bug';
   const prefix = startType === 'Story' ? 'STORY' : 'BUG';
   const bugDesc = `Test Case: ${tcId}\nStatus: FAILED\nEnvironment: Dev\nDetected by: Agrim ATS (automated)\n\n${description ? 'Description: ' + description + '\n\n' : ''}--- Steps to Reproduce ---\n1. Open Agrim ATS\n2. Select test case ${tcId}\n3. Click Run\n4. Observe failure`;
@@ -784,35 +834,74 @@ function JiraModal({ tcId, flowId, description, initialType, onClose, onSubmit, 
   const [desc, setDesc] = useState(startType === 'Story' ? storyDesc : bugDesc);
   const [labels, setLabels] = useState(startType === 'Story' ? 'story, ats' : 'automated-test, ats');
   const [issueType, setIssueType] = useState(startType);
+  const [attach, setAttach] = useState([]);
+  const [busy, setBusy] = useState(false);
 
-  const handleSave = async () => {
-    toast('Creating Jira issue...');
-    try {
-      let res;
-      const payload = {
-        tcId,
-        summary,
-        description: desc,
-        labels: labels.split(',').map(s => s.trim()).filter(Boolean)
-      };
-
-      if (issueType === 'Bug') {
-        res = await window.ats.createJiraBug(payload);
-      } else {
-        res = await window.ats.createJiraStory(payload);
-      }
-
-      if (res && res.success) {
-        toast(`Jira issue created successfully: ${res.key}`);
-      } else {
-        toast(`Failed to create issue: ${res ? res.error : 'unknown error'}`);
-      }
-    } catch (err) {
-      toast(`Jira error: ${err.message || String(err)}`);
-    }
-    onClose();
+  const buildItem = (status) => ({
+    type: issueType === 'Story' ? 'story' : 'bug',
+    tcId, flowId, summary, description: desc,
+    labels: labels.split(',').map(s => s.trim()).filter(Boolean),
+    attachments: attach, status,
+  });
+  const saveDraft = async () => {
+    setBusy(true);
+    const res = await window.ats.jiraItemSave(buildItem('draft'));
+    setBusy(false);
+    if (res && res.success) { window.dispatchEvent(new Event('jira-items-changed')); toast('Saved as draft in Bug & Story Manager'); onClose && onClose(); }
+    else toast('Save failed: ' + ((res && res.error) || 'unknown'));
+  };
+  const submit = async () => {
+    setBusy(true);
+    toast('Creating Jira issue…');
+    const saved = await window.ats.jiraItemSave(buildItem('draft'));
+    if (!saved || !saved.success) { setBusy(false); toast('Save failed: ' + ((saved && saved.error) || 'unknown')); return; }
+    const raised = await window.ats.jiraItemRaise(saved.item.id);
+    setBusy(false);
+    if (raised && raised.success) { window.dispatchEvent(new Event('jira-items-changed')); toast(`Created ${raised.key}${raised.attachments ? ` · ${raised.attachments} file(s)` : ''}`); onClose && onClose(); }
+    else toast('Jira error: ' + ((raised && raised.error) || 'unknown'));
   };
 
+  const inner = (
+    <>
+      <div className="field" style={{ display: 'block' }}>
+        <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Issue Type</label>
+        <select className="setting-input" value={issueType} onChange={e => setIssueType(e.target.value)}>
+          <option value="Bug">Bug / Defect</option>
+          <option value="Story">Story / Feature</option>
+        </select>
+      </div>
+      <div className="field" style={{ display: 'block' }}>
+        <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Summary</label>
+        <input className="setting-input" style={{ width: '100%', boxSizing: 'border-box' }} value={summary} onChange={e => setSummary(e.target.value)} />
+      </div>
+      <div className="field" style={{ display: 'block' }}>
+        <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Description</label>
+        <textarea className="setting-input" style={{ width: '100%', boxSizing: 'border-box', height: 150, fontFamily: 'var(--mono)', fontSize: 11.5 }} value={desc} onChange={e => setDesc(e.target.value)} />
+      </div>
+      <div className="field" style={{ display: 'block' }}>
+        <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Labels (comma-separated)</label>
+        <input className="setting-input" style={{ width: '100%', boxSizing: 'border-box' }} value={labels} onChange={e => setLabels(e.target.value)} />
+      </div>
+      <ArtifactPicker tcId={tcId} selected={attach} onChange={setAttach} />
+    </>
+  );
+  const actions = (
+    <>
+      <button className="rv-cta" onClick={onClose} disabled={busy}>Cancel</button>
+      <button className="rv-cta" onClick={saveDraft} disabled={busy}>Save as draft</button>
+      <button className="rv-cta primary" onClick={submit} disabled={busy}><I.Bug size={13} /> Submit to Jira</button>
+    </>
+  );
+
+  if (isTab) {
+    return (
+      <div className="jira-tab">
+        <div className="jira-tab-head"><h2><I.Bug size={15} /> Create Jira Issue — <span className="mono">{tcId}</span></h2></div>
+        <div className="jira-tab-body">{inner}</div>
+        <div className="jira-tab-actions">{actions}</div>
+      </div>
+    );
+  }
   return (
     <div className="overlay">
       <div className="modal" style={{ width: 600 }}>
@@ -820,31 +909,8 @@ function JiraModal({ tcId, flowId, description, initialType, onClose, onSubmit, 
           <h2 style={{ fontSize: 15, margin: 0, color: 'var(--text)', fontWeight: 600 }}>Create Jira Issue</h2>
           <button className="ic" onClick={onClose}><I.X size={16} /></button>
         </div>
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="field">
-            <label style={{ fontSize: 11.5 }}>Issue Type</label>
-            <select className="setting-input" value={issueType} onChange={e => setIssueType(e.target.value)}>
-              <option value="Bug">Bug / Defect</option>
-              <option value="Story">Story / Feature</option>
-            </select>
-          </div>
-          <div className="field" style={{ display: 'block' }}>
-            <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Summary</label>
-            <input className="setting-input" style={{ width: '100%', boxSizing: 'border-box' }} value={summary} onChange={e => setSummary(e.target.value)} />
-          </div>
-          <div className="field" style={{ display: 'block' }}>
-            <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Description</label>
-            <textarea className="setting-input" style={{ width: '100%', boxSizing: 'border-box', height: 150, fontFamily: 'var(--mono)', fontSize: 11.5 }} value={desc} onChange={e => setDesc(e.target.value)} />
-          </div>
-          <div className="field" style={{ display: 'block' }}>
-            <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: 'var(--text-3)' }}>Labels (comma-separated)</label>
-            <input className="setting-input" style={{ width: '100%', boxSizing: 'border-box' }} value={labels} onChange={e => setLabels(e.target.value)} />
-          </div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-          <button className="rv-cta" onClick={onClose}>Cancel</button>
-          <button className="rv-cta primary" onClick={handleSave}>Submit to Jira</button>
-        </div>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{inner}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>{actions}</div>
       </div>
     </div>
   );
@@ -977,12 +1043,59 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ──────────────────────────────────────────────────────────────
    Root App
    ────────────────────────────────────────────────────────────── */
+// Global themed tooltips: converts native `title` attributes app-wide into styled tooltips.
+function Tooltips() {
+  const [tip, setTip] = useState(null);
+  useEffect(() => {
+    let timer = null, curEl = null;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+    const show = (el) => {
+      const text = el.getAttribute('data-tip');
+      if (!text) return;
+      const r = el.getBoundingClientRect();
+      const below = r.bottom < window.innerHeight - 70;
+      setTip({ text, x: clamp(r.left + r.width / 2, 44, window.innerWidth - 44), y: below ? r.bottom + 7 : r.top - 7, above: !below });
+    };
+    const onOver = (e) => {
+      const el = e.target && e.target.closest && e.target.closest('[title],[data-tip]');
+      if (!el) return;
+      if (el.hasAttribute('title')) { const t = el.getAttribute('title'); if (t) el.setAttribute('data-tip', t); el.removeAttribute('title'); }
+      if (!el.getAttribute('data-tip')) return;
+      curEl = el;
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (curEl === el) show(el); }, 350);
+    };
+    const onOut = (e) => {
+      if (!curEl) return;
+      if (e.relatedTarget && curEl.contains(e.relatedTarget)) return;
+      clearTimeout(timer); setTip(null); curEl = null;
+    };
+    const hide = () => { clearTimeout(timer); setTip(null); curEl = null; };
+    document.addEventListener('pointerover', onOver, true);
+    document.addEventListener('pointerout', onOut, true);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('mousedown', hide, true);
+    return () => {
+      document.removeEventListener('pointerover', onOver, true);
+      document.removeEventListener('pointerout', onOut, true);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('mousedown', hide, true);
+    };
+  }, []);
+  if (!tip) return null;
+  return ReactDOM.createPortal(
+    <div className={`tooltip${tip.above ? ' above' : ''}`} style={{ left: tip.x, top: tip.y }}>{tip.text}</div>,
+    document.body
+  );
+}
+
 function App() {
   const [modal, setModal] = useState({ isOpen: false, type: null });
   useEffect(() => { window.setModalState = setModal; }, []);
   useEffect(() => { window.openTabGlobal = openTab; }, [openTab]);
   useEffect(() => { window.openCoverageTab = openCoverageTab; }, [openCoverageTab]);
   useEffect(() => { window.openReviewTab = openReviewTab; }, [openReviewTab]);
+  useEffect(() => { window.openJiraTab = openJiraTab; }, [openJiraTab]);
   useEffect(() => { window.showSaveToast = toast; }, [toast]);
   // Theme
   const [theme, setTheme] = useState('light');
@@ -991,7 +1104,53 @@ function App() {
   // Layout / tool windows
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [agentDock, setAgentDock] = useState('closed'); // 'closed' | 'docked' (agent in the right panel)
+  const [agentDock, setAgentDock] = useState('docked'); // 'closed' (History) | 'docked' (agent in the right panel) — agent is the default
+
+  // ── Resizable side panels (drag the gutter; min-width clamped; persisted) ──
+  const gridRef = useRef(null);
+  const PANEL_MIN = { left: 200, center: 380, right: 280 };
+  const PANEL_MAX = 640;
+  const [leftW, setLeftW] = useState(() => { const v = +localStorage.getItem('ats.lw'); return v >= PANEL_MIN.left ? v : 260; });
+  const [rightW, setRightW] = useState(() => { const v = +localStorage.getItem('ats.rw'); return v >= PANEL_MIN.right ? v : 360; });
+  const startResize = (side) => (e) => {
+    e.preventDefault();
+    const grid = gridRef.current; if (!grid) return;
+    const rect = grid.getBoundingClientRect();
+    let cur = side === 'left' ? leftW : rightW;
+    const otherR = (rightCollapsed && agentDock !== 'docked') ? 0 : rightW;
+    const otherL = leftCollapsed ? 0 : leftW;
+    const onMove = (ev) => {
+      if (side === 'left') {
+        const maxW = Math.min(PANEL_MAX, rect.width - PANEL_MIN.center - otherR);
+        cur = Math.max(PANEL_MIN.left, Math.min(ev.clientX - rect.left, maxW));
+        grid.style.setProperty('--lw', cur + 'px');
+      } else {
+        const maxW = Math.min(PANEL_MAX, rect.width - PANEL_MIN.center - otherL);
+        cur = Math.max(PANEL_MIN.right, Math.min(rect.right - ev.clientX, maxW));
+        grid.style.setProperty('--rw', cur + 'px');
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('resizing');
+      if (side === 'left') { setLeftW(cur); localStorage.setItem('ats.lw', Math.round(cur)); }
+      else { setRightW(cur); localStorage.setItem('ats.rw', Math.round(cur)); }
+    };
+    document.body.classList.add('resizing');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  // ── Bottom Live Log drawer (height of the log body; 0 = collapsed to the status line) ──
+  const [drawerH, setDrawerH] = useState(() => {
+    const stored = localStorage.getItem('ats.logH');
+    if (stored !== null) return +stored || 0;
+    return Math.max(220, Math.round(((window.innerHeight || 820) - 130) / 2)); // default: ~mid screen
+  });
+  useEffect(() => { localStorage.setItem('ats.logH', Math.round(drawerH)); }, [drawerH]);
+  useEffect(() => { window.toggleLogDrawer = () => setDrawerH(h => h > 60 ? 0 : 240); return () => { delete window.toggleLogDrawer; }; }, []);
+
   const AgentPanel = window.AgentApp;                    // shared module from agent_ui.js
   useEffect(() => { window.toggleAgentDock = () => setAgentDock(d => d === 'docked' ? 'closed' : 'docked'); }, []);
   useEffect(() => {
@@ -1009,7 +1168,6 @@ function App() {
 
   // Tab state
   const [tabs, setTabs] = useState([
-    { kind: 'log', id: 'log' },
     { kind: 'tc', id: 'TC-CATALOG-001', view: 'data' },
   ]);
   const [activeTab, setActiveTab] = useState('TC-CATALOG-001');
@@ -1121,6 +1279,16 @@ function App() {
     setActiveTab(id);
   }, []);
 
+  const openJiraTab = useCallback((tcId, flowId, description, jiraType) => {
+    const id = `jira:${tcId}`;
+    setTabs(prev => {
+      const exists = prev.find(t => t.id === id);
+      if (exists) return prev.map(t => t.id === id ? { ...t, tcId, flowId, description, jiraType } : t);
+      return [...prev, { kind: 'jira', id, tcId, flowId, description, jiraType }];
+    });
+    setActiveTab(id);
+  }, []);
+
   // Open the Autopilot (autonomous pipeline) tab — one per active project
   const closeTab = useCallback((tabId) => {
     setTabs(prev => {
@@ -1177,7 +1345,7 @@ function App() {
     setRunning(true);
     setRunProgress({ total: checked.size, done: 0, current: Array.from(checked)[0] });
     setLogLines([{ t: nowTs(), type: 'system', text: `▶ Starting ${checked.size} test(s)...` }]);
-    setActiveTab('log_1');
+    setDrawerH(h => h > 60 ? h : 240);
 
     const options = {
         tc_ids: Array.from(checked),
@@ -1198,6 +1366,8 @@ function App() {
         setRunning(false);
     }
   }, [checked, running, headless, execMode, env]);
+
+  const runSingle = useCallback((id) => { setChecked(new Set([id])); setTimeout(runSelected, 0); }, [runSelected]);
 
   useEffect(() => {
     if (!window.ats || !window.ats.onProgress) return;
@@ -1288,7 +1458,8 @@ function App() {
         toast={toast}
       />
       <div className="main-shell">
-        <div className={`main-grid${leftCollapsed ? ' lc' : ''}${(rightCollapsed && agentDock !== 'docked') ? ' rc' : ''}${agentDock === 'docked' ? ' agent-docked' : ''}`}>
+        <div ref={gridRef} style={{ '--lw': leftW + 'px', '--rw': rightW + 'px' }}
+          className={`main-grid${leftCollapsed ? ' lc' : ''}${(rightCollapsed && agentDock !== 'docked') ? ' rc' : ''}${agentDock === 'docked' ? ' agent-docked' : ''}`}>
           {!leftCollapsed && (
             <LeftToolWindow
               tool={leftTool}
@@ -1313,7 +1484,7 @@ function App() {
               search={search} setSearch={setSearch}
               filter={filter} setFilter={setFilter}
               running={running}
-              runSingle={(id) => { setChecked(new Set([id])); setTimeout(runSelected, 0); }}
+              runSingle={runSingle}
               onClose={() => setLeftCollapsed(true)}
               toast={toast}
               onRun={runSelected}
@@ -1337,18 +1508,16 @@ function App() {
             runProgress={runProgress}
             onOpenCmd={() => setCmdOpen(true)}
             onRun={runSelected}
+            runSingle={runSingle}
+            drawerH={drawerH}
+            setDrawerH={setDrawerH}
+            onClearLog={() => setLogLines([])}
+            openResultsTab={openResultsTab}
             toast={toast}
             checkedCount={checked.size}
             history={HISTORY}
             trend={TREND}
-            onCreateBug={(tc) => setModal({
-              isOpen: true,
-              type: 'jira',
-              tcId: tc.id,
-              flowId: (tc.module && tc.module.id) || '',
-              description: tc.title || tc.description || '',
-              jiraType: 'Bug',
-            })}
+            onCreateBug={(tc) => openJiraTab(tc.id, (tc.module && tc.module.id) || '', tc.title || tc.description || '', 'Bug')}
             openTab={openTab}
             openCoverageTab={openCoverageTab}
             openReviewTab={openReviewTab}
@@ -1364,6 +1533,12 @@ function App() {
               onClose={() => setRightCollapsed(true)}
             />
           ))}
+          {!leftCollapsed && (
+            <div className="resize-h rh-left" style={{ left: 'var(--lw)' }} onMouseDown={startResize('left')} title="Drag to resize"></div>
+          )}
+          {(agentDock === 'docked' || !rightCollapsed) && (
+            <div className="resize-h rh-right" style={{ right: 'var(--rw)' }} onMouseDown={startResize('right')} title="Drag to resize"></div>
+          )}
         </div>
       </div>
       <StatusBar
@@ -1394,6 +1569,7 @@ function App() {
       <div className="toast-stack">
         {toasts.map(t => <div className="toast" key={t.id}>{t.msg}</div>)}
       </div>
+      <Tooltips />
     </div>
   );
 }
@@ -1429,11 +1605,8 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
   const hasResultsTab = tabs && tabs.some(t => t.kind === 'results');
 
   const openLogTab = () => {
-    if (!hasLogTab) {
-      // The log tab isn't tracked through openTab — surface a toast in mockup
-      toast && toast('Live Log already runs in background');
-    }
-    setActiveTab && setActiveTab('log');
+    // Live Log now lives in the resizable bottom drawer of the editor.
+    if (window.toggleLogDrawer) window.toggleLogDrawer();
   };
 
   return (
@@ -1482,6 +1655,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         >
           <I.ListChecks size={15} />
         </button>
+        <div className="divider"></div>
         <button
           className="tb-window-btn"
           onClick={openLogTab}
@@ -1510,6 +1684,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         >
           <I.Calendar size={15} />
         </button>
+        <div className="divider"></div>
         <button
           className={`tb-window-btn${!rightCollapsed ? ' active' : ''}`}
           onClick={() => setRightCollapsed(c => !c)}
@@ -1565,6 +1740,9 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         </button>
         <button className="tb-icon-btn" title="AI Agent — dock/undock the agent panel on the right (persistent, resumable sessions)" onClick={() => { if (window.toggleAgentDock) window.toggleAgentDock(); }}>
           <I.MessageSquare size={15} />
+        </button>
+        <button className="tb-icon-btn" title="Bug & Story Manager" onClick={() => window.ats.bugsOpenWindow()}>
+          <I.Bug size={15} />
         </button>
         <button className="tb-icon-btn" title="Notifications">
           <I.AlertCircle size={15} />
@@ -1996,6 +2174,10 @@ function TestRow({ tc, checked, pinned, active, runStatus, onCheck, onPin, onSel
   }, []);
 
   const status = runStatus || tc.lastStatus;
+  const isFlaky = (tc.tags || []).includes('flaky');
+  const stClass = status === 'running' ? 'running' : (isFlaky ? 'flaky' : status);
+  const stLabel = status === 'running' ? '··'
+    : (isFlaky ? 'FLAKY' : ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', never: '—' }[status] || '—'));
   if (isVersion) {
     // Version row (child of a parent test case)
     const checkedV = checkedVersions && checkedVersions.has(tc.id);
@@ -2005,7 +2187,7 @@ function TestRow({ tc, checked, pinned, active, runStatus, onCheck, onPin, onSel
         <div className={`tc-check${checkedV ? ' checked' : ''}`} onClick={e => { e.stopPropagation(); onCheckVersion(tc.id); }}>
           {checkedV && <I.Check size={9} stroke={3} />}
         </div>
-        <div className={`tc-status-dot ${status}`} title={status}></div>
+        <div className={`tc-status-label ${stClass}`} title={status}>{stLabel}</div>
         <div className="tc-body">
           <div className="tc-line1">
             <span className={`ver-kind ${tc.kind}`}>{tc.kind === 'negative' ? '−' : '+'}</span>
@@ -2037,7 +2219,7 @@ function TestRow({ tc, checked, pinned, active, runStatus, onCheck, onPin, onSel
       <div className={`tc-check${checked ? ' checked' : ''}`} onClick={e => { e.stopPropagation(); onCheck(); }}>
         {checked && <I.Check size={9} stroke={3} />}
       </div>
-      <div className={`tc-status-dot ${status}`} title={status}></div>
+      <div className={`tc-status-label ${stClass}`} title={status}>{stLabel}</div>
       <div className="tc-body">
         <div className="tc-line1">
           <span className="tc-id">{tc.id}</span>
@@ -2045,7 +2227,6 @@ function TestRow({ tc, checked, pinned, active, runStatus, onCheck, onPin, onSel
           {versionCount > 0 && (
             <span className="ver-count" title={`${versionCount} versions`}>×{versionCount}</span>
           )}
-          {(tc.tags || []).includes('flaky') && <span className="tc-tag flaky">flaky</span>}
           {(tc.tags || []).includes('new') && <span className="tc-tag new">new</span>}
           {tc.lastDuration && tc.lastDuration !== '—' && <span className="tc-dur">{tc.lastDuration}</span>}
         </div>
@@ -2079,7 +2260,7 @@ function TestRow({ tc, checked, pinned, active, runStatus, onCheck, onPin, onSel
                 <I.BarChart size={12} />
                 <span>Analyze Coverage</span>
               </button>
-              <button onClick={() => { setMenuOpen(false); window.setModalState({ isOpen: true, type: 'jira', tcId: tc.id, flowId: tc.module ? tc.module.id : 'po', description: tc.title || tc.description, jiraType: 'Story' }); }}>
+              <button onClick={() => { setMenuOpen(false); window.openJiraTab(tc.id, tc.module ? tc.module.id : 'po', tc.title || tc.description, 'Story'); }}>
                 <I.Bug size={12} />
                 <span>Jira Story</span>
               </button>
@@ -2139,8 +2320,44 @@ window.nowTs = nowTs;
 /* ──────────────────────────────────────────────────────────────
    Editor Area — tabs + content
    ────────────────────────────────────────────────────────────── */
-function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLines, running, execMode, headless, runProgress, onOpenCmd, onRun, toast, checkedCount, history, trend, onCreateBug, openTab, openCoverageTab, openReviewTab }) {
+function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLines, running, execMode, headless, runProgress, onOpenCmd, onRun, runSingle, drawerH, setDrawerH, onClearLog, openResultsTab, toast, checkedCount, history, trend, onCreateBug, openTab, openCoverageTab, openReviewTab }) {
   const active = tabs.find(t => t.id === activeTab) || tabs[0];
+  const activeTcId = active && active.kind === 'tc' ? active.id : null;
+  const tcRuns = (history || []).filter(h => activeTcId ? (h.tcs || []).includes(activeTcId) : true);
+
+  // Bottom drawer (Live Log / History): elapsed timer, auto-scroll, and a draggable divider
+  const logRef = useRef(null);
+  const logScrollRef = useRef(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [drawerTab, setDrawerTab] = useState('log');  // 'log' | 'history'
+  useEffect(() => {
+    if (!running) return;
+    setDrawerTab('log');               // jump to the log when a run starts
+    const t0 = Date.now(); setElapsed(0);
+    const iv = setInterval(() => setElapsed((Date.now() - t0) / 1000), 200);
+    return () => clearInterval(iv);
+  }, [running]);
+  useEffect(() => {
+    if (logScrollRef.current) logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+  }, [logLines]);
+  const startDrawerResize = (e) => {
+    e.preventDefault();
+    const startY = e.clientY, startH = drawerH || 0;
+    let cur = startH;
+    const onMove = (ev) => {
+      cur = Math.max(0, Math.min(startH + (startY - ev.clientY), window.innerHeight * 0.6));
+      if (logRef.current) logRef.current.style.height = cur + 'px';
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('resizing-v');
+      setDrawerH(cur);
+    };
+    document.body.classList.add('resizing-v');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   return (
     <section className="editor-area">
@@ -2195,6 +2412,17 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
               </div>
             );
           }
+          if (t.kind === 'jira') {
+            return (
+              <div key={t.id} className={`tab${isActive ? ' active' : ''}`} onClick={() => setActiveTab(t.id)}>
+                <I.Bug size={12} className="ic" style={{ color: 'var(--accent)' }} />
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>Jira — {t.tcId}</span>
+                <button className="close" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>
+                  <I.X size={10} />
+                </button>
+              </div>
+            );
+          }
           const tc = MODULES.flatMap(m => m.tests).find(x => x.id === t.id);
           if (!tc) return null;
           return (
@@ -2211,6 +2439,14 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
         <div className="tab-spacer"></div>
         <div className="tab-tools">
           <button title="Recent tabs"><I.ChevronDown size={13} /></button>
+          <button
+            className="tab-run"
+            title={active && active.kind === 'tc' ? 'Run this test' : 'Run selected'}
+            disabled={running}
+            onClick={() => { if (active && active.kind === 'tc') runSingle(active.id); else onRun(); }}
+          >
+            <I.Play size={12} /> Run
+          </button>
         </div>
       </div>
 
@@ -2230,6 +2466,68 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
         {active && active.kind === 'review' && (
           <ReviewModal tcId={active.tcId} flowId={active.flowId} description={active.description} onClose={() => closeTab(active.id)} toast={toast} reviewData={active.reviewData} isTab={true} />
         )}
+        {active && active.kind === 'jira' && (
+          <JiraModal tcId={active.tcId} flowId={active.flowId} description={active.description} initialType={active.jiraType} onClose={() => closeTab(active.id)} toast={toast} isTab={true} />
+        )}
+      </div>
+
+      {/* Bottom drawer — Live Log + per-test History, faded draggable divider */}
+      <div className="log-drawer">
+        <div className="drawer-divider" onMouseDown={startDrawerResize} title="Drag to resize"></div>
+        <div className="drawer-head">
+          <div className="drawer-tabs">
+            <button className={drawerTab === 'log' ? 'on' : ''} onClick={() => { setDrawerTab('log'); if (drawerH < 60) setDrawerH(240); }}>
+              <span className={`dh-dot${running ? ' running' : ''}`}></span> Live Log
+            </button>
+            <button className={drawerTab === 'history' ? 'on' : ''} onClick={() => { setDrawerTab('history'); if (drawerH < 60) setDrawerH(240); }}>
+              History{activeTcId && tcRuns.length > 0 ? <span className="dh-count">{tcRuns.length}</span> : null}
+            </button>
+          </div>
+          {drawerTab === 'log' ? (
+            <>
+              <span className="dh-status">{running ? `Running ${runProgress.done}/${runProgress.total || 0}` : (logLines.length ? `${logLines.length} lines` : 'idle')}</span>
+              {(running || elapsed > 0) && <span className="dh-time">{elapsed.toFixed(1)}s</span>}
+              <span className="dh-meta">{execMode === 'parallel' ? 'Parallel' : 'Sequential'} · {headless ? 'Headless' : 'Headed'}</span>
+            </>
+          ) : (
+            <span className="dh-status">{activeTcId ? activeTcId : 'all test cases'}</span>
+          )}
+          <div style={{ flex: 1 }}></div>
+          {drawerTab === 'log' && <button className="dh-ic" title="Clear log" onClick={(e) => { e.stopPropagation(); onClearLog && onClearLog(); }}><I.Trash size={12} /></button>}
+          <button className="dh-ic" title={drawerH > 60 ? 'Collapse' : 'Expand'} onClick={() => setDrawerH(h => h > 60 ? 0 : 240)}>
+            <I.ChevronDown size={13} style={{ transform: drawerH > 60 ? 'none' : 'rotate(180deg)', transition: 'transform .15s' }} />
+          </button>
+        </div>
+        <div className="drawer-body" ref={logRef} style={{ height: drawerH }}>
+          {drawerTab === 'log' ? (
+            logLines.length === 0 ? (
+              <div className="drawer-empty">No output yet — run a test to see live logs here.</div>
+            ) : (
+              <div className="log-scroll" ref={logScrollRef}>
+                {logLines.map((l, i) => (
+                  <div className={`log-row ${l.type}`} key={i}>
+                    <span className="log-time">{l.t}</span>
+                    <span className="log-marker"></span>
+                    <span className="log-text">{l.text}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            <div className="drawer-runs">
+              {tcRuns.length === 0 ? (
+                <div className="drawer-empty">{activeTcId ? 'No runs yet for this test case.' : 'No run history.'}</div>
+              ) : tcRuns.map(h => (
+                <button className="drawer-run" key={h.id} onClick={() => openResultsTab && openResultsTab(h.id)} title="Open this run">
+                  <span className={`run-dot ${h.failed > 0 ? 'fail' : h.passed > 0 ? 'pass' : 'skip'}`}></span>
+                  <span className="run-when">{h.when}</span>
+                  <span className="run-stats"><b className="p">{h.passed}</b><span className="sep">·</span><b className="f">{h.failed}</b></span>
+                  <span className="run-dur">{(h.duration || 0).toFixed(1)}s</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -2294,6 +2592,37 @@ function LogView({ logLines, running, execMode, headless, onRun, onOpenCmd, chec
   );
 }
 
+// Linked Jira tickets (draft + raised) for a test case, shown on its title line.
+function JiraChips({ tcId, flowId, title }) {
+  const [items, setItems] = useState([]);
+  const load = useCallback(() => {
+    if (!window.ats || !window.ats.jiraItemsList) return;
+    window.ats.jiraItemsList().then(r => setItems(((r && r.items) || []).filter(x => x.tcId === tcId)));
+  }, [tcId]);
+  useEffect(() => {
+    load();
+    const h = () => load();
+    window.addEventListener('jira-items-changed', h);
+    return () => window.removeEventListener('jira-items-changed', h);
+  }, [load]);
+  return (
+    <div className="jira-chips">
+      {items.map(it => (
+        <button key={it.id}
+          className={`jira-chip ${it.type === 'story' ? 'story' : 'bug'} ${it.status === 'raised' ? 'raised' : 'draft'}`}
+          title={it.status === 'raised' ? `${it.jiraKey}${it.jiraStatus ? ' · ' + it.jiraStatus : ''} — open in Jira` : 'Draft — open Bug & Story Manager to raise'}
+          onClick={() => { if (it.status === 'raised' && it.jiraUrl) window.ats.openExternal(it.jiraUrl); else window.ats.bugsOpenWindow(); }}>
+          {it.type === 'story' ? <I.FileText size={11} /> : <I.Bug size={11} />}
+          <span>{it.status === 'raised' ? it.jiraKey : 'Draft'}</span>
+        </button>
+      ))}
+      <button className="jira-chip add" title="Create a Jira bug / story for this test" onClick={() => window.openJiraTab(tcId, flowId, title, 'Bug')}>
+        <I.Plus size={11} /> Bug/Story
+      </button>
+    </div>
+  );
+}
+
 function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openReviewTab }) {
   const tc = useMemo(() => {
     for (const m of MODULES) {
@@ -2310,6 +2639,7 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameVal, setRenameVal] = useState('');
+  const [dsHost, setDsHost] = useState(null);   // portal slot in the sub-tab row for DataView's controls
   const menuRef = useRef(null);
   useEffect(() => {
     const h = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
@@ -2345,7 +2675,7 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
     { id: 'edit', label: 'Edit Steps', icon: 'Edit', onClick: () => setTabView(tabId, 'steps') },
     { id: 'rerecord', label: 'Re-record', icon: 'Record', onClick: () => window.setModalState({ isOpen: true, type: 'record', tcId: tc.id, flowId: tc.module.id, description: tc.title }) },
     { id: 'coverage', label: 'Analyze Coverage', icon: 'BarChart', onClick: () => openCoverageTab ? openCoverageTab(tc.id, tc.module.id, tc.title) : window.setModalState({ isOpen: true, type: 'coverage', tcId: tc.id, flowId: tc.module.id, description: tc.title }) },
-    { id: 'jira', label: 'Jira Story', icon: 'Bug', onClick: () => window.setModalState({ isOpen: true, type: 'jira', tcId: tc.id, flowId: tc.module.id, description: tc.title, jiraType: 'Story' }) },
+    { id: 'jira', label: 'Jira Bug / Story', icon: 'Bug', onClick: () => window.openJiraTab(tc.id, tc.module.id, tc.title, 'Story') },
     { divider: true },
     { id: 'duplicate', label: 'Duplicate version…', icon: 'Copy', onClick: () => toast('Version duplicated') },
     { id: 'delete', label: 'Delete version', icon: 'Trash', danger: true, onClick: () => toast('Delete version?') },
@@ -2354,7 +2684,7 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
     { id: 'edit', label: 'Edit Test', icon: 'Edit', onClick: () => openReviewTab ? openReviewTab(tc.id, tc.module.id, tc.title, { editMode: true }) : window.setModalState({ isOpen: true, type: 'review', tcId: tc.id, flowId: tc.module.id, description: tc.title, reviewData: { editMode: true } }) },
     { id: 'rerecord', label: 'Re-record', icon: 'Record', onClick: () => window.setModalState({ isOpen: true, type: 'record', tcId: tc.id, flowId: tc.module.id, description: tc.title }) },
     { id: 'coverage', label: 'Analyze Coverage', icon: 'BarChart', onClick: () => openCoverageTab ? openCoverageTab(tc.id, tc.module.id, tc.title) : window.setModalState({ isOpen: true, type: 'coverage', tcId: tc.id, flowId: tc.module.id, description: tc.title }) },
-    { id: 'jira', label: 'Jira Story', icon: 'Bug', onClick: () => window.setModalState({ isOpen: true, type: 'jira', tcId: tc.id, flowId: tc.module.id, description: tc.title, jiraType: 'Story' }) },
+    { id: 'jira', label: 'Jira Bug / Story', icon: 'Bug', onClick: () => window.openJiraTab(tc.id, tc.module.id, tc.title, 'Story') },
     { divider: true },
     { id: 'rename', label: 'Rename / edit description…', icon: 'Edit', onClick: () => { setRenameVal(tc.title); setRenaming(true); } },
     { id: 'newver', label: 'New version…', icon: 'Plus', onClick: () => toast('New version created') },
@@ -2366,24 +2696,6 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
   return (
     <>
       <div className="tc-head-row">
-        <div className="id-block">
-          <span className={`tc-status-dot ${tc.lastStatus}`}></span>
-          <span className="tc-id">{tc.id}</span>
-          {(tc.tags || []).includes('flaky') && <span className="tc-tag" style={{ color: 'var(--warn)', background: 'oklch(94% 0.05 60)' }}>flaky</span>}
-          {(tc.tags || []).includes('new') && <span className="tc-tag" style={{ color: 'var(--accent)', background: 'var(--accent-bg)' }}>new</span>}
-          {(tc.tags || []).filter(t => t !== 'flaky' && t !== 'new').map(t => <span key={t} className="tc-tag">{t}</span>)}
-          {renaming ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <input className="setting-input" autoFocus value={renameVal}
-                onChange={e => setRenameVal(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(false); }}
-                style={{ minWidth: 280 }} />
-              <button className="ic-action" title="Save" onClick={commitRename}><I.Check size={13} /></button>
-              <button className="ic-action" title="Cancel" onClick={() => setRenaming(false)}><I.X size={13} /></button>
-            </span>
-          ) : <h3>{tc.title}</h3>}
-        </div>
-
         <div className="seg">
           {views.map(v => {
             const Icon = I[v.icon];
@@ -2400,8 +2712,9 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
           })}
         </div>
 
+        <div className="ds-host" ref={setDsHost}></div>
+
         <div className="right-acts">
-          <button className="run-action" title="Run only this test"><I.Play size={11} /> Run</button>
           <div ref={menuRef} style={{ position: 'relative' }}>
             <button className="ic-action" title="More" onClick={() => setMenuOpen(o => !o)}>
               <I.MoreHorizontal size={14} />
@@ -2429,7 +2742,25 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
       </div>
 
       <div className="detail-body">
-        {view === 'data' && tc.hasData && <DataView tc={tc} toast={toast} />}
+        <div className="tc-line">
+          <span className={`tc-status-dot ${tc.lastStatus}`}></span>
+          <span className="tc-id">{tc.id}</span>
+          {(tc.tags || []).includes('flaky') && <span className="tc-tag" style={{ color: 'var(--warn)', background: 'var(--warn-bg)' }}>flaky</span>}
+          {(tc.tags || []).includes('new') && <span className="tc-tag" style={{ color: 'var(--accent)', background: 'var(--accent-bg)' }}>new</span>}
+          {(tc.tags || []).filter(t => t !== 'flaky' && t !== 'new').map(t => <span key={t} className="tc-tag">{t}</span>)}
+          {renaming ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <input className="setting-input" autoFocus value={renameVal}
+                onChange={e => setRenameVal(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(false); }}
+                style={{ minWidth: 280 }} />
+              <button className="ic-action" title="Save" onClick={commitRename}><I.Check size={13} /></button>
+              <button className="ic-action" title="Cancel" onClick={() => setRenaming(false)}><I.X size={13} /></button>
+            </span>
+          ) : <h3 className="tc-line-title">{tc.title}</h3>}
+          <JiraChips tcId={tc.id} flowId={tc.module.id} title={tc.title} />
+        </div>
+        {view === 'data' && tc.hasData && <DataView tc={tc} toast={toast} ctlHost={dsHost} />}
         {view === 'data' && !tc.hasData && (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
             This test case has no configurable data.
@@ -2442,7 +2773,7 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
   );
 }
 
-function DataView({ tc, toast }) {
+function DataView({ tc, toast, ctlHost }) {
   const flowId = tc.module.id;
   // On a version tab, the synthetic tc.id is `${parentId}::${variant}`; resolve to the real TC id.
   const tcId = tc.isVersion && tc.parent ? tc.parent.id : tc.id;
@@ -2457,9 +2788,55 @@ function DataView({ tc, toast }) {
   const [dirty, setDirty] = useState(false);
   const [namePrompt, setNamePrompt] = useState(null); // { mode:'new'|'dup'|'tpl', value }
   const [templates, setTemplates] = useState(null);   // null = picker closed, [] = open
+  const [mode, setMode] = useState('table');          // 'table' | 'raw'  (table = friendly key/value)
+  const [rows, setRows] = useState([]);               // [{ id, key, val, type }]  type: 'text' | 'json'
+  const [moreOpen, setMoreOpen] = useState(false);    // variant/template overflow menu (keeps band 2 compact)
+  const moreRef = useRef(null);
+  const ridRef = useRef(0);
+  useEffect(() => {
+    const h = (e) => { if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
 
   let valid = true, parsed = null;
   try { parsed = JSON.parse(jsonStr); } catch (e) { valid = false; }
+
+  // ── Postman-style key/value <-> object bridge (jsonStr stays the single source of truth) ──
+  const isPlainObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
+  const canTable = isPlainObj(parsed);
+  const fieldCount = canTable ? Object.keys(parsed).length : rows.length;
+  const newRow = (key = '', val = '', type = 'text') => ({ id: ++ridRef.current, key, val, type });
+  const objToRows = (obj) => isPlainObj(obj)
+    ? Object.entries(obj).map(([k, v]) => typeof v === 'string' ? newRow(k, v, 'text') : newRow(k, JSON.stringify(v), 'json'))
+    : [];
+  const rowsToObj = (rs) => {
+    const o = {};
+    for (const r of rs) {
+      const k = (r.key || '').trim();
+      if (!k) continue;
+      if (r.type === 'json') { try { o[k] = JSON.parse(r.val); } catch (e) { o[k] = r.val; } }
+      else o[k] = r.val;
+    }
+    return o;
+  };
+  const rowValid = (r) => { if (r.type !== 'json') return true; try { JSON.parse(r.val); return true; } catch (e) { return false; } };
+  const commitRows = (rs) => { setRows(rs); setJsonStr(JSON.stringify(rowsToObj(rs), null, 2)); setDirty(true); };
+  const patchRow = (id, patch) => commitRows(rows.map(r => r.id === id ? { ...r, ...patch } : r));
+  const addRow = () => commitRows([...rows, newRow()]);
+  const delRow = (id) => { const next = rows.filter(r => r.id !== id); commitRows(next.length ? next : [newRow('', '', 'text')]); };
+  const toggleRowType = (id) => { const r = rows.find(x => x.id === id); if (r) patchRow(id, { type: r.type === 'json' ? 'text' : 'json' }); };
+  const goRaw = () => setMode('raw');
+  const goTable = () => {
+    // Only rebuild the table when the raw JSON was actually changed; otherwise keep the
+    // existing rows as-is so switching Raw<->Table never resets the table (or loses focus).
+    if (valid) {
+      const changed = JSON.stringify(rowsToObj(rows)) !== JSON.stringify(parsed);
+      if (changed) { const r = objToRows(parsed || {}); setRows(r.length ? r : [newRow('', '', 'text')]); }
+    }
+    setMode('table');
+  };
+  const formatJson = () => { if (valid) setJsonStr(JSON.stringify(parsed, null, 2)); };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -2484,6 +2861,15 @@ function DataView({ tc, toast }) {
   }, [flowId, tcId, lockedVariant]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Re-derive the key/value table whenever the data SOURCE changes (variant switch, reload, template),
+  // but NOT on table keystrokes (those only mutate jsonStr, leaving these deps untouched).
+  useEffect(() => {
+    let obj = {}; try { obj = JSON.parse(jsonStr); } catch (e) {}
+    const r = objToRows(obj);
+    setRows(r.length ? r : [newRow('', '', 'text')]);   // empty data → one blank row in the table
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, isVariantMode, loading]);
 
   function applyVariants(vs, name) {
     const names = Object.keys(vs);
@@ -2527,7 +2913,7 @@ function DataView({ tc, toast }) {
   async function applyTemplate(name) {
     setTemplates(null);
     const data = await window.ats.loadTemplate(name);
-    if (data) { setJsonStr(JSON.stringify(data, null, 2)); setDirty(true); toast(`Template "${name}" loaded — review and Save`); }
+    if (data) { setJsonStr(JSON.stringify(data, null, 2)); setRows(objToRows(data)); setDirty(true); toast(`Template "${name}" loaded — review and Save`); }
     else toast('Template empty or not found');
   }
 
@@ -2555,26 +2941,50 @@ function DataView({ tc, toast }) {
 
   return (
     <>
-      <div className="dataset-bar">
-        <label>Data set</label>
-        {lockedVariant ? (
-          <span style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--text-2)' }}>{lockedVariant} <span style={{ color: 'var(--text-3)', fontSize: 10.5 }}>(locked from {tcId})</span></span>
-        ) : isVariantMode ? (
-          <select value={active || ''} onChange={e => selectVariant(e.target.value)}>
-            {variantNames.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        ) : (
-          <select value="default" disabled><option value="default">default (flat)</option></select>
-        )}
-        <div className="acts">
-          <button onClick={() => setNamePrompt({ mode: 'new', value: '' })} disabled={!!lockedVariant}><I.Plus size={10} /> New</button>
-          <button onClick={() => setNamePrompt({ mode: 'dup', value: (active || 'data') + '_copy' })} disabled={!isVariantMode || !!lockedVariant}><I.Copy size={10} /> Duplicate</button>
-          <button title="Delete variant" onClick={doDelete} disabled={!isVariantMode || !!lockedVariant}><I.Trash size={10} /></button>
-          <button onClick={openTemplates}><I.Folder size={10} /> Load template</button>
-          <button onClick={() => setNamePrompt({ mode: 'tpl', value: tcId.toLowerCase() })}><I.Download size={10} /> Save as template</button>
-          <button onClick={save}><I.Save size={10} /> Save</button>
-        </div>
-      </div>
+      {(() => {
+        const inner = (<>
+          {/* view mode — labels kept (primary switch) */}
+          <div className="ds-seg">
+            <button className={mode === 'table' ? 'on' : ''} onClick={goTable} title="Edit as a key / value table"><I.Table size={12} /> Table</button>
+            <button className={mode === 'raw' ? 'on' : ''} onClick={goRaw} title="Edit raw JSON"><I.Braces size={12} /> Raw</button>
+          </div>
+          {mode === 'raw' && (
+            <button className="ds-ic" onClick={formatJson} disabled={!valid} title="Reformat / prettify the JSON"><I.Sparkle size={14} /></button>
+          )}
+          <div className="ds-div"></div>
+          {/* data set selector */}
+          {lockedVariant ? (
+            <span style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--text-2)' }}>{lockedVariant} <span style={{ color: 'var(--text-3)', fontSize: 10.5 }}>(locked from {tcId})</span></span>
+          ) : isVariantMode ? (
+            <select value={active || ''} onChange={e => selectVariant(e.target.value)} title="Switch data set variant">
+              {variantNames.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          ) : (
+            <select value="default" disabled title="Single (flat) data set"><option value="default">default (flat)</option></select>
+          )}
+          {/* variant + template actions tucked into an overflow menu so the band stays compact */}
+          <div className="ds-more" ref={moreRef}>
+            <button className="ds-ic" title="Variants & templates" onClick={() => setMoreOpen(o => !o)}><I.MoreHorizontal size={15} /></button>
+            {moreOpen && (
+              <div className="ds-menu">
+                <button onClick={() => { setMoreOpen(false); setNamePrompt({ mode: 'new', value: '' }); }} disabled={!!lockedVariant}><I.Plus size={13} /> New variant…</button>
+                <button onClick={() => { setMoreOpen(false); setNamePrompt({ mode: 'dup', value: (active || 'data') + '_copy' }); }} disabled={!isVariantMode || !!lockedVariant}><I.Copy size={13} /> Duplicate variant…</button>
+                <button className="danger" onClick={() => { setMoreOpen(false); doDelete(); }} disabled={!isVariantMode || !!lockedVariant}><I.Trash size={13} /> Delete variant</button>
+                <div className="div"></div>
+                <button onClick={() => { setMoreOpen(false); openTemplates(); }}><I.FolderOpen size={13} /> Load template…</button>
+                <button onClick={() => { setMoreOpen(false); setNamePrompt({ mode: 'tpl', value: tcId.toLowerCase() }); }}><I.Upload size={13} /> Save as template…</button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ flex: 1 }}></div>
+
+          <button className="ds-save" title="Save test data" onClick={save}><I.Save size={13} /> Save</button>
+        </>);
+        return ctlHost
+          ? ReactDOM.createPortal(inner, ctlHost)
+          : <div className="dataset-bar">{inner}</div>;
+      })()}
 
       {namePrompt && (
         <div className="dataset-bar" style={{ borderTop: 'none' }}>
@@ -2601,13 +3011,54 @@ function DataView({ tc, toast }) {
         </div>
       )}
 
-      <textarea className="json-editor" value={jsonStr} onChange={e => { setJsonStr(e.target.value); setDirty(true); }} spellCheck={false} />
+      {mode === 'table' ? (
+        canTable ? (
+          <div className="kv-editor">
+            {rows.length === 0 ? (
+              <div className="kv-empty">
+                <I.Database size={20} />
+                <span>No fields yet</span>
+                <button onClick={addRow}><I.Plus size={11} /> Add field</button>
+              </div>
+            ) : (
+              <>
+                <div className="kv-row kv-head"><span>Key</span><span>Value</span><span></span><span></span></div>
+                {rows.map(r => (
+                  <div className="kv-row" key={r.id}>
+                    <input className="kv-key" value={r.key} placeholder="key" spellCheck={false}
+                      onChange={e => patchRow(r.id, { key: e.target.value })} />
+                    <input className={`kv-val${rowValid(r) ? '' : ' invalid'}`} value={r.val}
+                      placeholder={r.type === 'json' ? 'JSON: 12, true, [..], {..}' : 'value'} spellCheck={false}
+                      onChange={e => patchRow(r.id, { val: e.target.value })} />
+                    <button className={`kv-type ${r.type}`} onClick={() => toggleRowType(r.id)}
+                      title={r.type === 'json' ? 'JSON value (number/bool/array/object) — click for plain text' : 'Plain text — click for JSON/number'}>
+                      {r.type === 'json' ? '{ }' : 'T'}
+                    </button>
+                    <button className="kv-del" onClick={() => delRow(r.id)} title="Remove field"><I.X size={12} /></button>
+                  </div>
+                ))}
+                <button className="kv-add" onClick={addRow}><I.Plus size={12} /> Add field</button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="kv-empty" style={{ minHeight: 140 }}>
+            <I.AlertCircle size={20} />
+            <span>{valid ? "This data isn't a flat object — edit it as Raw JSON." : 'Invalid JSON — switch to Raw to fix it.'}</span>
+            <button onClick={goRaw}><I.Braces size={11} /> Switch to Raw</button>
+          </div>
+        )
+      ) : (
+        <textarea className="json-editor" value={jsonStr} onChange={e => { setJsonStr(e.target.value); setDirty(true); }} spellCheck={false} />
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <span style={{ width: 6, height: 6, borderRadius: 99, background: valid ? 'var(--pass)' : 'var(--fail)' }}></span>
           {valid ? 'Valid JSON' : 'Invalid JSON'}
         </span>
         <span>· {isVariantMode ? active : 'flat'}</span>
+        <span>· {fieldCount} field{fieldCount === 1 ? '' : 's'}</span>
         <div style={{ flex: 1 }}></div>
         <span>{dirty ? 'unsaved changes' : 'saved'}</span>
         <span>· {flowId}/test_data.json</span>
