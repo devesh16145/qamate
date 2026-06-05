@@ -350,6 +350,25 @@ function createAgentWindow() {
   return agentWindow;
 }
 
+let bugManagerWindow = null;
+function createBugManagerWindow() {
+  if (bugManagerWindow && !bugManagerWindow.isDestroyed()) { bugManagerWindow.focus(); return bugManagerWindow; }
+  bugManagerWindow = new BrowserWindow({
+    width: 1100, height: 760,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    title: 'Agrim ATS — Bug & Story Manager',
+    backgroundColor: '#ffffff',
+  });
+  bugManagerWindow.loadFile(path.join(__dirname, 'src', 'bugs.html'));
+  bugManagerWindow.on('closed', () => { bugManagerWindow = null; });
+  return bugManagerWindow;
+}
+
 // Agent events are BROADCAST to every window: the dedicated agent window AND the main IDE
 // (when the agent is docked into its right panel) both run the same UI and route by sessionId.
 function sendToAgent(channel, data) {
@@ -406,6 +425,8 @@ function _spawnAgent(sessionId, projectId, initCmd) {
 }
 
 ipcMain.handle('agent-open-window', async () => { createAgentWindow(); return { status: 'success' }; });
+ipcMain.handle('bugs-open-window', async () => { createBugManagerWindow(); return { status: 'success' }; });
+ipcMain.handle('open-external', async (event, url) => { try { if (url) await shell.openExternal(String(url)); return { success: true }; } catch (e) { return { success: false, error: e.message }; } });
 
 // Dock the floating agent window INTO the main IDE's right panel: tell the main window to
 // render the docked agent, then close the floating window. Sessions keep running (the window's
@@ -884,6 +905,23 @@ ipcMain.handle('get-run-artifacts', async (event, runId) => {
   const junit = junitFile ? path.join(runDir, junitFile) : null;
 
   return { videos, screenshots, traces, heals, report, junit, folder: runDir };
+});
+
+// Artifacts (screenshots/videos) for a single test case from its latest run — for the Jira attach picker.
+ipcMain.handle('get-tc-artifacts', async (event, { tcId, runFolder } = {}) => {
+  try {
+    const folder = runFolder || _findLatestRunForTc(tcId);
+    if (!folder || !fs.existsSync(folder)) return { videos: [], screenshots: [], folder: null };
+    const tcNorm = String(tcId || '').replace(/-/g, '_');
+    const pick = (sub, ext) => {
+      const d = path.join(folder, sub);
+      if (!fs.existsSync(d)) return [];
+      return fs.readdirSync(d)
+        .filter(f => f.endsWith(ext) && (f.includes(tcId) || f.startsWith(tcNorm)))
+        .map(f => ({ name: f, path: path.join(d, f) }));
+    };
+    return { videos: pick('videos', '.webm'), screenshots: pick('screenshots', '.png'), folder };
+  } catch (e) { return { videos: [], screenshots: [], folder: null, error: e.message }; }
 });
 
 // ──────────────────────────────────────
@@ -1740,5 +1778,126 @@ ipcMain.handle('create-jira-story', async (event, { tcId, flowId, userStory, sum
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Bug & Story store (local sidecar jira_items.json) + raise / comment / status
+// Each item: { id, type:'bug'|'story', tcId, flowId, summary, description,
+//   labels:[], status:'draft'|'raised', jiraKey, jiraUrl, jiraStatus,
+//   runFolder, attachments:[paths], createdAt, updatedAt }
+// ──────────────────────────────────────────────────────────────────────────
+function _jiraItemsPath() { return path.join(__dirname, 'jira_items.json'); }
+function _readJiraItems() {
+  try {
+    const p = _jiraItemsPath();
+    if (!fs.existsSync(p)) return [];
+    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return Array.isArray(data) ? data : (data.items || []);
+  } catch (e) { return []; }
+}
+function _writeJiraItems(items) {
+  fs.writeFileSync(_jiraItemsPath(), JSON.stringify(items, null, 2), 'utf8');
+}
+// Attach a TC's run screenshots+videos (and any explicit files) to an issue.
+async function _attachArtifacts(cfg, issueKey, { tcId, runFolder, files } = {}) {
+  let count = 0;
+  const upload = async (fp, name) => { try { await _jiraUploadAttachment(cfg, issueKey, fp, name); count++; } catch (e) {} };
+  // Explicit file selection wins; otherwise auto-attach the TC's latest-run screenshots+videos.
+  if (files && files.length) {
+    for (const fp of files) { if (fp && fs.existsSync(fp)) await upload(fp, path.basename(fp)); }
+    return count;
+  }
+  if (tcId) {
+    const folder = runFolder || _findLatestRunForTc(tcId);
+    if (folder) {
+      const tcNorm = tcId.replace(/-/g, '_');
+      for (const sub of ['screenshots', 'videos']) {
+        const d = path.join(folder, sub);
+        if (fs.existsSync(d)) {
+          for (const f of fs.readdirSync(d)) {
+            if (f.includes(tcId) || f.startsWith(tcNorm)) await upload(path.join(d, f), f);
+          }
+        }
+      }
+    }
+  }
+  return count;
+}
+
+ipcMain.handle('jira-items-list', async () => ({ success: true, items: _readJiraItems() }));
+
+ipcMain.handle('jira-item-save', async (event, item) => {
+  try {
+    const items = _readJiraItems();
+    const now = new Date().toISOString();
+    if (item && item.id) {
+      const i = items.findIndex(x => x.id === item.id);
+      if (i >= 0) items[i] = { ...items[i], ...item, updatedAt: now };
+      else items.push({ ...item, createdAt: now, updatedAt: now });
+    } else {
+      item = { ...item, id: 'JI-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        status: (item && item.status) || 'draft', createdAt: now, updatedAt: now };
+      items.push(item);
+    }
+    _writeJiraItems(items);
+    return { success: true, item: items.find(x => x.id === item.id), items };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('jira-item-delete', async (event, { id }) => {
+  try { const items = _readJiraItems().filter(x => x.id !== id); _writeJiraItems(items); return { success: true, items }; }
+  catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('jira-item-raise', async (event, { id }) => {
+  const cfg = _getJiraConfig();
+  if (!cfg.url || !cfg.email || !cfg.apiKey) return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
+  const items = _readJiraItems();
+  const item = items.find(x => x.id === id);
+  if (!item) return { success: false, error: 'Item not found' };
+  try {
+    const isBug = item.type === 'bug';
+    const labels = (item.labels && item.labels.length) ? item.labels : (isBug ? ['automated-test', 'ats'] : ['ats-generated']);
+    const body = { fields: {
+      project: { key: cfg.projectKey },
+      issuetype: { name: isBug ? 'Bug' : 'Story' },
+      summary: item.summary || `${isBug ? 'BUG' : 'STORY'}: ${item.tcId || ''}`,
+      description: item.description || '',
+      labels,
+    } };
+    const res = await _jiraRequest(cfg, 'POST', '/issue', body);
+    if (res.status !== 201) return { success: false, error: `Jira HTTP ${res.status}: ${JSON.stringify(res.body)}` };
+    const key = res.body.key;
+    const attachCount = await _attachArtifacts(cfg, key, { tcId: item.tcId, runFolder: item.runFolder, files: item.attachments });
+    item.status = 'raised'; item.jiraKey = key; item.jiraUrl = `${cfg.url}/browse/${key}`;
+    item.jiraStatus = 'To Do'; item.updatedAt = new Date().toISOString();
+    _writeJiraItems(items);
+    return { success: true, item, key, url: item.jiraUrl, attachments: attachCount };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('jira-issue-status', async (event, { key }) => {
+  const cfg = _getJiraConfig();
+  if (!cfg.url || !cfg.email || !cfg.apiKey) return { success: false, error: 'Jira not configured' };
+  try {
+    const res = await _jiraRequest(cfg, 'GET', `/issue/${key}?fields=status,summary`);
+    if (res.status !== 200) return { success: false, error: `HTTP ${res.status}` };
+    const st = res.body.fields && res.body.fields.status ? res.body.fields.status.name : null;
+    return { success: true, status: st, summary: res.body.fields && res.body.fields.summary };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('jira-add-comment', async (event, { key, body, attachments, tcId, runFolder }) => {
+  const cfg = _getJiraConfig();
+  if (!cfg.url || !cfg.email || !cfg.apiKey) return { success: false, error: 'Jira not configured. Set URL, Email, and API Token in Settings.' };
+  try {
+    let attachCount = 0;
+    if ((attachments && attachments.length) || tcId) attachCount = await _attachArtifacts(cfg, key, { tcId, runFolder, files: attachments });
+    if (body && body.trim()) {
+      const res = await _jiraRequest(cfg, 'POST', `/issue/${key}/comment`, { body });
+      if (res.status !== 201) return { success: false, error: `Comment HTTP ${res.status}: ${JSON.stringify(res.body)}` };
+    }
+    return { success: true, attachments: attachCount };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 

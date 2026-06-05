@@ -230,6 +230,21 @@ const ICONS = {
     ['path', { d: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7' }],
     ['path', { d: 'M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z' }],
   ],
+  Table: [
+    ['path', { d: 'M12 3v18' }],
+    ['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }],
+    ['path', { d: 'M3 9h18' }],
+    ['path', { d: 'M3 15h18' }],
+  ],
+  Braces: [
+    ['path', { d: 'M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1' }],
+    ['path', { d: 'M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1' }],
+  ],
+  Database: [
+    ['ellipse', { cx: 12, cy: 5, rx: 9, ry: 3 }],
+    ['path', { d: 'M3 5v14a9 3 0 0 0 18 0V5' }],
+    ['path', { d: 'M3 12a9 3 0 0 0 18 0' }],
+  ],
 };
 
 Object.keys(ICONS).forEach((name) => {
