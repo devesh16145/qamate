@@ -64,8 +64,8 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project_store
 import agent_sessions
-from app_explorer import _comprehensive_snapshot, element_to_model, _label
-from dom_inspector import DESTRUCTIVE_KEYWORDS
+from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link
+from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
 from smart_locator import smart_locator, SelfHealError, to_locator
 from recorder_parser import generate_from_review
 from agent_recorder import _locator_str, _q  # reuse the proven codegen helpers
@@ -860,6 +860,119 @@ class BrowserSession:
         return res
 
 
+# ── UI Map crawler (sync, runs on _BROWSER thread) ───────────────────────────
+
+def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
+    """BFS crawl using the agent's existing authenticated sync Playwright page.
+    Follows same-origin <a href> links only (no button-clicks that might mutate state).
+    Saves elements per page, nav edges, errors. Navigates back to start_url when done."""
+    page = session.page
+    if not page:
+        return {"ok": False, "error": "browser not running"}
+
+    def _log(m):
+        if on_log:
+            on_log(str(m))
+
+    m = re.match(r"(https?://[^/]+)", start_url)
+    base_origin = m.group(1) if m else start_url
+
+    pages_data = {}   # norm_url -> page snapshot
+    nav_edges = []
+    visited = set()
+    errors = []
+    queue = [(start_url, 0, None)]  # (url, depth, edge_dict)
+
+    while queue and len(pages_data) < max_pages:
+        url, depth, edge = queue.pop(0)
+        norm = _normalize_url(url)
+        if norm in visited:
+            continue
+        visited.add(norm)
+
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:
+                pass
+        except Exception as e:
+            errors.append({"url": url, "error": str(e)[:200]})
+            _log(f"[map] skip {url}: {str(e)[:80]}")
+            continue
+
+        if edge:
+            nav_edges.append(edge)
+
+        title = ""
+        try:
+            title = page.title()
+        except Exception:
+            pass
+
+        raw = _comprehensive_snapshot(page)
+        elements = []
+        seen_refs: dict = {}
+        for el in raw:
+            if "_error" in el or not _label(el) or not el.get("visible", True):
+                continue
+            mod = element_to_model(el)
+            ref = mod["ref"]
+            if ref in seen_refs:
+                seen_refs[ref] += 1
+                mod["ref"] = f"{ref}-{seen_refs[ref]}"
+            else:
+                seen_refs[ref] = 0
+            # Keep only what the agent needs — drop fingerprint/fallback bulk
+            elements.append({k: mod[k] for k in
+                              ("ref", "role", "name", "tag", "test_id",
+                               "input_type", "placeholder", "primary") if k in mod})
+
+        links_out = []
+        try:
+            for lnk in page.evaluate(_LINKS_JS):
+                href = lnk.get("href", "")
+                text = lnk.get("text", "")
+                if not href or _should_skip_link(href, text):
+                    continue
+                norm_href = _normalize_url(href)
+                if norm_href and norm_href not in visited:
+                    links_out.append(norm_href)
+                    if depth + 1 <= max_depth:
+                        queue.append((href, depth + 1, {
+                            "from": norm, "via": (text or href)[:60], "to": norm_href,
+                        }))
+        except Exception:
+            pass
+
+        pages_data[norm] = {
+            "title": title, "url": norm, "depth": depth,
+            "element_count": len(elements), "elements": elements,
+            "links_out": sorted(set(links_out)),
+        }
+        _log(f"[map] [{len(pages_data)}/{max_pages}] {norm}  "
+             f"({len(elements)} elements, depth {depth})")
+
+    # Return browser to start page so the agent can continue where it was
+    try:
+        page.goto(start_url, wait_until="domcontentloaded", timeout=15000)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "schema_version": 2,
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "start_url": _normalize_url(start_url),
+        "base_origin": base_origin,
+        "page_count": len(pages_data),
+        "element_count": sum(p["element_count"] for p in pages_data.values()),
+        "pages": pages_data,
+        "navigation": nav_edges,
+        "errors": errors,
+    }
+
+
 # ── Agent dependencies ───────────────────────────────────────────────────────
 
 @dataclass
@@ -906,6 +1019,9 @@ _SYSTEM = (
     "- Note: you usually do NOT need credentials to log in — the session is already authenticated "
     "for you; get_settings is for answering questions and for flows that explicitly need an account.\n\n"
     "Context about the app (use what you're given — don't ask the user to paste things you can read):\n"
+    "- At the start of a new project, call map_app to BFS-crawl the app and discover all screens, "
+    "their elements, and navigation. Call read_ui_map (with a url_filter) to look up elements on a "
+    "specific screen before driving it — you know what's there before you inspect blind.\n"
     "- The user can ATTACH documents and images to a message. Document text is inlined for you and "
     "images are shown to you visually — read them and act on them.\n"
     "- The project may have a SCOPED CONTEXT FOLDER (a docs/code tree about the app). It is NOT "
@@ -1058,6 +1174,17 @@ def build_agent(model, max_tokens=None):
         except Exception:
             pass
 
+        # Windows: prevent handle inheritance deadlocks when agent has live Chrome/Playwright.
+        # stdin=DEVNULL: pytest must not inherit the agent's stdin (Electron IPC pipe) or it
+        # blocks waiting for input that never arrives and the process never exits.
+        # CREATE_NO_WINDOW + close_fds: sever the inheritance chain so Chrome subprocesses
+        # spawned by the test's Playwright don't hold the stdout PIPE open past pytest exit.
+        _spawn_kw: dict = {"stdin": asyncio.subprocess.DEVNULL}
+        if sys.platform == "win32":
+            import subprocess as _sp
+            _spawn_kw["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0x08000000)
+            _spawn_kw["close_fds"] = True  # Python 3.9+: PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+
         async def _one(idx):
             rdir = os.path.join(verify_root, f"{underscored}_{idx}")
             env = dict(base_env)
@@ -1067,7 +1194,8 @@ def build_agent(model, max_tokens=None):
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd, cwd=ats_root, env=env,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                    **_spawn_kw)
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
             except asyncio.TimeoutError:
                 try:
@@ -1397,6 +1525,119 @@ def build_agent(model, max_tokens=None):
             return {"ok": True, "path": p, "mode": mode, "bytes": os.path.getsize(p)}
         except Exception as e:
             return {"ok": False, "error": str(e)[:160]}
+
+    @agent.tool
+    async def map_app(ctx: RunContext[Deps], start_url: str = "",
+                      max_pages: int = 30, max_depth: int = 3) -> dict:
+        """BFS-crawl the web app to discover all screens, their interactive elements, and
+        navigation paths, then save a ui_map.json to the project folder.
+        Call this at the start of a new project — the map tells you what pages exist and what
+        elements are on them BEFORE you author any test, so you're not exploring blind.
+        start_url: leave empty to start from the current page.
+        max_pages: stop after N pages (default 30). max_depth: BFS link depth (default 3).
+        Returns a page inventory; use read_ui_map to query elements for a specific screen."""
+        session = ctx.deps.session
+        if not session.page:
+            return {"ok": False, "error": "browser not running — call navigate first"}
+        actual_start = start_url
+        if not actual_start:
+            try:
+                actual_start = await _bro(lambda: session.page.url)
+            except Exception:
+                return {"ok": False, "error": "could not read current URL"}
+        if not actual_start or not actual_start.startswith("http"):
+            return {"ok": False, "error": f"invalid start URL: {actual_start!r}"}
+
+        def _run():
+            return _crawl_ui_map(session, actual_start, max_pages, max_depth, on_log=log)
+
+        ui_map = await _bro(_run)
+        if not ui_map.get("ok"):
+            return ui_map
+
+        ats_root = ctx.deps.ats_root
+        proj_id = (ctx.deps.project or {}).get("id", "")
+        out_path = (project_store.ui_map_path(ats_root, proj_id)
+                    if proj_id else os.path.join(ats_root, "ui_map.json"))
+        try:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(ui_map, f, indent=2)
+        except Exception as e:
+            ui_map["save_error"] = str(e)[:200]
+
+        page_list = [
+            {"url": p["url"], "title": p["title"],
+             "depth": p["depth"], "elements": p["element_count"]}
+            for p in ui_map["pages"].values()
+        ]
+        return {
+            "ok": True,
+            "page_count": ui_map["page_count"],
+            "element_count": ui_map["element_count"],
+            "errors": len(ui_map["errors"]),
+            "saved_to": out_path,
+            "pages": page_list,
+            "note": "Call read_ui_map(url_filter='/some/path') to see elements for a specific screen.",
+        }
+
+    @agent.tool
+    async def read_ui_map(ctx: RunContext[Deps], url_filter: str = "") -> dict:
+        """Query the saved UI map (built by map_app).
+        url_filter: if given, returns full element list for pages whose URL contains this string
+        (e.g. '/catalog', '/orders'). Without a filter, returns the page inventory and navigation
+        graph only (no per-page elements) to stay concise. Run map_app first if the map is missing."""
+        ats_root = ctx.deps.ats_root
+        proj_id = (ctx.deps.project or {}).get("id", "")
+        path = (project_store.ui_map_path(ats_root, proj_id)
+                if proj_id else os.path.join(ats_root, "ui_map.json"))
+        if not os.path.isfile(path):
+            return {"ok": False, "error": "no UI map found — call map_app first"}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                ui_map = json.load(f)
+        except Exception as e:
+            return {"ok": False, "error": f"could not read ui_map.json: {str(e)[:160]}"}
+
+        pages = ui_map.get("pages", {})
+        if url_filter:
+            matched = {u: p for u, p in pages.items()
+                       if url_filter.lower() in u.lower()}
+            if not matched:
+                return {"ok": True, "found": 0,
+                        "note": f"no pages match '{url_filter}'",
+                        "all_urls": [p["url"] for p in pages.values()]}
+            return {
+                "ok": True, "found": len(matched),
+                "pages": {
+                    u: {"title": p["title"], "depth": p["depth"],
+                        "elements": p.get("elements", []),
+                        "links_out": p.get("links_out", [])}
+                    for u, p in matched.items()
+                },
+            }
+        # Inventory + deduplicated nav only
+        inventory = [
+            {"url": p["url"], "title": p["title"],
+             "depth": p["depth"], "element_count": p["element_count"],
+             "links_out": len(p.get("links_out", []))}
+            for p in pages.values()
+        ]
+        seen_edges: set = set()
+        nav = []
+        for e in ui_map.get("navigation", []):
+            key = f"{e.get('from')}|{e.get('to')}"
+            if key not in seen_edges:
+                seen_edges.add(key)
+                nav.append(e)
+        return {
+            "ok": True,
+            "generated_at": ui_map.get("generated_at"),
+            "page_count": ui_map.get("page_count", len(inventory)),
+            "element_count": ui_map.get("element_count", 0),
+            "pages": inventory,
+            "navigation": nav[:60],
+        }
 
     @agent.instructions
     async def _project_memory_and_context(ctx: RunContext[Deps]) -> str:
