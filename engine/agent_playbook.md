@@ -19,6 +19,21 @@ single biggest failure mode. Verify, fix, re-run, and only then deliver.
   automatically, but if you still see a closed-browser error, call `restart_browser` yourself.
 - After `restart_browser` your old refs are stale — always `inspect_page` before acting.
 
+## Mapping an app before authoring
+When starting work on a new app or project (or after the app has changed significantly):
+1. Call `map_app(start_url)` — BFS-crawls the authenticated app from `start_url`, discovers
+   every linked screen, catalogs interactive elements per page, and saves `ui_map.json`.
+   You only need to do this ONCE per project (or when the app's structure changes).
+2. Call `read_ui_map()` — returns the full page inventory and navigation graph (no per-page
+   elements — concise). Use this to plan which flows to test.
+3. Call `read_ui_map(url_filter='/some/path')` to get the element list for a specific screen
+   BEFORE you navigate to it. This tells you what buttons/forms/inputs are there so you can
+   pick the right actions without blind inspect-and-guess loops.
+
+The UI map is authoritative for structure (what pages exist, what elements they have).
+It does NOT capture dynamic content (data rows, generated IDs) — use inspect_page for those.
+Update the map with a fresh `map_app` call when the app's navigation or layout changes.
+
 ## Exploring and inspecting
 - Call `inspect_page` BEFORE acting on a page. Use ONLY the refs from the most recent
   `inspect_page`. Re-inspect after any navigation or click that changes the page.

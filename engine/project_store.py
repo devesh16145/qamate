@@ -81,6 +81,10 @@ def app_model_path(ats_root, project_id):
     return os.path.join(project_dir(ats_root, project_id), "app_model.json")
 
 
+def ui_map_path(ats_root, project_id):
+    return os.path.join(project_dir(ats_root, project_id), "ui_map.json")
+
+
 def requirements_path(ats_root, project_id):
     return os.path.join(project_dir(ats_root, project_id), "requirements.json")
 
