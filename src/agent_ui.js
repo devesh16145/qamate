@@ -486,14 +486,22 @@
 
   /* ── Root ────────────────────────────────────────────────────────────────── */
   /* ── Chat initiator: compose a first message to start a brand-new session ──── */
-  function StartComposer({ onStart, headed, setHeaded, onOpenBrowser }) {
+  function StartComposer({ onStart, headed, setHeaded, onOpenBrowser, projectId }) {
     const [text, setText] = useState('');
     const [atts, setAtts] = useState([]);
+    const [autoOpen, setAutoOpen] = useState(false);
     const go = () => { const t = text.trim(); if (!t && !atts.length) return; onStart(t, atts); setText(''); setAtts([]); };
     const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } };
     const addFiles = async () => { const r = await window.ats.agentPickFiles(); const files = (r && r.files) || []; if (files.length) setAtts((a) => [...a, ...files]); };
     return (
       <div className="ses-initiator">
+        {autoOpen && (
+          <RunAutoModal
+            projectId={projectId}
+            onClose={() => setAutoOpen(false)}
+            onConfirm={(msg) => { setAutoOpen(false); onStart(msg, []); }}
+          />
+        )}
         {atts.length > 0 && (
           <div className="ses-init-atts">
             {atts.map((a, i) => (
@@ -512,7 +520,106 @@
             <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} /> Watch live
           </label>
           <span style={{ flex: 1 }}></span>
+          <button className="rv-cta sm" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised">
+            <Ic.Zap size={12} /> Auto
+          </button>
           <button className="rv-cta primary sm" onClick={go} disabled={!text.trim() && !atts.length}><Ic.Play size={13} /> Start</button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Autonomous Run Modal ────────────────────────────────────────────────── */
+  function RunAutoModal({ onConfirm, onClose, projectId }) {
+    const [url, setUrl] = useState('');
+    const [files, setFiles] = useState(null);   // null=loading, []=no ctx
+    const [contextFile, setContextFile] = useState('');
+    const [focus, setFocus] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+      window.ats.getConfig().then((cfg) => {
+        const envs = (cfg && cfg.environments) || {};
+        const env = Object.keys(envs).find((k) => envs[k] && envs[k].is_default) || 'dev';
+        const su = cfg && cfg.platforms && cfg.platforms.seller && cfg.platforms.seller.urls;
+        const u = (su && (su[env] || su.dev)) || '';
+        if (u) setUrl(u);
+      }).catch(() => {});
+      window.ats.agentContextList({ projectId: projectId || '', subdir: '' })
+        .then((r) => setFiles((r && r.files) || []))
+        .catch(() => setFiles([]));
+    }, [projectId]);
+
+    const run = () => {
+      const u = url.trim(); if (!u) return;
+      let msg = `Map the app at ${u}`;
+      if (contextFile) {
+        msg += `, extract all testable flows from @${contextFile}`;
+        if (focus.trim()) msg += ` (focus on: ${focus.trim()})`;
+      } else {
+        msg += ', discover all screens and identify the main user flows';
+      }
+      msg += '. Then for each flow: navigate to its entry URL, drive the complete flow step by step, add_checkpoint at each meaningful outcome, create_test_case with the suggested tc_id and flow_id, run_test_case — fix and re-run until it passes. Work through ALL flows autonomously without stopping for confirmation between them. End with a summary: N flows authored, M passed, K need attention.';
+      setBusy(true);
+      onConfirm(msg);
+    };
+
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+           onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, width: 440, maxWidth: '92vw', padding: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Ic.Zap size={15} style={{ color: 'var(--accent)' }} />
+            <b style={{ fontSize: 13 }}>Run Autonomous</b>
+            <span style={{ flex: 1 }} />
+            <button className="rv-cta" onClick={onClose}><Ic.X size={13} /></button>
+          </div>
+          <p style={{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.5, margin: '0 0 14px' }}>
+            The agent maps the app, extracts flows from your spec, then authors and verifies a test for each — no hand-holding required.
+          </p>
+
+          <label style={{ display: 'block', marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>App URL <span style={{ color: 'var(--fail)' }}>*</span></div>
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-app.com/"
+              style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }} />
+          </label>
+
+          <label style={{ display: 'block', marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>
+              Spec / PRD file
+              <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 4 }}>(optional — from context folder)</span>
+            </div>
+            {files === null
+              ? <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Loading…</div>
+              : files.length === 0
+                ? <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                    No context folder set. Attach one via <b>Context</b> in the agent header,
+                    or leave blank and the agent will discover flows by exploring the app.
+                  </div>
+                : <select value={contextFile} onChange={(e) => setContextFile(e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)' }}>
+                    <option value="">— explore freely, no spec —</option>
+                    {files.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
+                  </select>}
+          </label>
+
+          {contextFile && (
+            <label style={{ display: 'block', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>
+                Focus
+                <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 4 }}>(optional — e.g. "catalog" or "checkout")</span>
+              </div>
+              <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="leave blank to extract all flows"
+                style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }} />
+            </label>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: contextFile ? 0 : 14 }}>
+            <button className="rv-cta" onClick={onClose}>Cancel</button>
+            <button className="rv-cta primary" onClick={run} disabled={!url.trim() || busy}>
+              <Ic.Zap size={12} /> {busy ? 'Starting…' : 'Run Autonomous'}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -672,7 +779,7 @@
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
         projectId={projectId} toast={toast} onBack={onBack} />
     );
-    const initiator = <StartComposer onStart={startWithMessage} headed={headed} setHeaded={setHeaded} onOpenBrowser={openBrowser} />;
+    const initiator = <StartComposer onStart={startWithMessage} headed={headed} setHeaded={setHeaded} onOpenBrowser={openBrowser} projectId={projectId} />;
     const noSessionPane = (
       <div className="agent-pane no-ses">
         <div className="no-ses-msg">
