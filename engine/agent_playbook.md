@@ -19,6 +19,23 @@ single biggest failure mode. Verify, fix, re-run, and only then deliver.
   automatically, but if you still see a closed-browser error, call `restart_browser` yourself.
 - After `restart_browser` your old refs are stale — always `inspect_page` before acting.
 
+## Starting a new project — the full setup sequence
+When working on a new app with a PRD or spec:
+1. `map_app(start_url)` — discover all screens, elements, nav graph → saved to ui_map.json.
+2. `extract_flows(context_file='<prd_file>')` — parse the spec into a structured work order:
+   a list of flows each with role, entry URL, steps, success criteria, suggested TC id.
+3. For each flow in the returned list:
+   a. `navigate` to `flow['entry']`
+   b. Drive the flow step by step (inspect_page → click/fill/select_option)
+   c. `add_checkpoint` at each meaningful outcome
+   d. `create_test_case` (use `suggested_tc_id` and `suggested_flow_id`)
+   e. `run_test_case` — verify it passes (fix and re-run if needed)
+   f. Move to the next flow
+4. Report the final summary: N flows authored, M passed, K failed (with error detail).
+
+Do not stop between flows to ask for confirmation — work through the list autonomously
+and only pause if a flow is genuinely ambiguous or the app is in an unexpected state.
+
 ## Mapping an app before authoring
 When starting work on a new app or project (or after the app has changed significantly):
 1. Call `map_app(start_url)` — BFS-crawls the authenticated app from `start_url`, discovers
