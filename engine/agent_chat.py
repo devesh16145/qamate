@@ -66,6 +66,7 @@ import project_store
 import agent_sessions
 from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link
 from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
+import llm as _llm
 from smart_locator import smart_locator, SelfHealError, to_locator
 from recorder_parser import generate_from_review
 from agent_recorder import _locator_str, _q  # reuse the proven codegen helpers
@@ -1019,9 +1020,10 @@ _SYSTEM = (
     "- Note: you usually do NOT need credentials to log in — the session is already authenticated "
     "for you; get_settings is for answering questions and for flows that explicitly need an account.\n\n"
     "Context about the app (use what you're given — don't ask the user to paste things you can read):\n"
-    "- At the start of a new project, call map_app to BFS-crawl the app and discover all screens, "
-    "their elements, and navigation. Call read_ui_map (with a url_filter) to look up elements on a "
-    "specific screen before driving it — you know what's there before you inspect blind.\n"
+    "- At the start of a new project: (1) call map_app to discover all screens; "
+    "(2) call extract_flows(context_file='<prd>') to turn the spec into a structured work order "
+    "(list of flows, each with entry URL, steps, success criteria, suggested TC id); "
+    "(3) call read_ui_map(url_filter=...) to see elements on a specific screen before driving it.\n"
     "- The user can ATTACH documents and images to a message. Document text is inlined for you and "
     "images are shown to you visually — read them and act on them.\n"
     "- The project may have a SCOPED CONTEXT FOLDER (a docs/code tree about the app). It is NOT "
@@ -1499,6 +1501,138 @@ def build_agent(model, max_tokens=None):
         except Exception as e:
             return {"ok": False, "error": str(e)[:160]}
         return {"ok": True, "path": p, "content": "", "note": "memory is empty"}
+
+    @agent.tool
+    async def extract_flows(ctx: RunContext[Deps], context_file: str = "",
+                            focus: str = "") -> dict:
+        """Parse a PRD, spec, or requirements file from the context folder into a structured
+        list of testable end-to-end flows — each with role, entry URL, steps, and success
+        criteria. This is the work order for autonomous test authoring.
+        context_file: filename in the project context folder (list_context_files to browse).
+        focus: optional keyword to filter flows, e.g. 'catalog' or 'checkout'.
+        After extracting, navigate to each flow's entry URL, drive the flow, create_test_case,
+        and run_test_case — repeat for each flow in the list."""
+        base = ctx.deps.context_dir or ""
+
+        # If no file given, list what's available
+        if not context_file:
+            if not base or not os.path.isdir(base):
+                return {"ok": False, "error": "no context folder set — attach a file or set the context folder in project settings"}
+            try:
+                files = [f for f in sorted(os.listdir(base))
+                         if not _is_junk_name(f) and os.path.isfile(os.path.join(base, f))]
+            except Exception:
+                files = []
+            return {"ok": False, "error": "context_file is required",
+                    "available_files": files,
+                    "hint": "Call extract_flows(context_file='<name>') with one of the files above."}
+
+        safe = _scoped_path(base, context_file) if base else None
+        if not safe or not os.path.isfile(safe):
+            return {"ok": False, "error": f"file not found in context folder: {context_file!r}"}
+
+        text, truncated = extract_file_text(safe)
+        if text is None:
+            return {"ok": False, "error": f"could not read '{context_file}' (unsupported format or binary)"}
+        if len(text) > 40_000:
+            text = text[:40_000]
+            truncated = True
+
+        # Inject known pages from the UI map so the LLM can use real entry URLs
+        ats_root = ctx.deps.ats_root
+        proj_id = (ctx.deps.project or {}).get("id", "")
+        map_path = (project_store.ui_map_path(ats_root, proj_id)
+                    if proj_id else os.path.join(ats_root, "ui_map.json"))
+        pages_hint = ""
+        if os.path.isfile(map_path):
+            try:
+                with open(map_path, "r", encoding="utf-8") as f:
+                    ui_map = json.load(f)
+                page_lines = [f"  {p['url']}  ({p['element_count']} elements, title: {p['title']!r})"
+                              for p in list(ui_map.get("pages", {}).values())[:20]]
+                if page_lines:
+                    pages_hint = ("\n\nKnown app pages (from UI map — use these for entry URLs):\n"
+                                  + "\n".join(page_lines))
+            except Exception:
+                pass
+
+        focus_clause = f"\nFocus only on flows related to: {focus}\n" if focus else ""
+
+        _SYSTEM_EXTRACT = (
+            "You are a senior QA engineer specialising in end-to-end test planning.\n"
+            "Extract every distinct testable end-to-end flow from the specification.\n"
+            "A flow is ONE complete user journey: start → actions → verifiable outcome.\n\n"
+            "Output a JSON ARRAY (no wrapper object). Each item:\n"
+            "  id                – 'flow-NNN' (sequential, 3-digit)\n"
+            "  name              – concise verb+object ('Create product', 'Accept purchase order')\n"
+            "  role              – user type ('Seller', 'Admin', 'Buyer', 'Guest')\n"
+            "  entry             – URL path or page name where the flow starts\n"
+            "  preconditions     – one line: what must be true before starting\n"
+            "  steps             – array of 3-8 high-level user actions (what they DO)\n"
+            "  success_criteria  – what must be true at the END (what to assert)\n"
+            "  suggested_tc_id   – 'TC-<AREA>-NNN' (AREA = CATALOG, ORDERS, AUTH, SETTINGS, ADMIN …)\n"
+            "  suggested_flow_id – lowercase folder name ('catalog', 'orders', 'auth')\n"
+            "  priority          – 'high' | 'medium' | 'low'\n\n"
+            "Rules:\n"
+            "- Happy path for every major feature. Include important negative/error paths too.\n"
+            "- Do NOT include infrastructure or data-setup steps — only real user journeys.\n"
+            "- Steps: 3-8 high-level actions. 'Fill form and submit' beats listing every field.\n"
+            "- Group related flows by suggested_flow_id.\n"
+            "- If you cannot determine an entry URL, use the closest known page path."
+        )
+
+        user_prompt = (
+            f"Specification file: {context_file}\n"
+            f"{focus_clause}"
+            f"{pages_hint}\n\n"
+            f"--- SPECIFICATION ---\n{text}\n--- END ---"
+        )
+
+        try:
+            provider = _llm.make_provider(ctx.deps.config)
+        except _llm.LLMError as e:
+            return {"ok": False, "error": f"LLM provider not configured: {e}"}
+
+        loop = asyncio.get_running_loop()
+        try:
+            flows = await loop.run_in_executor(
+                None,
+                lambda: _llm.complete_json(provider, _SYSTEM_EXTRACT, user_prompt, max_tokens=4096)
+            )
+        except _llm.LLMNotConfigured as e:
+            return {"ok": False, "error": str(e)}
+        except _llm.LLMError as e:
+            return {"ok": False, "error": f"LLM extraction failed: {str(e)[:300]}"}
+        except Exception as e:
+            return {"ok": False, "error": f"unexpected error: {str(e)[:200]}"}
+
+        if not isinstance(flows, list):
+            # LLM may return {"flows": [...]} — unwrap
+            if isinstance(flows, dict):
+                for key in ("flows", "test_flows", "items", "results"):
+                    if isinstance(flows.get(key), list):
+                        flows = flows[key]
+                        break
+        if not isinstance(flows, list):
+            return {"ok": False, "error": "LLM did not return a JSON array of flows",
+                    "raw": str(flows)[:400]}
+
+        if focus:
+            flows = [f for f in flows
+                     if focus.lower() in json.dumps(f).lower()]
+
+        return {
+            "ok": True,
+            "flow_count": len(flows),
+            "source_file": context_file,
+            "truncated": truncated,
+            "flows": flows,
+            "note": (
+                "Work order ready. For each flow: navigate to flow['entry'], drive the steps, "
+                "add_checkpoint at each success_criteria, create_test_case (use suggested_tc_id "
+                "and suggested_flow_id), then run_test_case. Repeat until all flows are green."
+            ),
+        }
 
     @agent.tool
     async def update_memory(ctx: RunContext[Deps], content: str, mode: str = "append") -> dict:
