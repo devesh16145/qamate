@@ -778,33 +778,66 @@ class BrowserSession:
 
     _OPTIONS_JS = """() => {
         const texts = [];
-        // role=option covers MUI, Radix, Headless UI, Ant Design, etc.
+
+        // Tier 1: standard ARIA roles (MUI, Radix, Headless UI, Ant Design)
         for (const el of document.querySelectorAll('[role="option"]')) {
             const t = (el.textContent || '').trim();
             if (t) texts.push(t);
         }
-        // Fallback: plain li inside a listbox / dropdown menu
-        if (!texts.length) {
-            for (const el of document.querySelectorAll(
-                    '[role="listbox"] li, [role="menu"] li, ul[class*="option"] li, ' +
-                    'ul[class*="menu"] li, ul[class*="dropdown"] li')) {
-                const t = (el.textContent || '').trim();
-                if (t) texts.push(t);
-            }
+        if (texts.length) return texts.slice(0, 30);
+
+        // Tier 2: li inside a role=listbox/menu container
+        for (const el of document.querySelectorAll(
+                '[role="listbox"] li, [role="menu"] li, ul[class*="option"] li, ' +
+                'ul[class*="menu"] li, ul[class*="dropdown"] li')) {
+            const t = (el.textContent || '').trim();
+            if (t) texts.push(t);
         }
-        return texts.slice(0, 30);
+        if (texts.length) return texts.slice(0, 30);
+
+        // Tier 3: custom dropdown — scan absolutely/fixed positioned containers
+        // that are currently visible and appeared near an input field.
+        // Collect direct children that look like option rows (short, leaf-ish text).
+        const active = document.activeElement;
+        const inputRect = active ? active.getBoundingClientRect() : null;
+        for (const el of document.querySelectorAll('div, ul')) {
+            const style = window.getComputedStyle(el);
+            const pos = style.position;
+            if (pos !== 'absolute' && pos !== 'fixed') continue;
+            if (el.offsetWidth < 50 || el.offsetHeight < 20) continue;
+            // Must be roughly below/near the active input
+            if (inputRect) {
+                const r = el.getBoundingClientRect();
+                if (r.top < inputRect.top - 20) continue;  // above input — skip
+            }
+            // Gather direct child text (skip pure-header rows that have no siblings)
+            const children = Array.from(el.children);
+            for (const child of children) {
+                const t = (child.textContent || '').trim();
+                if (t && t.length > 0 && t.length < 120) texts.push(t);
+            }
+            if (texts.length) break;  // stop at first matching container
+        }
+        return [...new Set(texts)].slice(0, 30);
     }"""
 
     def _wait_for_options(self, timeout_ms: int = 3000) -> bool:
-        """Wait up to timeout_ms for any [role=option] to become visible.
+        """Wait up to timeout_ms for dropdown options to appear (ARIA or custom).
         Returns True if options appeared, False on timeout."""
         try:
             self.page.wait_for_selector(
-                '[role="option"], [role="listbox"] li',
+                '[role="option"], [role="listbox"] li, [role="listbox"]',
                 state="attached", timeout=timeout_ms)
             return True
         except Exception:
-            return False
+            pass
+        # Also wait a fixed 1s for custom (non-ARIA) dropdowns — they may have
+        # no sentinel element we can wait_for_selector on.
+        try:
+            self.page.wait_for_timeout(1000)
+        except Exception:
+            pass
+        return False
 
     def _get_visible_options(self) -> list:
         """Synchronously read all visible option texts from any open dropdown/listbox."""
@@ -826,27 +859,98 @@ class BrowserSession:
         """Click a visible dropdown option by its text content.
         Searches the entire document including portal elements."""
         try:
-            # Primary: role=option with the given name (Playwright searches entire doc)
+            # Tier 1: role=option (MUI, Radix, standard)
             loc = self.page.get_by_role("option", name=text, exact=exact)
-            count = loc.count()
-            if count > 0:
+            if loc.count() > 0:
                 loc.first.click()
                 self._settle()
                 return {"ok": True, "clicked": text, "url": self._url()}
-            # Fallback: any visible element inside a listbox containing the text
+            # Tier 2: any element inside a role=listbox/menu container
             loc2 = self.page.locator(
-                f'[role="listbox"] *:has-text("{text}"), '
-                f'[role="menu"] *:has-text("{text}")'
-            ).filter(has_text=text)
+                f'[role="listbox"] *:has-text("{text}"), [role="menu"] *:has-text("{text}")'
+            )
             if loc2.count() > 0:
                 loc2.first.click()
                 self._settle()
-                return {"ok": True, "clicked": text, "url": self._url(), "fallback": "listbox text"}
+                return {"ok": True, "clicked": text, "url": self._url(), "strategy": "listbox-child"}
+            # Tier 3: get_by_text — finds any element by visible text, including
+            # custom non-ARIA dropdown items (plain divs, custom components).
+            # Prefer smaller elements (option rows) over large containers.
+            loc3 = self.page.get_by_text(text, exact=exact)
+            count3 = loc3.count()
+            if count3 > 0:
+                for i in range(min(count3, 8)):
+                    item = loc3.nth(i)
+                    try:
+                        bb = item.bounding_box()
+                        if bb and 10 < bb["height"] < 80:
+                            item.click()
+                            self._settle()
+                            return {"ok": True, "clicked": text, "url": self._url(), "strategy": "get_by_text"}
+                    except Exception:
+                        continue
+                # If all were too large (containers), click the first one anyway
+                loc3.first.click()
+                self._settle()
+                return {"ok": True, "clicked": text, "url": self._url(), "strategy": "get_by_text-first"}
             return {"ok": False,
-                    "error": f"No option matching '{text}' visible in any open dropdown. "
-                             f"Call list_options() first to see what is available."}
+                    "error": f"No element matching '{text}' found. "
+                             f"Call list_options() or click_by_text() with exact text from the screen."}
         except Exception as e:
             return {"ok": False, "error": f"click_option failed: {str(e)[:200]}"}
+
+    def click_by_text_direct(self, text: str) -> dict:
+        """Last-resort click: finds any visible element containing `text` and clicks it.
+        Uses three strategies in order: get_by_text → text= selector → JS click.
+        Works on completely custom components with no ARIA roles."""
+        try:
+            # Strategy 1: Playwright get_by_text, prefer option-row-sized elements
+            loc = self.page.get_by_text(text, exact=False)
+            count = loc.count()
+            if count > 0:
+                for i in range(min(count, 10)):
+                    item = loc.nth(i)
+                    try:
+                        bb = item.bounding_box()
+                        if bb and 10 < bb["height"] < 80:
+                            item.click()
+                            self._settle()
+                            return {"ok": True, "clicked": text, "url": self._url(), "strategy": "get_by_text"}
+                    except Exception:
+                        continue
+
+            # Strategy 2: Playwright text= selector
+            loc2 = self.page.locator(f"text={text}")
+            if loc2.count() > 0:
+                loc2.first.click()
+                self._settle()
+                return {"ok": True, "clicked": text, "url": self._url(), "strategy": "text-selector"}
+
+            # Strategy 3: JavaScript click — completely bypasses Playwright's
+            # interactability checks. Finds the smallest visible element containing the text.
+            search = text.lower()
+            clicked = self.page.evaluate(f"""() => {{
+                const needle = {json.dumps(search)};
+                const all = Array.from(document.querySelectorAll('*'));
+                const candidates = all.filter(el => {{
+                    const t = (el.textContent || '').trim().toLowerCase();
+                    return t.includes(needle) && el.offsetWidth > 0 && el.offsetHeight > 0
+                           && el.offsetHeight < 100;
+                }});
+                // prefer the element whose text is closest in length to the needle
+                candidates.sort((a, b) =>
+                    Math.abs(a.textContent.trim().length - needle.length) -
+                    Math.abs(b.textContent.trim().length - needle.length));
+                if (candidates.length) {{ candidates[0].click(); return candidates[0].textContent.trim(); }}
+                return null;
+            }}""")
+            if clicked:
+                self._settle()
+                return {"ok": True, "clicked": clicked, "url": self._url(), "strategy": "js-click"}
+
+            return {"ok": False, "error": f"No visible element containing '{text}' found on page."}
+        except Exception as e:
+            return {"ok": False, "error": f"click_by_text failed: {str(e)[:200]}"}
 
     def screenshot(self) -> bytes:
         return self.page.screenshot(type="png")
@@ -1492,6 +1596,18 @@ def build_agent(model, max_tokens=None):
         IMPORTANT: do NOT call inspect_page before this — the refs will be stale. Just call
         click_option directly with the text you saw in autocomplete_options or list_options."""
         return await _bro(ctx.deps.session.click_option_by_text, text, exact)
+
+    @agent.tool
+    async def click_by_text(ctx: RunContext[Deps], text: str) -> dict:
+        """LAST RESORT — click any visible element on the page that contains `text`,
+        regardless of its HTML element type or ARIA role. Use this when:
+        - click_option() fails because the dropdown uses plain <div> elements (no role=option)
+        - The component is fully custom and has no standard ARIA attributes
+        Uses three strategies: get_by_text → text= selector → JavaScript click.
+        The JS fallback clicks the smallest visible element whose text contains `text`,
+        bypassing Playwright's interactability checks entirely.
+        Do NOT use for navigation links or buttons that have inspect_page refs — use click() for those."""
+        return await _bro(ctx.deps.session.click_by_text_direct, text)
 
     @agent.tool
     async def fill(ctx: RunContext[Deps], ref: str, value: str) -> dict:
