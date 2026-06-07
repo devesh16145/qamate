@@ -116,7 +116,14 @@ After click() on a trigger:
 - NEVER call inspect_page to find dropdown options. Refs are stale the moment the overlay opens. Use list_options + click_option.
 - NEVER give up after one empty inspect_page. The options are loading. Wait with list_options() (retries for 3s).
 - click_option searches the entire document including portals. Just pass the option text.
-- If click_option reports 0 matches, call list_options() to confirm what is actually visible.
+- If click_option reports 0 matches, the dropdown is a custom component with no ARIA roles.
+  Escalate: click_by_text("exact text from vision/list_options") — uses JS click as final fallback.
+
+### Escalation ladder for unclickable dropdown options
+1. fill() -> read autocomplete_options from result -> click_option(text)
+2. list_options() -> read option texts -> click_option(text)
+3. click_by_text(text) — role-agnostic, JS fallback, works on fully custom components
+4. If all fail: ask_user() — the component may need keyboard nav or a workaround
 
 ### When to call look manually
 - Before interacting with any rich widget (date-picker, multi-select, drag-and-drop).
