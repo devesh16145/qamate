@@ -103,6 +103,13 @@
     },
     "_comment": "Pluggable LLM for the explorer (browser-use agent), PRD extraction + test synthesis. Default = Xiaomi MiMo (OpenAI-compatible, key from MIMO_API_KEY) for testing; generalises to any provider. API keys are NEVER stored here — only the env-var name each provider reads."
   },
+  "vision_oracle": {
+    "model": "CONFIGURE_ME",
+    "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "api_key_env": "MIMO_API_KEY",
+    "max_tokens": 512,
+    "_comment": "Vision model used ONLY for screenshot analysis (overlay/dropdown detection). Set 'model' to the Xiaomi vision model name (e.g. mimo-vl-2.5 — confirm exact name). Uses the same MIMO_API_KEY. The main agent (mimo-v2.5-pro) is never sent images; it receives the text description from this model."
+  },
   "jira": {
     "url": "https://agrim-product.atlassian.net",
     "email": "Devesh.yadav@agrim.app",
