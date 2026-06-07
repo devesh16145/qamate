@@ -47,6 +47,136 @@
   }
   const fmtTok = (n) => { n = n || 0; if (n < 1000) return '' + n; if (n < 1e6) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k'; return (n / 1e6).toFixed(2) + 'M'; };
 
+  /* ── Markdown rendering ──────────────────────────────────────────────────── */
+  function Spans({ text }) {
+    const re = /\*\*(.+?)\*\*|__(.+?)__|`([^`\n]+)`|\*(.+?)\*|_(.+?)_|~~(.+?)~~/gs;
+    const nodes = []; let last = 0, m, k = 0;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) nodes.push(text.slice(last, m.index));
+      if (m[1] != null) nodes.push(<strong key={k++}>{m[1]}</strong>);
+      else if (m[2] != null) nodes.push(<strong key={k++}>{m[2]}</strong>);
+      else if (m[3] != null) nodes.push(<code key={k++} style={{ background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 4, fontSize: '0.87em', fontFamily: 'var(--mono)', color: 'var(--text)' }}>{m[3]}</code>);
+      else if (m[4] != null) nodes.push(<em key={k++}>{m[4]}</em>);
+      else if (m[5] != null) nodes.push(<em key={k++}>{m[5]}</em>);
+      else if (m[6] != null) nodes.push(<s key={k++} style={{ opacity: 0.6 }}>{m[6]}</s>);
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) nodes.push(text.slice(last));
+    return nodes.length ? nodes : [text];
+  }
+
+  function Markdown({ text }) {
+    if (!text) return null;
+    // Split code fences out first
+    const segs = []; const fence = /```(\w*)\n?([\s\S]*?)```/g;
+    let last = 0, m;
+    while ((m = fence.exec(text)) !== null) {
+      if (m.index > last) segs.push({ t: 'prose', s: text.slice(last, m.index) });
+      segs.push({ t: 'code', lang: m[1], s: m[2].trimEnd() });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) segs.push({ t: 'prose', s: text.slice(last) });
+    return (
+      <div style={{ lineHeight: 1.65, wordBreak: 'break-word' }}>
+        {segs.map((seg, si) => {
+          if (seg.t === 'code') return (
+            <pre key={si} style={{ background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', margin: '8px 0', fontSize: 11.5, fontFamily: 'var(--mono)', overflowX: 'auto', whiteSpace: 'pre' }}>
+              {seg.lang && <span style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', marginBottom: 6, fontFamily: 'var(--mono)' }}>{seg.lang}</span>}
+              <code>{seg.s}</code>
+            </pre>
+          );
+          return (
+            <React.Fragment key={si}>
+              {seg.s.split('\n').map((line, li) => {
+                const trim = line.trimStart(), ind = line.length - trim.length;
+                if (!trim) return <div key={li} style={{ height: 6 }} />;
+                if (trim.startsWith('### ')) return <div key={li} style={{ fontWeight: 600, fontSize: 12.5, marginTop: 10, marginBottom: 2, color: 'var(--text)' }}><Spans text={trim.slice(4)} /></div>;
+                if (trim.startsWith('## '))  return <div key={li} style={{ fontWeight: 700, fontSize: 13.5, marginTop: 12, marginBottom: 4, color: 'var(--text)' }}><Spans text={trim.slice(3)} /></div>;
+                if (trim.startsWith('# '))   return <div key={li} style={{ fontWeight: 700, fontSize: 15,   marginTop: 14, marginBottom: 5, color: 'var(--text)' }}><Spans text={trim.slice(2)} /></div>;
+                if (/^[-*] /.test(trim)) return (
+                  <div key={li} style={{ display: 'flex', gap: 8, paddingLeft: 4 + ind * 4, marginTop: 2 }}>
+                    <span style={{ color: 'var(--accent)', fontSize: 8, marginTop: 5, flexShrink: 0 }}>◆</span>
+                    <span><Spans text={trim.slice(2)} /></span>
+                  </div>
+                );
+                const num = trim.match(/^(\d+)\. /);
+                if (num) return (
+                  <div key={li} style={{ display: 'flex', gap: 8, paddingLeft: 4 + ind * 4, marginTop: 2 }}>
+                    <span style={{ color: 'var(--accent)', flexShrink: 0, fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{num[1]}.</span>
+                    <span><Spans text={trim.replace(/^\d+\. /, '')} /></span>
+                  </div>
+                );
+                if (/^---+$/.test(trim)) return <hr key={li} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0' }} />;
+                if (trim.startsWith('> ')) return (
+                  <div key={li} style={{ borderLeft: '3px solid var(--accent)', paddingLeft: 10, margin: '4px 0', color: 'var(--text-2)', fontStyle: 'italic' }}><Spans text={trim.slice(2)} /></div>
+                );
+                return <div key={li}><Spans text={line} /></div>;
+              })}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
+  }
+
+  /* ── Tool activity batch (collapsible) ───────────────────────────────────── */
+  function ToolBatch({ items }) {
+    const [open, setOpen] = useState(false);
+    // Pair tool + tool_result
+    const pairs = [];
+    let i = 0;
+    while (i < items.length) {
+      if (items[i].role === 'tool') {
+        const res = items[i + 1] && items[i + 1].role === 'tool_result' ? items[i + 1] : null;
+        pairs.push({ call: items[i], result: res });
+        i += res ? 2 : 1;
+      } else { i++; }
+    }
+    const names = [...new Set(pairs.map(p => p.call.tool))];
+    const preview = names.slice(0, 4).join(' · ') + (names.length > 4 ? ` +${names.length - 4}` : '');
+    return (
+      <div style={{ alignSelf: 'flex-start', margin: '1px 0', paddingLeft: 36 }}>
+        <button onClick={() => setOpen(o => !o)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
+          <span style={{ fontSize: 8, color: 'var(--accent)' }}>{open ? '▾' : '▸'}</span>
+          <Ic.Zap size={10} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, color: 'var(--text-2)' }}>{pairs.length} tool call{pairs.length !== 1 ? 's' : ''}</span>
+          {!open && <span style={{ color: 'var(--text-3)' }}>· {preview}</span>}
+        </button>
+        {open && (
+          <div style={{ marginTop: 4, borderLeft: '1px solid var(--border)', paddingLeft: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pairs.map(({ call, result }, pi) => (
+              <div key={pi}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)' }}>
+                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{call.tool}</span>
+                  <span style={{ color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320 }}>{argStr(call.args).slice(0, 100)}</span>
+                </div>
+                {result && <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 2, marginTop: 1 }}>↳ {String(result.text).slice(0, 140)}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* Group consecutive tool/tool_result messages into batches for rendering */
+  function groupMessages(msgs) {
+    const out = []; let i = 0;
+    while (i < msgs.length) {
+      const m = msgs[i];
+      if (m.role === 'tool' || m.role === 'tool_result') {
+        const startKey = 'tb-' + m.id; const batch = [];
+        while (i < msgs.length && (msgs[i].role === 'tool' || msgs[i].role === 'tool_result')) batch.push(msgs[i++]);
+        out.push({ type: 'batch', key: startKey, items: batch });
+      } else {
+        out.push({ type: 'msg', key: String(m.id), msg: m });
+        i++;
+      }
+    }
+    return out;
+  }
+
   /* Reduce one streamed agent-event into a session's runtime state. */
   function applyEvent(rt, msg, nextId) {
     const ev = msg.event;
@@ -88,12 +218,17 @@
     if (ev === 'error') return set({ status: 'ready', messages: [...messages, { id: nextId(), role: 'error', text: msg.message || 'error' }] });
     if (ev === 'exited') return set({ status: 'idle', info: null, messages: [...messages, { id: nextId(), role: 'system', text: 'Session stopped.' }] });
     if (ev === 'log') return set({ lastLog: String(msg.message || '') });
+    if (ev === 'input_required') return set({
+      status: 'awaiting_input',
+      messages: [...finalizeStreaming(messages), { id: nextId(), role: 'input_request', text: msg.question || '' }],
+    });
     return rt;
   }
 
   function statusColor(rt, live) {
     const st = rt && rt.status;
     if (st === 'busy' || st === 'starting') return 'var(--accent)';
+    if (st === 'awaiting_input') return '#f59e0b';
     if (live || st === 'ready') return 'var(--pass, #16a34a)';
     if (st === 'error') return 'var(--fail, #dc2626)';
     return 'var(--text-3)';
@@ -193,7 +328,7 @@
 
   /* ── Active session chat (ALWAYS rendered with a real session — no conditional
      hooks; the "no session" case is handled by AgentApp, never here) ────────── */
-  function SessionChat({ session, rt, provider, setProvider, headed, setHeaded,
+  function SessionChat({ session, rt, provider, setProvider, headed, setHeaded, toolBudget, setToolBudget,
                          onStart, onSend, onStop, onReset, onOpenBrowser, setInput, setAttachments, projectId, toast, onBack }) {
     const scrollRef = useRef(null);
     const taRef = useRef(null);
@@ -214,8 +349,9 @@
     const info = rt.info;
     const messages = rt.messages || [];
     const attachments = rt.attachments || [];
-    const connected = status === 'ready' || status === 'busy' || status === 'starting' || !!info;
+    const connected = status === 'ready' || status === 'busy' || status === 'starting' || status === 'awaiting_input' || !!info;
     const busy = status === 'busy' || status === 'starting';
+    const awaitingInput = status === 'awaiting_input';
     const canResume = (session.message_count > 0) || messages.length > 0;
 
     const ctxPid = () => projectId || (info && info.project_id) || null;
@@ -319,34 +455,73 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
     };
 
+    const MimoAvatar = () => (
+      <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#1d4ed8 0%,#7c3aed 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', flexShrink: 0, letterSpacing: '-0.5px', userSelect: 'none' }}>M</div>
+    );
+    const YouAvatar = () => (
+      <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Ic.User size={13} style={{ color: '#fff' }} /></div>
+    );
+
     const bubble = (m) => {
       if (m.role === 'user') return (
-        <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: '82%', background: 'var(--editor)', color: 'var(--text)', border: '1px solid var(--border)', padding: '8px 11px', borderRadius: 8, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {m.text}
-          {m.attachments && m.attachments.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: m.text ? 6 : 0 }}>
-              {m.attachments.map((n, i) => (
-                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '1px 6px' }}><Ic.File size={10} /> {n}</span>
-              ))}
-            </div>
-          )}
+        <div key={m.id} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8 }}>
+          <div style={{ maxWidth: '78%', background: 'var(--editor)', color: 'var(--text)', border: '1px solid var(--border)', padding: '9px 13px', borderRadius: '12px 12px 3px 12px', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {m.text}
+            {m.attachments && m.attachments.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                {m.attachments.map((n, i) => (
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '1px 6px' }}><Ic.File size={10} /> {n}</span>
+                ))}
+              </div>
+            )}
+          </div>
+          <YouAvatar />
         </div>
       );
+
       if (m.role === 'assistant') return (
-        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '94%', background: 'transparent', padding: '2px 0', fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text)' }}>{m.text}{m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}</div>
+        <div key={m.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <MimoAvatar />
+          <div style={{ flex: 1, minWidth: 0, paddingTop: 3, fontSize: 13, color: 'var(--text)' }}>
+            <Markdown text={m.text} />
+            {m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}
+          </div>
+        </div>
       );
+
+      // tool/tool_result are batched by groupMessages; these are fallback singles
       if (m.role === 'tool') return (
-        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
-          <Ic.Zap size={11} style={{ verticalAlign: -1 }} /><b>{m.tool}</b><span style={{ color: 'var(--text-3)' }}>{argStr(m.args).slice(0, 120)}</span>
+        <div key={m.id} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--accent)', paddingLeft: 38 }}>
+          <Ic.Zap size={10} /><b>{m.tool}</b><span style={{ color: 'var(--text-3)' }}>{argStr(m.args).slice(0, 100)}</span>
         </div>
       );
       if (m.role === 'tool_result') return (
-        <div key={m.id} style={{ alignSelf: 'flex-start', maxWidth: '92%', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 16 }}>↳ {String(m.text).slice(0, 160)}</div>
+        <div key={m.id} style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 54 }}>↳ {String(m.text).slice(0, 120)}</div>
       );
+
       if (m.role === 'error') return (
-        <div key={m.id} style={{ alignSelf: 'center', fontSize: 11, color: 'var(--fail)', fontFamily: 'var(--mono)' }}>⚠ {m.text}</div>
+        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'center', fontSize: 11.5, color: 'var(--fail)', background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 8, padding: '7px 12px', maxWidth: '90%' }}>
+          <Ic.AlertCircle size={14} style={{ flexShrink: 0 }} /> {m.text}
+        </div>
       );
-      return <div key={m.id} style={{ alignSelf: 'center', fontSize: 10.5, color: 'var(--text-3)' }}>{m.text}</div>;
+
+      if (m.role === 'input_request') return (
+        <div key={m.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <MimoAvatar />
+          <div style={{ flex: 1, minWidth: 0, padding: '10px 14px', background: 'rgba(245,158,11,0.08)', border: '1.5px solid #f59e0b', borderRadius: '12px 12px 12px 3px' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: '#f59e0b', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 5 }}><Ic.Pause size={12} /> Needs your input</div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>{m.text}</div>
+            <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--text-3)' }}>Type your answer in the box below ↓</div>
+          </div>
+        </div>
+      );
+
+      // system messages — centered pill
+      return (
+        <div key={m.id} style={{ display: 'flex', justifyContent: 'center' }}>
+          <div style={{ fontSize: 10.5, color: 'var(--text-3)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 20, padding: '3px 12px', maxWidth: '80%', textAlign: 'center', lineHeight: 1.5 }}>{m.text}</div>
+        </div>
+      );
     };
 
     return (
@@ -363,6 +538,7 @@
           )}
           <span style={{ flex: 1 }}></span>
           {busy && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}><span className="live-dot"></span> {status === 'starting' ? 'starting' : 'working'}…</span>}
+          {awaitingInput && <span style={{ fontSize: 10.5, color: '#f59e0b', fontWeight: 600 }}>⏸ Needs your answer ↓</span>}
           <button className="rv-cta" onClick={toggleCtx} title="Scoped project folder the agent explores"><Ic.Folder size={12} /> Context</button>
           <button className="rv-cta" onClick={() => window.ats.agentMemoryOpen({ projectId: ctxPid() })} title="Open the agent's memory file (AGENT_MEMORY.md)"><Ic.FileText size={12} /> Memory</button>
           {connected && <button className="rv-cta" onClick={onReset} disabled={busy} title="Clear this session's conversation"><Ic.RefreshCw size={12} /></button>}
@@ -421,7 +597,11 @@
                          : 'New session. Start the agent below, then tell it what to do — e.g. "explore the orders area and write a test for the full order lifecycle."'}
             </div>
           )}
-          {messages.map(bubble)}
+          {groupMessages(messages).map(g =>
+            g.type === 'batch'
+              ? <ToolBatch key={g.key} items={g.items} />
+              : bubble(g.msg)
+          )}
           {dragOver && <div style={{ alignSelf: 'center', margin: 'auto', color: 'var(--accent)', fontSize: 12, fontFamily: 'var(--mono)' }}>Drop files to attach</div>}
         </div>
 
@@ -437,6 +617,15 @@
             <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none' }}>
               <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
               Watch live
+            </label>
+            <label style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }} title="Max tool calls per turn before the agent pauses and summarises. 'Never' runs until it finishes.">
+              <Ic.Zap size={11} />
+              <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ fontSize: 11, padding: '3px 6px' }}>
+                <option value={30}>30 steps</option>
+                <option value={50}>50 steps</option>
+                <option value={100}>100 steps</option>
+                <option value={0}>Never pause</option>
+              </select>
             </label>
             <span style={{ flex: 1 }}></span>
             <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
@@ -473,10 +662,10 @@
               <button className="rv-cta" onClick={onOpenBrowser} title="Open the app under test in your browser" style={{ alignSelf: 'flex-end' }}><Ic.ExternalLink size={14} /></button>
               <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
                 onBlur={() => setTimeout(() => setAtOpen(false), 120)}
-                placeholder={status === 'ready' ? 'Tell the agent what to do… (Enter to send) · @ to reference a file · attach or drop files' : 'Agent is working…'}
-                disabled={status !== 'ready'}
-                style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '9px 10px', fontFamily: 'inherit', background: 'var(--editor)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', outline: 'none' }} />
-              <button className="rv-cta primary" onClick={onSend} disabled={status !== 'ready' || (!(rt.input || '').trim() && !attachments.length)} style={{ alignSelf: 'flex-end' }}><Ic.Play size={13} /> Send</button>
+                placeholder={awaitingInput ? 'Type your answer and press Enter…' : status === 'ready' ? 'Message MIMO… (Enter to send · @ to reference a file · drop files to attach)' : 'MIMO is working…'}
+                disabled={status !== 'ready' && status !== 'awaiting_input'}
+                style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '9px 10px', fontFamily: 'inherit', background: awaitingInput ? 'rgba(245,158,11,0.06)' : 'var(--editor)', color: 'var(--text)', border: awaitingInput ? '1.5px solid #f59e0b' : '1px solid var(--border)', borderRadius: 'var(--radius-lg)', outline: 'none', transition: 'border-color 0.15s, background 0.15s' }} />
+              <button className="rv-cta primary" onClick={onSend} disabled={(status !== 'ready' && status !== 'awaiting_input') || (!(rt.input || '').trim() && !attachments.length)} style={{ alignSelf: 'flex-end' }}><Ic.Play size={13} /></button>
             </div>
           </div>
         )}
@@ -486,7 +675,7 @@
 
   /* ── Root ────────────────────────────────────────────────────────────────── */
   /* ── Chat initiator: compose a first message to start a brand-new session ──── */
-  function StartComposer({ onStart, headed, setHeaded, onOpenBrowser, projectId }) {
+  function StartComposer({ onStart, headed, setHeaded, toolBudget, setToolBudget, onOpenBrowser, projectId }) {
     const [text, setText] = useState('');
     const [atts, setAtts] = useState([]);
     const [autoOpen, setAutoOpen] = useState(false);
@@ -519,6 +708,15 @@
           <label className="ses-headed" title="Show the automation browser window while the agent works">
             <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} /> Watch live
           </label>
+          <label style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }} title="Max tool calls per turn before the agent pauses. 'Never' runs until done.">
+            <Ic.Zap size={11} />
+            <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ fontSize: 11, padding: '2px 5px' }}>
+              <option value={30}>30 steps</option>
+              <option value={50}>50 steps</option>
+              <option value={100}>100 steps</option>
+              <option value={0}>Never pause</option>
+            </select>
+          </label>
           <span style={{ flex: 1 }}></span>
           <button className="rv-cta sm" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised">
             <Ic.Zap size={12} /> Auto
@@ -530,9 +728,60 @@
   }
 
   /* ── Autonomous Run Modal ────────────────────────────────────────────────── */
+  let _autoAppSeq = 0;
+  const mkApp = (label='', url='', email='', password='') =>
+    ({ id: ++_autoAppSeq, label, url, email, password, showPw: false });
+
+  function AppCard({ app, index, total, onChange, onRemove }) {
+    const inp = (field) => (e) => onChange(app.id, field, e.target.value);
+    const iStyle = { width: '100%', fontSize: 12, padding: '5px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' };
+    return (
+      <div style={{ border: '1px solid var(--border)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
+        {/* card header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--tool)', borderBottom: '1px solid var(--border)' }}>
+          <Ic.ExternalLink size={11} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-2)' }}>App {index + 1}</span>
+          <input value={app.label} onChange={inp('label')} placeholder="Label (e.g. Admin Panel)"
+            style={{ flex: 1, fontSize: 11.5, padding: '2px 7px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', minWidth: 0 }} />
+          {total > 1 && (
+            <button onClick={() => onRemove(app.id)} title="Remove this app"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex', padding: 2 }}>
+              <Ic.X size={13} />
+            </button>
+          )}
+        </div>
+        {/* card body */}
+        <div style={{ padding: '10px 10px 8px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginBottom: 3 }}>URL <span style={{ color: 'var(--fail)' }}>*</span></div>
+            <input value={app.url} onChange={inp('url')} placeholder="https://your-app.com/" style={iStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginBottom: 3 }}>Email / Username</div>
+              <input value={app.email} onChange={inp('email')} placeholder="user@example.com" autoComplete="off" style={iStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginBottom: 3 }}>Password</div>
+              <div style={{ position: 'relative' }}>
+                <input value={app.password} onChange={inp('password')} type={app.showPw ? 'text' : 'password'}
+                  placeholder="••••••••" autoComplete="new-password"
+                  style={{ ...iStyle, paddingRight: 28 }} />
+                <button onClick={() => onChange(app.id, 'showPw', !app.showPw)}
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex', padding: 0 }}>
+                  {app.showPw ? <Ic.EyeOff size={13} /> : <Ic.Eye size={13} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function RunAutoModal({ onConfirm, onClose, projectId }) {
-    const [url, setUrl] = useState('');
-    const [files, setFiles] = useState(null);   // null=loading, []=no ctx
+    const [apps, setApps] = useState(() => [mkApp()]);
+    const [files, setFiles] = useState(null);
     const [contextFile, setContextFile] = useState('');
     const [focus, setFocus] = useState('');
     const [busy, setBusy] = useState(false);
@@ -541,82 +790,113 @@
       window.ats.getConfig().then((cfg) => {
         const envs = (cfg && cfg.environments) || {};
         const env = Object.keys(envs).find((k) => envs[k] && envs[k].is_default) || 'dev';
-        const su = cfg && cfg.platforms && cfg.platforms.seller && cfg.platforms.seller.urls;
-        const u = (su && (su[env] || su.dev)) || '';
-        if (u) setUrl(u);
+        const pl = (cfg && cfg.platforms) || {};
+        const selUrls = pl.seller && pl.seller.urls;
+        const selUrl = (selUrls && (selUrls[env] || selUrls.dev)) || '';
+        const selUsers = pl.seller && pl.seller.users;
+        const selUser = (selUsers && selUsers[0]) || {};
+        const admUrl = (pl.admin && pl.admin.url) || (pl.admin && pl.admin.urls && (pl.admin.urls[env] || pl.admin.urls.dev)) || '';
+        const admUsers = pl.admin && pl.admin.users;
+        const admUser = (admUsers && admUsers[0]) || {};
+        const initial = [];
+        if (selUrl) initial.push(mkApp('Seller App', selUrl, selUser.email || '', selUser.password || ''));
+        if (admUrl) initial.push(mkApp('Admin Panel', admUrl, admUser.email || '', admUser.password || ''));
+        if (initial.length) setApps(initial);
+        else setApps([mkApp()]);
       }).catch(() => {});
       window.ats.agentContextList({ projectId: projectId || '', subdir: '' })
         .then((r) => setFiles((r && r.files) || []))
         .catch(() => setFiles([]));
     }, [projectId]);
 
+    const updateApp = (id, field, value) =>
+      setApps(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+    const removeApp = (id) => setApps(prev => prev.filter(a => a.id !== id));
+    const addApp = () => setApps(prev => [...prev, mkApp()]);
+
     const run = () => {
-      const u = url.trim(); if (!u) return;
-      let msg = `Map the app at ${u}`;
+      const valid = apps.filter(a => a.url.trim());
+      if (!valid.length) return;
+      const appLines = valid.map((a, i) => {
+        let line = `${i + 1}. ${a.label || ('App ' + (i + 1))}: ${a.url.trim()}`;
+        if (a.email) line += ` — login: email="${a.email}"${a.password ? ` password="${a.password}"` : ''}`;
+        return line;
+      });
+      let msg = valid.length === 1
+        ? `Map the app at ${valid[0].url.trim()}${valid[0].email ? ` (login: email="${valid[0].email}" password="${valid[0].password}")` : ''}`
+        : `Map these apps in order:\n${appLines.join('\n')}`;
       if (contextFile) {
-        msg += `, extract all testable flows from @${contextFile}`;
-        if (focus.trim()) msg += ` (focus on: ${focus.trim()})`;
+        msg += `\n\nExtract all testable flows from @${contextFile}`;
+        if (focus.trim()) msg += ` (focus: ${focus.trim()})`;
       } else {
-        msg += ', discover all screens and identify the main user flows';
+        msg += '\n\nDiscover all screens and identify the main user flows.';
       }
-      msg += '. Then for each flow: navigate to its entry URL, drive the complete flow step by step, add_checkpoint at each meaningful outcome, create_test_case with the suggested tc_id and flow_id, run_test_case — fix and re-run until it passes. Work through ALL flows autonomously without stopping for confirmation between them. End with a summary: N flows authored, M passed, K need attention.';
+      msg += '\n\nFor each flow: navigate to its entry URL, drive the complete flow step by step, add_checkpoint at each meaningful outcome, create_test_case with the suggested tc_id and flow_id, run_test_case — fix and re-run until it passes. Work through ALL flows autonomously without stopping for confirmation between them. End with a summary: N flows authored, M passed, K need attention.';
       setBusy(true);
       onConfirm(msg);
     };
 
+    const hasUrl = apps.some(a => a.url.trim());
+    const divStyle = { fontSize: 11, color: 'var(--text-2)', marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' };
+
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-        <div style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, width: 440, maxWidth: '92vw', padding: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, width: 500, maxWidth: '94vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+
+          {/* header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
             <Ic.Zap size={15} style={{ color: 'var(--accent)' }} />
             <b style={{ fontSize: 13 }}>Run Autonomous</b>
             <span style={{ flex: 1 }} />
             <button className="rv-cta" onClick={onClose}><Ic.X size={13} /></button>
           </div>
-          <p style={{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.5, margin: '0 0 14px' }}>
-            The agent maps the app, extracts flows from your spec, then authors and verifies a test for each — no hand-holding required.
-          </p>
 
-          <label style={{ display: 'block', marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>App URL <span style={{ color: 'var(--fail)' }}>*</span></div>
-            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-app.com/"
-              style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }} />
-          </label>
+          {/* scrollable body */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', minHeight: 0 }}>
+            <p style={{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, margin: '0 0 16px' }}>
+              The agent logs into each app, maps every screen, extracts flows from your spec, then authors and verifies a test for each — unsupervised.
+            </p>
 
-          <label style={{ display: 'block', marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>
-              Spec / PRD file
-              <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 4 }}>(optional — from context folder)</span>
+            {/* apps section */}
+            <div style={divStyle}>Apps to test</div>
+            {apps.map((app, i) => (
+              <AppCard key={app.id} app={app} index={i} total={apps.length}
+                onChange={updateApp} onRemove={removeApp} />
+            ))}
+            <button onClick={addApp}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--accent)', background: 'transparent', border: '1px dashed var(--accent)', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', marginBottom: 16 }}>
+              <Ic.Plus size={12} /> Add another app
+            </button>
+
+            {/* spec section */}
+            <div style={divStyle}>Spec / PRD <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--text-3)', fontSize: 10.5 }}>(optional)</span></div>
+            <div style={{ marginBottom: 10 }}>
+              {files === null
+                ? <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Loading context files…</div>
+                : files.length === 0
+                  ? <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.55, padding: '6px 0' }}>
+                      No context folder attached. Add one via <b>Context</b> in the agent header, or leave blank — the agent will explore the app freely.
+                    </div>
+                  : <select value={contextFile} onChange={(e) => setContextFile(e.target.value)}
+                      style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)' }}>
+                      <option value="">— explore freely, no spec —</option>
+                      {files.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
+                    </select>}
             </div>
-            {files === null
-              ? <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Loading…</div>
-              : files.length === 0
-                ? <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
-                    No context folder set. Attach one via <b>Context</b> in the agent header,
-                    or leave blank and the agent will discover flows by exploring the app.
-                  </div>
-                : <select value={contextFile} onChange={(e) => setContextFile(e.target.value)}
-                    style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)' }}>
-                    <option value="">— explore freely, no spec —</option>
-                    {files.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
-                  </select>}
-          </label>
-
-          {contextFile && (
-            <label style={{ display: 'block', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>
-                Focus
-                <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 4 }}>(optional — e.g. "catalog" or "checkout")</span>
+            {contextFile && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginBottom: 3 }}>Focus <span style={{ fontStyle: 'italic' }}>(optional — e.g. "cart flow" or "checkout")</span></div>
+                <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="leave blank to extract all flows"
+                  style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }} />
               </div>
-              <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="leave blank to extract all flows"
-                style={{ width: '100%', fontSize: 12, padding: '6px 8px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }} />
-            </label>
-          )}
+            )}
+          </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: contextFile ? 0 : 14 }}>
+          {/* footer */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '12px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
             <button className="rv-cta" onClick={onClose}>Cancel</button>
-            <button className="rv-cta primary" onClick={run} disabled={!url.trim() || busy}>
+            <button className="rv-cta primary" onClick={run} disabled={!hasUrl || busy}>
               <Ic.Zap size={12} /> {busy ? 'Starting…' : 'Run Autonomous'}
             </button>
           </div>
@@ -633,6 +913,7 @@
     const [runtime, setRuntime] = useState({});
     const [provider, setProvider] = useState('mimo');
     const [headed, setHeaded] = useState(false);
+    const [toolBudget, setToolBudget] = useState(30);
     const [toasts, setToasts] = useState([]);
     const idRef = useRef(0);
     const nextId = () => (idRef.current += 1);
@@ -714,7 +995,7 @@
       const sid = activeId; if (!sid) return;
       const sess = sessions.find((s) => s.id === sid) || {};
       patchRt(sid, (cur) => ({ status: 'starting', messages: [...cur.messages, { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' }] }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, title: sess.title || '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, title: sess.title || '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Compose-to-start: create a session, start it, and queue the first message (sent on 'ready').
@@ -729,12 +1010,22 @@
           ...(text ? [{ id: nextId(), role: 'user', text, attachments: (atts || []).map((a) => a.name) }] : []),
           { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' },
         ] } }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, title: '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, title: '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Open the app under test (the agent's current page, else the seller URL from config) in the system browser.
     const openBrowser = async () => {
-      const rt = activeId ? runtime[activeId] : null;
+      const sid = activeId;
+      const rt = sid ? runtime[sid] : null;
+      const sessionRunning = rt && (rt.status === 'ready' || rt.status === 'busy');
+      // If a session is active, show the agent's OWN browser (switch to headed mode).
+      // If no session is running, fall back to opening the app URL in the system browser.
+      if (sessionRunning && sid) {
+        const res = await window.ats.agentShowBrowser({ sessionId: sid });
+        if (res && res.status === 'error') toast(res.message || 'Could not show browser');
+        else toast('Browser window opened — switching to headed mode');
+        return;
+      }
       let url = rt && rt.info && rt.info.url;
       if (!url) {
         try {
@@ -753,7 +1044,7 @@
       const cur = runtime[sid]; if (!cur) return;
       const text = (cur.input || '').trim();
       const atts = cur.attachments || [];
-      if ((!text && !atts.length) || cur.status !== 'ready') return;
+      if ((!text && !atts.length) || (cur.status !== 'ready' && cur.status !== 'awaiting_input')) return;
       patchRt(sid, (c) => ({ messages: [...c.messages, { id: nextId(), role: 'user', text, attachments: atts.map((a) => a.name) }], input: '', attachments: [], status: 'busy' }));
       const res = await window.ats.agentSend({ sessionId: sid, message: text, attachments: atts.map((a) => a.path) });
       if (res && res.status === 'error') patchRt(sid, (c) => ({ status: 'ready', messages: [...c.messages, { id: nextId(), role: 'error', text: res.message }] }));
@@ -774,12 +1065,13 @@
     const renderChat = (onBack) => (
       <SessionChat session={activeSession} rt={activeRt}
         provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+        toolBudget={toolBudget} setToolBudget={setToolBudget}
         onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset} onOpenBrowser={openBrowser}
         setInput={(v) => patchRt(activeId, { input: v })}
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
         projectId={projectId} toast={toast} onBack={onBack} />
     );
-    const initiator = <StartComposer onStart={startWithMessage} headed={headed} setHeaded={setHeaded} onOpenBrowser={openBrowser} projectId={projectId} />;
+    const initiator = <StartComposer onStart={startWithMessage} headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} onOpenBrowser={openBrowser} projectId={projectId} />;
     const noSessionPane = (
       <div className="agent-pane no-ses">
         <div className="no-ses-msg">

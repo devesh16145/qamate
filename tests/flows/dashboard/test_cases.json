@@ -1,0 +1,169 @@
+[
+    {
+        "tc_id": "TC-DASH-001",
+        "description": "Verify Dashboard: all nav links (SOR, Orders, Payments, Returns, Deductions, Account Statement) navigate to correct pages",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"link\", name=\"SOR\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"SOR\")",
+                "targetDescription": "Click SOR",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 3,
+                "rawLine": "page.get_by_role(\"link\", name=\"Orders\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"Orders\")",
+                "targetDescription": "Click Orders",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 4,
+                "rawLine": "page.get_by_role(\"link\", name=\"Payments\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"Payments\")",
+                "targetDescription": "Click Payments",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 5,
+                "rawLine": "page.get_by_role(\"link\", name=\"Returns\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"Returns\")",
+                "targetDescription": "Click Returns",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 6,
+                "rawLine": "page.get_by_role(\"link\", name=\"Deductions\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"Deductions\")",
+                "targetDescription": "Click Deductions",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 7,
+                "rawLine": "page.get_by_role(\"link\", name=\"Account Statement\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"Account Statement\")",
+                "targetDescription": "Click Account Statement",
+                "value": "",
+                "varName": ""
+            }
+        ],
+        "preconditions": "test reachable; logged in if required",
+        "expected_result": "Dashboard loads with main navigation. Clicking each nav link navigates to the corresponding page: /sor, /orders, /payments, /returns, /deductions, /account-statement.",
+        "assertions": [
+            {
+                "type": "page_contains_text",
+                "value": "My Storefront",
+                "afterStep": 1,
+                "description": "Dashboard loads with main navigation"
+            },
+            {
+                "type": "url_contains",
+                "value": "/sor",
+                "afterStep": 2,
+                "description": "SOR link navigates to SOR page"
+            },
+            {
+                "type": "url_contains",
+                "value": "/orders",
+                "afterStep": 3,
+                "description": "Orders link navigates to Orders page"
+            },
+            {
+                "type": "url_contains",
+                "value": "/payments",
+                "afterStep": 4,
+                "description": "Payments link navigates to Payments page"
+            },
+            {
+                "type": "url_contains",
+                "value": "/returns",
+                "afterStep": 5,
+                "description": "Returns link navigates to Returns page"
+            },
+            {
+                "type": "url_contains",
+                "value": "/deductions",
+                "afterStep": 6,
+                "description": "Deductions link navigates to Deductions page"
+            },
+            {
+                "type": "url_contains",
+                "value": "account-statement",
+                "afterStep": 7,
+                "description": "Account Statement link navigates to Account Statement page"
+            }
+        ]
+    },
+    {
+        "tc_id": "TC-DASHBOARD-001",
+        "description": "Verify the Seller Dashboard landing page loads with navigation sidebar links (SOR, Orders, Payments, Returns, Deductions, Account Statement) and upload functionality",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"link\", name=\"My Storefront\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"link\", name=\"My Storefront\")",
+                "targetDescription": "Click My Storefront",
+                "value": "",
+                "varName": ""
+            }
+        ],
+        "preconditions": "test reachable; logged in if required",
+        "expected_result": "Dashboard page displays with all nav links and upload buttons visible; My Storefront link navigates correctly",
+        "assertions": [
+            {
+                "type": "page_contains_text",
+                "value": "My Storefront",
+                "afterStep": 1,
+                "description": "Dashboard loaded with nav links"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "SOR",
+                "afterStep": 1,
+                "description": "Dashboard has SOR link"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Upload",
+                "afterStep": 1,
+                "description": "Dashboard has upload functionality"
+            },
+            {
+                "type": "url_contains",
+                "value": "supplier-dev.agrim.app",
+                "afterStep": 2,
+                "description": "Storefront link navigates correctly"
+            }
+        ]
+    }
+]

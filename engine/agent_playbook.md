@@ -10,6 +10,76 @@ NEVER hand a test case to the user without running it and seeing it PASS. A test
 wrote but did not verify is not done — it is a guess. Authoring without verifying is the
 single biggest failure mode. Verify, fix, re-run, and only then deliver.
 
+## Blocked steps — NEVER skip, ALWAYS ask
+
+This is the second golden rule. When you cannot complete a step — login fails, an element
+is missing, a form rejects your input, or you are in an unexpected state — you have exactly
+two valid responses:
+
+1. **Try harder** — `inspect_page(include_hidden=True)`, `restart_browser`, check
+   `get_settings()` for credentials you may have missed.
+2. **Call `ask_user`** — pause and tell the user exactly what you need.
+
+**What you must NEVER do:**
+- Skip the blocked step and proceed to the next item in the sequence.
+- Jump to a different app or section while still blocked on the current one.
+- Silently note "couldn't log in" and move on as if the step was done.
+- Treat a login failure as optional — if authentication is required and you can't do it,
+  stop and ask.
+
+**Login is a hard blocker.** If you land on a login form and the saved session was not
+accepted (you are still on the login page after navigation):
+1. Call `get_settings()` and check `platforms.seller.users` / `platforms.admin.users`
+   for credentials.
+2. If credentials are there, fill the form and log in.
+3. If login still fails, or credentials are absent, call `ask_user("I am on the login page
+   for <app>. The saved session was not accepted. What email and password should I use?")`.
+4. Do NOT navigate away. Do NOT start work on a different app. Wait for the answer.
+
+**Sequence integrity.** If the user gave you a sequence (App 1 → App 2, or Step 1 → Step 2),
+you must complete each item before moving to the next. A partially-completed item is not
+done. If you cannot complete it, pause with `ask_user` — the sequence is suspended at that
+point until you get an answer and resume.
+
+## Auth failures — reading the navigate() signal
+
+The `navigate()` tool now detects authentication failures and returns a key named
+`⚠_AUTH_REQUIRED` when either:
+- You landed on a login form (password field visible, or URL contains "login")
+- API calls returned 401/403 after the page loaded (expired session on an SPA)
+
+When you see `⚠_AUTH_REQUIRED` in a navigate result, read the message — it tells you
+exactly what to do. The short version:
+1. Call `get_settings()` → find credentials under `platforms.seller.users[0]` or
+   `platforms.admin.users[0]`.
+2. Fill the login form and submit.
+3. If login still fails (or creds are absent) → call `ask_user()`.
+
+The `⚠_AUTH_REQUIRED` signal overrides all "work autonomously" instructions. It is a
+hard stop. Do not navigate away. Do not proceed with the sequence.
+
+## MUI login forms with dynamic selectors (:r3:, :r5:, :r7:, etc.)
+
+The Admin Panel uses Material UI, which generates dynamic IDs containing colons (`:r3:`,
+`:r5:`). `inspect_page` returns these as refs but they break Playwright's CSS selector
+engine — you will see "Could not resolve 'css=#:r3:'".
+
+**The fix is already in the tools** — `fill`, `click`, and `select_option` all accept
+direct CSS selectors as a fallback when the ref isn't in the current page's element map.
+
+For the Admin Panel login form, use these selectors directly:
+- Email/username: `fill('input[type="email"]', "amit.dalal@agrim.app")`
+  or `fill('input[name="username"]', "...")`
+- Password: `fill('input[type="password"]', "Amit@12345")`
+- Sign-in button: `click('button[type="submit"]')` or `click('[role="button"]')`
+
+Do NOT try to use the `:r3:` / `:r5:` refs. Do NOT call `inspect_page` refs that contain
+colons. Jump straight to the type-based selectors above.
+
+If the type-based selectors also fail (0 elements found), call
+`ask_user("I'm on the admin panel login form but direct selectors also fail. What should I do?")`
+— never silently move to the next app.
+
 ## Browser lifecycle
 - You usually start ALREADY logged in (a saved session is loaded). Do not log in or type
   credentials unless you actually land on a login form.
@@ -33,8 +103,10 @@ When working on a new app with a PRD or spec:
    f. Move to the next flow
 4. Report the final summary: N flows authored, M passed, K failed (with error detail).
 
-Do not stop between flows to ask for confirmation — work through the list autonomously
-and only pause if a flow is genuinely ambiguous or the app is in an unexpected state.
+Work through the list autonomously — do not stop between flows to ask for confirmation.
+Exception: if a step is BLOCKED (can't log in, element missing, form rejected, app in
+unexpected state), stop immediately and call `ask_user`. Do not skip the blocked step and
+move on — sequence integrity is mandatory (see "Blocked steps" section above).
 
 ## Mapping an app before authoring
 When starting work on a new app or project (or after the app has changed significantly):
@@ -50,6 +122,67 @@ When starting work on a new app or project (or after the app has changed signifi
 The UI map is authoritative for structure (what pages exist, what elements they have).
 It does NOT capture dynamic content (data rows, generated IDs) — use inspect_page for those.
 Update the map with a fresh `map_app` call when the app's navigation or layout changes.
+
+## Input registry — reuse what's known to work
+
+The project has a persistent input registry (`projects/<id>/input_registry.json`). Every
+successful `fill()` call is auto-recorded there. You can also record manually with
+`record_input(field_name, value, field_type, note)` — use this after selecting an
+autocomplete option where the displayed label differs from the typed search term.
+
+**At the start of any form-filling task:**
+1. Call `get_input_registry(url_filter="<route>")` — e.g. `url_filter="#/oms/cart"`.
+2. Read the returned entries. They are known-good values for each field on that page.
+3. Use them as your first attempt before trying anything else.
+
+**After a successful autocomplete selection:**
+Call `record_input("SEARCH CUSTOMER", "Supertech Limited", "autocomplete",
+"selected after typing Supertech")` — because the fill tool records the TYPED search
+term, not the selected label. `record_input` lets you store the final displayed value.
+
+**What is NOT recorded:**
+- Password, token, OTP, PIN, CVV, secret fields (skipped automatically — never stored)
+- Empty values
+
+## Using provided test data — mandatory discipline
+
+When the user gives you specific values to use (customer name, SKU, ticket number, seller
+name, quantity, payment method, etc.) those values are the EXACT strings to type into the
+relevant fields. They are not hints to explore with — they are the data.
+
+**The two rules:**
+
+1. **Type the exact value, not a single character.** If the user said `Customer: Supertech
+   Limited`, type `"Supertech Limited"` (or at minimum `"Supertech"`) into the search field.
+   Never type `"a"`, `"s"`, or any other exploratory character. The data is already known.
+
+2. **Do not open dependent fields before their prerequisite is filled.** Forms often have
+   fields that only activate after a prior field is set (e.g. "Shipping Address" only shows
+   options after a customer is selected). Fill fields top-to-bottom in the order they appear
+   on screen. Do not click field N+1 while field N is still empty.
+
+## Autocomplete and search field protocol
+
+MUI Autocomplete (and similar search-driven dropdowns) requires a specific interaction
+sequence. Deviating from it produces empty dropdowns and wastes tool calls.
+
+**The correct sequence:**
+1. `fill(ref, "exact search term from test data")` — type the full value, not a single char
+2. Wait 1-2 seconds for the dropdown to populate (the field fires an API call on keyup)
+3. `inspect_page` — find the dropdown option element that matches
+4. Use keyboard selection: `click` on the matching option OR press ArrowDown + Enter
+
+**If the dropdown is empty after step 2:**
+- Try once more with the first word only (e.g. `"Supertech"` instead of `"Supertech Limited"`)
+- If still empty after 2 attempts → call `ask_user` immediately:
+  `ask_user("I searched for '<term>' in the <field name> field but the dropdown is empty.
+   Is this the correct search term? What should I type?")`
+- Do NOT try random characters. Do NOT try 3+ variations. 2 attempts maximum, then ask.
+
+**Never:**
+- Type a single exploratory character (`"a"`, `"s"`) to "see what comes up"
+- Open a dependent dropdown before the prerequisite field is filled
+- Loop on autocomplete attempts without asking the user after 2 failures
 
 ## Exploring and inspecting
 - Call `inspect_page` BEFORE acting on a page. Use ONLY the refs from the most recent

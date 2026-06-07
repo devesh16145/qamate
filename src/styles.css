@@ -846,8 +846,26 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .main-grid.lc { grid-template-columns: 0 1fr var(--rw, 360px); }
 .main-grid.rc { grid-template-columns: var(--lw, 260px) 1fr 0; }
 .main-grid.lc.rc { grid-template-columns: 0 1fr 0; }
-/* Docked AI Agent + History share the same right-column width (360px). */
+/* Agent only (default): single right column */
 .main-grid.agent-docked { --rw: 360px; }
+
+/* History only: single right column using history width */
+.main-grid.history-docked {
+  grid-template-columns: var(--lw, 260px) 1fr var(--hrw, 280px);
+}
+.main-grid.history-docked.lc {
+  grid-template-columns: 0 1fr var(--hrw, 280px);
+}
+
+/* Both docked: 4-column layout — History (inner) | Agent (outer) */
+.main-grid.both-docked {
+  grid-template-columns: var(--lw, 260px) 1fr var(--hrw, 280px) var(--rw, 360px);
+}
+.main-grid.both-docked.lc {
+  grid-template-columns: 0 1fr var(--hrw, 280px) var(--rw, 360px);
+}
+/* Inner gutter between History and Agent panels when both are visible */
+.rh-history { right: calc(var(--rw, 360px) + var(--hrw, 280px)); }
 
 /* ─── AI Agent (shared by the dedicated window AND the docked right panel) ─── */
 .agent-shell { display: flex; height: 100vh; min-height: 0; background: var(--tool); color: var(--text); }
@@ -864,6 +882,17 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .ses-x { opacity: 0; border: none; background: transparent; cursor: pointer; color: var(--text-3); display: inline-flex; }
 .ses-row:hover .ses-x { opacity: 1; }
 .agent-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+/* ── Agent chat message feed ─────────────────────────────────────────────── */
+/* Space between consecutive same-role messages */
+.agent-msg-gap { height: 6px; }
+
+/* Smooth transition on the awaiting-input textarea border */
+.agent-composer-ta { transition: border-color 0.15s ease, background 0.15s ease; }
+.agent-composer-ta:focus { border-color: var(--accent) !important; outline: none; }
+
+/* Tool batch expand button subtle hover */
+.agent-tool-btn:hover { background: var(--hover) !important; border-radius: 4px; }
 
 /* Agent chat initiator (compose a first message to start a new session) */
 .agent-pane.no-ses { display: flex; flex-direction: column; min-height: 0; }

@@ -1,0 +1,87 @@
+[
+    {
+        "tc_id": "TC-DED-001",
+        "description": "Verify Deductions page: status tabs (All, Open, Processing, Closed) switch correctly, search field accepts input",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/deductions\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/deductions",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/deductions",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"button\", name=\"Open\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Open\")",
+                "targetDescription": "Click Open",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 3,
+                "rawLine": "page.get_by_role(\"button\", name=\"Processing\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Processing\")",
+                "targetDescription": "Click Processing",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 4,
+                "rawLine": "page.get_by_role(\"button\", name=\"Closed\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Closed\")",
+                "targetDescription": "Click Closed",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 5,
+                "rawLine": "page.get_by_placeholder(\"PO Number, Bill Number, UTR, DN#, Items\").fill(\"DN123\")",
+                "type": "fill",
+                "target": "page.get_by_placeholder(\"PO Number, Bill Number, UTR, DN#, Items\")",
+                "targetDescription": "Enter \"DN123\" in po-number-bill-number-utr-dn-items",
+                "value": "DN123",
+                "varName": "input_1"
+            }
+        ],
+        "preconditions": "test reachable; logged in if required",
+        "expected_result": "Deductions page loads with All tab. Clicking Open, Processing, Closed tabs each filters correctly. Search field accepts DN/PO/bill number input and shows results.",
+        "assertions": [
+            {
+                "type": "page_contains_text",
+                "value": "All",
+                "afterStep": 1,
+                "description": "Deductions page loads with status tabs"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Open",
+                "afterStep": 2,
+                "description": "Open tab filters deductions"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Processing",
+                "afterStep": 3,
+                "description": "Processing tab filters deductions"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "Closed",
+                "afterStep": 4,
+                "description": "Closed tab filters deductions"
+            },
+            {
+                "type": "page_contains_text",
+                "value": "No Deduction Found",
+                "afterStep": 5,
+                "description": "Search shows no results for unmatched query"
+            }
+        ]
+    }
+]

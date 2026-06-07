@@ -947,6 +947,15 @@ def capture_screenshot_on_failure(page, request, results_dir):
         except Exception:
             pass
 
+        # Save full visible page text so non-vision LLMs (e.g. MiMo) can read what was on screen
+        try:
+            page_text = active_page.inner_text("body") or ""
+            if page_text.strip():
+                with open(os.path.join(screenshot_dir, f"{tc_name}_FAILED_TEXT.txt"), "w", encoding="utf-8") as _ft:
+                    _ft.write(page_text[:12000])
+        except Exception:
+            pass
+
         # Capture visible page errors
         try:
             error_selectors = [
@@ -1068,7 +1077,7 @@ def pytest_generate_tests(metafunc):
         return
 
     tc_raw = data.get(tc_id, {})
-    if _is_variants(tc_raw) and len(tc_raw) > 1:
+    if _is_variants(tc_raw) and len(tc_raw) > 1 and "tc_data" in metafunc.fixturenames:
         target_variant = os.environ.get("ATS_VARIANT")
         if target_variant and target_variant in tc_raw:
             variant_names = [target_variant]

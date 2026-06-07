@@ -1104,7 +1104,10 @@ function App() {
   // Layout / tool windows
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [agentDock, setAgentDock] = useState('docked'); // 'closed' (History) | 'docked' (agent in the right panel) — agent is the default
+  // Right rail: agent is the default. History is the secondary inner panel.
+  // Both can be visible simultaneously (4-panel layout: left | center | history | agent).
+  const [agentDocked,   setAgentDocked]   = useState(true);   // agent in far-right slot
+  const [historyDocked, setHistoryDocked] = useState(false);  // history in inner-right slot
 
   // ── Resizable side panels (drag the gutter; min-width clamped; persisted) ──
   const gridRef = useRef(null);
@@ -1117,7 +1120,7 @@ function App() {
     const grid = gridRef.current; if (!grid) return;
     const rect = grid.getBoundingClientRect();
     let cur = side === 'left' ? leftW : rightW;
-    const otherR = (rightCollapsed && agentDock !== 'docked') ? 0 : rightW;
+    const otherR = (rightCollapsed && !agentDocked) ? 0 : rightW;
     const otherL = leftCollapsed ? 0 : leftW;
     const onMove = (ev) => {
       if (side === 'left') {
@@ -1152,10 +1155,24 @@ function App() {
   useEffect(() => { window.toggleLogDrawer = () => setDrawerH(h => h > 60 ? 0 : 240); return () => { delete window.toggleLogDrawer; }; }, []);
 
   const AgentPanel = window.AgentApp;                    // shared module from agent_ui.js
-  useEffect(() => { window.toggleAgentDock = () => setAgentDock(d => d === 'docked' ? 'closed' : 'docked'); }, []);
+  // Legacy toggle (keyboard shortcuts)
+  useEffect(() => { window.toggleAgentDock = () => setAgentDocked(d => !d); }, []);
+  // Agent float window → Dock button: dock agent back into far-right slot
   useEffect(() => {
     if (!window.ats || !window.ats.onAgentDockRequest) return;
-    const off = window.ats.onAgentDockRequest(() => setAgentDock('docked'));
+    const off = window.ats.onAgentDockRequest(() => setAgentDocked(true));
+    return () => off && off();
+  }, []);
+  // History float window → Dock button: dock history into inner-right slot
+  useEffect(() => {
+    if (!window.ats || !window.ats.onHistoryDockRequest) return;
+    const off = window.ats.onHistoryDockRequest(() => { setHistoryDocked(true); setRightCollapsed(false); });
+    return () => off && off();
+  }, []);
+  // Float history window asks main window to open a specific run as a results tab
+  useEffect(() => {
+    if (!window.ats || !window.ats.onOpenRunRequest) return;
+    const off = window.ats.onOpenRunRequest((runId) => { if (openResultsTab) openResultsTab(runId); });
     return () => off && off();
   }, []);
   const [leftTool, setLeftTool] = useState('explorer'); // explorer | search | schedule
@@ -1451,6 +1468,8 @@ function App() {
         leftCollapsed={leftCollapsed}
         rightCollapsed={rightCollapsed}
         setRightCollapsed={setRightCollapsed}
+        agentDocked={agentDocked}   setAgentDocked={setAgentDocked}
+        historyDocked={historyDocked} setHistoryDocked={setHistoryDocked}
         setActiveTab={setActiveTab}
         openResultsTab={openResultsTab}
         openTab={openTab}
@@ -1459,7 +1478,7 @@ function App() {
       />
       <div className="main-shell">
         <div ref={gridRef} style={{ '--lw': leftW + 'px', '--rw': rightW + 'px' }}
-          className={`main-grid${leftCollapsed ? ' lc' : ''}${(rightCollapsed && agentDock !== 'docked') ? ' rc' : ''}${agentDock === 'docked' ? ' agent-docked' : ''}`}>
+          className={`main-grid${leftCollapsed ? ' lc' : ''}${(rightCollapsed || (!agentDocked && !historyDocked)) ? ' rc' : ''}${agentDocked && historyDocked ? ' both-docked' : agentDocked ? ' agent-docked' : historyDocked ? ' history-docked' : ''}`}>
           {!leftCollapsed && (
             <LeftToolWindow
               tool={leftTool}
@@ -1522,21 +1541,25 @@ function App() {
             openCoverageTab={openCoverageTab}
             openReviewTab={openReviewTab}
           />
-          {agentDock === 'docked' && AgentPanel ? (
-            <AgentPanel embedded
-              onUndock={() => { window.ats.agentOpenWindow(); setAgentDock('closed'); }}
-              onClose={() => setAgentDock('closed')} />
-          ) : (!rightCollapsed && (
+          {/* Inner right panel: History — appears between center and agent */}
+          {historyDocked && !rightCollapsed && (
             <HistoryPanel
               history={HISTORY}
               onOpen={openResultsTab}
-              onClose={() => setRightCollapsed(true)}
+              onClose={() => setHistoryDocked(false)}
+              onPopOut={() => { window.ats.historyOpenWindow(); setHistoryDocked(false); }}
             />
-          ))}
+          )}
+          {/* Outer right panel: Agent — always the far-right slot */}
+          {agentDocked && AgentPanel && !rightCollapsed && (
+            <AgentPanel embedded
+              onUndock={() => { window.ats.agentOpenWindow(); setAgentDocked(false); }}
+              onClose={() => setAgentDocked(false)} />
+          )}
           {!leftCollapsed && (
             <div className="resize-h rh-left" style={{ left: 'var(--lw)' }} onMouseDown={startResize('left')} title="Drag to resize"></div>
           )}
-          {(agentDock === 'docked' || !rightCollapsed) && (
+          {(agentDocked || historyDocked) && !rightCollapsed && (
             <div className="resize-h rh-right" style={{ right: 'var(--rw)' }} onMouseDown={startResize('right')} title="Drag to resize"></div>
           )}
         </div>
@@ -1582,7 +1605,7 @@ const nowTs = () => {
 /* ──────────────────────────────────────────────────────────────
    Title Bar
    ────────────────────────────────────────────────────────────── */
-function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, leftTool, setLeftTool, setLeftCollapsed, leftCollapsed, rightCollapsed, setRightCollapsed, setActiveTab, openResultsTab, openTab, tabs, toast }) {
+function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, leftTool, setLeftTool, setLeftCollapsed, leftCollapsed, rightCollapsed, setRightCollapsed, agentDocked, setAgentDocked, historyDocked, setHistoryDocked, setActiveTab, openResultsTab, openTab, tabs, toast }) {
   const [envOpen, setEnvOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -1686,9 +1709,16 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         </button>
         <div className="divider"></div>
         <button
-          className={`tb-window-btn${!rightCollapsed ? ' active' : ''}`}
-          onClick={() => setRightCollapsed(c => !c)}
-          title="History"
+          className={`tb-window-btn${historyDocked && !rightCollapsed ? ' active' : ''}`}
+          onClick={() => {
+            if (historyDocked) {
+              setHistoryDocked(false);           // already showing → hide it
+            } else {
+              setHistoryDocked(true);            // show between center and agent (even if agent is docked)
+              setRightCollapsed(false);
+            }
+          }}
+          title="History — shows inner right panel; stacks next to agent if agent is docked"
         >
           <I.Clock size={15} />
         </button>
@@ -1738,7 +1768,19 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         <button className="tb-icon-btn" title="Search everywhere ⌘K" onClick={onOpenCmd}>
           <I.Search size={15} />
         </button>
-        <button className="tb-icon-btn" title="AI Agent — dock/undock the agent panel on the right (persistent, resumable sessions)" onClick={() => { if (window.toggleAgentDock) window.toggleAgentDock(); }}>
+        <button className={`tb-icon-btn${agentDocked && !rightCollapsed ? ' active' : ''}`}
+          title="AI Agent — dock/undock the agent panel on the far right"
+          onClick={() => {
+            if (agentDocked) {
+              // Already docked → undock to float
+              window.ats.agentOpenWindow();
+              setAgentDocked(false);
+            } else {
+              // Not docked → dock it (stacks next to history if history is open)
+              setAgentDocked(true);
+              setRightCollapsed(false);
+            }
+          }}>
           <I.MessageSquare size={15} />
         </button>
         <button className="tb-icon-btn" title="Bug & Story Manager" onClick={() => window.ats.bugsOpenWindow()}>
@@ -3208,12 +3250,13 @@ function StepsView({ tc }) {
 /* ──────────────────────────────────────────────────────────────
    History Panel — right rail; clicking a row opens the result as a tab
    ────────────────────────────────────────────────────────────── */
-function HistoryPanel({ history, onOpen, onClose }) {
+function HistoryPanel({ history, onOpen, onClose, onPopOut }) {
   return (
     <aside className="tw right history-panel">
       <div className="hp-head">
         <span className="hp-title">History</span>
         <span className="hp-count">{history.length}</span>
+        {onPopOut && <button className="ic" title="Open as floating window" onClick={onPopOut}><I.ExternalLink size={12} /></button>}
         <button className="ic" title="Hide panel" onClick={onClose}><I.X size={12} /></button>
       </div>
       <div className="hp-list">

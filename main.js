@@ -350,6 +350,25 @@ function createAgentWindow() {
   return agentWindow;
 }
 
+let historyWindow = null;
+function createHistoryWindow() {
+  if (historyWindow && !historyWindow.isDestroyed()) { historyWindow.focus(); return historyWindow; }
+  historyWindow = new BrowserWindow({
+    width: 420, height: 700,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    title: 'Agrim ATS — History',
+    backgroundColor: '#ffffff',
+  });
+  historyWindow.loadFile(path.join(__dirname, 'src', 'history.html'));
+  historyWindow.on('closed', () => { historyWindow = null; });
+  return historyWindow;
+}
+
 let bugManagerWindow = null;
 function createBugManagerWindow() {
   if (bugManagerWindow && !bugManagerWindow.isDestroyed()) { bugManagerWindow.focus(); return bugManagerWindow; }
@@ -425,6 +444,29 @@ function _spawnAgent(sessionId, projectId, initCmd) {
 }
 
 ipcMain.handle('agent-open-window', async () => { createAgentWindow(); return { status: 'success' }; });
+ipcMain.handle('history-open-window', async () => { createHistoryWindow(); return { status: 'success' }; });
+ipcMain.handle('history-dock', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('history-dock-request');
+  if (historyWindow && !historyWindow.isDestroyed()) historyWindow.close();
+  return { status: 'success' };
+});
+ipcMain.handle('open-run-in-main', async (event, runId) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show(); mainWindow.focus();
+    mainWindow.webContents.send('open-run-request', runId);
+  }
+  return { status: 'success' };
+});
+ipcMain.handle('agent-show-browser', async (event, { sessionId } = {}) => {
+  if (!sessionId || !agentProcs.has(sessionId)) return { status: 'error', message: 'session not running' };
+  return _agentWrite(sessionId, { action: 'show_browser' })
+    ? { status: 'success' } : { status: 'error', message: 'write failed' };
+});
+ipcMain.handle('open-main-window', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+  else createWindow();
+  return { status: 'success' };
+});
 ipcMain.handle('bugs-open-window', async () => { createBugManagerWindow(); return { status: 'success' }; });
 ipcMain.handle('open-external', async (event, url) => { try { if (url) await shell.openExternal(String(url)); return { success: true }; } catch (e) { return { success: false, error: e.message }; } });
 
@@ -463,6 +505,7 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
       headed: !!opts.headed,
       title: opts.title || '',
       start_path: opts.startPath || '',
+      tool_budget: (opts.toolBudget != null) ? Number(opts.toolBudget) : null,
     });
   } catch (err) { return { status: 'error', message: err.message }; }
   return { status: 'success' };
