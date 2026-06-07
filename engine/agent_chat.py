@@ -378,6 +378,36 @@ async def _bro(fn, *args, **kwargs):
     return await loop.run_in_executor(_BROWSER, lambda: fn(*args, **kwargs))
 
 
+_VISION_PROMPT = (
+    "You are the eyes of a browser automation agent. Describe ONLY what is visually "
+    "present on screen right now. Focus on: any open dropdown lists and ALL their visible "
+    "options (quote exact text), modal dialogs and their content, form fields and their "
+    "current values, buttons and their labels, any error or success messages. "
+    "Be concise and literal — no inference, no guessing. "
+    "Start with: 'Current screen shows:'"
+)
+
+
+async def _call_vision_oracle(config: dict, screenshot_bytes: bytes,
+                               question: str = "") -> str:
+    """Async wrapper: dispatches a one-shot vision call to the configured vision model
+    on the default executor (NOT the browser thread). Returns a text description.
+    Falls back to a clear error string so callers can always include it in results."""
+    oracle_cfg = (config.get("vision_oracle") or {})
+    if not oracle_cfg or not oracle_cfg.get("model"):
+        return ("(vision oracle not configured — add 'vision_oracle' block with "
+                "'model','base_url','api_key_env' to config.json)")
+    q = question or _VISION_PROMPT
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, lambda: _llm.call_vision_oracle(oracle_cfg, screenshot_bytes, q))
+    except _llm.LLMNotConfigured as e:
+        return f"(vision oracle key missing: {e})"
+    except Exception as e:
+        return f"(vision oracle error: {type(e).__name__}: {str(e)[:200]})"
+
+
 # ── Live browser session (every method runs ON the browser thread) ───────────
 
 def _is_closed_error(e):
@@ -726,6 +756,101 @@ class BrowserSession:
         except Exception:
             pass
 
+    # Overlay detection + screenshot ─────────────────────────────────────────
+
+    _OVERLAY_JS = """() => {
+        const sel = [
+            '[role="listbox"]', '[role="dialog"]', '[role="menu"]',
+            '[role="option"]',  '[aria-haspopup][aria-expanded="true"]',
+            '[data-radix-popper-content-wrapper]', '.select__menu',
+            '[class*="dropdown"][class*="open"]', '[class*="popover"]'
+        ].join(',');
+        const el = document.querySelector(sel);
+        return el ? true : false;
+    }"""
+
+    def overlay_opened(self) -> bool:
+        """Fast post-click check: did a dropdown / dialog / menu appear?"""
+        try:
+            return bool(self.page.evaluate(self._OVERLAY_JS))
+        except Exception:
+            return False
+
+    _OPTIONS_JS = """() => {
+        const texts = [];
+        // role=option covers MUI, Radix, Headless UI, Ant Design, etc.
+        for (const el of document.querySelectorAll('[role="option"]')) {
+            const t = (el.textContent || '').trim();
+            if (t) texts.push(t);
+        }
+        // Fallback: plain li inside a listbox / dropdown menu
+        if (!texts.length) {
+            for (const el of document.querySelectorAll(
+                    '[role="listbox"] li, [role="menu"] li, ul[class*="option"] li, ' +
+                    'ul[class*="menu"] li, ul[class*="dropdown"] li')) {
+                const t = (el.textContent || '').trim();
+                if (t) texts.push(t);
+            }
+        }
+        return texts.slice(0, 30);
+    }"""
+
+    def _wait_for_options(self, timeout_ms: int = 3000) -> bool:
+        """Wait up to timeout_ms for any [role=option] to become visible.
+        Returns True if options appeared, False on timeout."""
+        try:
+            self.page.wait_for_selector(
+                '[role="option"], [role="listbox"] li',
+                state="attached", timeout=timeout_ms)
+            return True
+        except Exception:
+            return False
+
+    def _get_visible_options(self) -> list:
+        """Synchronously read all visible option texts from any open dropdown/listbox."""
+        try:
+            return self.page.evaluate(self._OPTIONS_JS) or []
+        except Exception:
+            return []
+
+    def get_options(self, filter_text: str = "") -> dict:
+        """Read option texts from any open dropdown. Waits up to 3s for options to load."""
+        self._wait_for_options(3000)
+        opts = self._get_visible_options()
+        if filter_text:
+            low = filter_text.lower()
+            opts = [o for o in opts if low in o.lower()]
+        return {"ok": True, "count": len(opts), "options": opts}
+
+    def click_option_by_text(self, text: str, exact: bool = False) -> dict:
+        """Click a visible dropdown option by its text content.
+        Searches the entire document including portal elements."""
+        try:
+            # Primary: role=option with the given name (Playwright searches entire doc)
+            loc = self.page.get_by_role("option", name=text, exact=exact)
+            count = loc.count()
+            if count > 0:
+                loc.first.click()
+                self._settle()
+                return {"ok": True, "clicked": text, "url": self._url()}
+            # Fallback: any visible element inside a listbox containing the text
+            loc2 = self.page.locator(
+                f'[role="listbox"] *:has-text("{text}"), '
+                f'[role="menu"] *:has-text("{text}")'
+            ).filter(has_text=text)
+            if loc2.count() > 0:
+                loc2.first.click()
+                self._settle()
+                return {"ok": True, "clicked": text, "url": self._url(), "fallback": "listbox text"}
+            return {"ok": False,
+                    "error": f"No option matching '{text}' visible in any open dropdown. "
+                             f"Call list_options() first to see what is available."}
+        except Exception as e:
+            return {"ok": False, "error": f"click_option failed: {str(e)[:200]}"}
+
+    def screenshot(self) -> bytes:
+        return self.page.screenshot(type="png")
+
     def _on_login_page(self):
         """A visible password field is the most reliable 'not logged in' signal."""
         try:
@@ -797,9 +922,11 @@ class BrowserSession:
             result["⚠_AUTH_REQUIRED"] = (
                 f"SESSION EXPIRED — {len(auth_failures)} request(s) returned 401/403: "
                 f"{auth_failures[0]}{'...' if len(auth_failures)>1 else ''}. "
-                "The saved session is no longer valid. "
-                "Step 1: call get_settings() for credentials and attempt a fresh login. "
-                "Step 2: if login fails, call ask_user() for new credentials. "
+                "The frontend may still show pages (stale localStorage token) but the backend rejects requests. "
+                "Step 1: call clear_auth_storage() to wipe the stale token. "
+                "Step 2: navigate to the login URL. "
+                "Step 3: call get_settings() for credentials and fill the login form. "
+                "Step 4: if login still fails, call ask_user() for new credentials. "
                 "DO NOT continue the task sequence until authentication is resolved."
             )
         return result
@@ -951,6 +1078,15 @@ class BrowserSession:
                   "new_issues": self.issues[before:]}
         if warning:
             result["warning"] = warning
+        if kind == "click" and self.overlay_opened():
+            result["overlay_opened"] = True
+        elif kind == "fill":
+            # After typing into a field, wait for autocomplete options (API response may be async).
+            # If any appear, include them directly so the agent doesn't need another round-trip.
+            opts = self.get_options()["options"]
+            if opts:
+                result["autocomplete_options"] = opts
+                result["hint"] = "Call click_option(text) with one of these values to select it."
         return result
 
     def _act_direct(self, kind, ref, value=None):
@@ -996,6 +1132,13 @@ class BrowserSession:
                   "new_issues": self.issues[before:]}
         if n > 1:
             result["warning"] = f"Selector '{ref}' matched {n} elements — acted on the first one."
+        if kind == "click" and self.overlay_opened():
+            result["overlay_opened"] = True
+        elif kind == "fill":
+            opts = self.get_options()["options"]
+            if opts:
+                result["autocomplete_options"] = opts
+                result["hint"] = "Call click_option(text) with one of these values to select it."
         return result
 
     def add_checkpoint(self, name, assert_type, value):
@@ -1300,10 +1443,55 @@ def build_agent(model, max_tokens=None):
     async def click(ctx: RunContext[Deps], ref: str) -> dict:
         """Click the element with the given ref (from the latest inspect_page). Records the action
         as a test step. Returns ok, the new URL/title, and any breakage triggered.
+        If the click opened a dropdown / dialog / menu, the result includes 'overlay_opened: true'
+        AND a 'visual_state' key — read that description to find option text before acting.
         FALLBACK: if a ref is broken (e.g. MUI colon IDs like :r3:), pass a direct CSS selector
         instead — e.g. 'button[type="submit"]' or '[role="button"]'. Direct selectors are
         detected automatically and bypass the ref lookup."""
-        return await _bro(ctx.deps.session.act, "click", ref, None)
+        result = await _bro(ctx.deps.session.act, "click", ref, None)
+        if result.get("overlay_opened"):
+            shot = await _bro(ctx.deps.session.screenshot)
+            result["visual_state"] = await _call_vision_oracle(ctx.deps.config, shot)
+        return result
+
+    @agent.tool
+    async def look(ctx: RunContext[Deps],
+                   question: str = "Describe all interactive elements on screen, especially any "
+                                   "open dropdowns with their options, dialogs, overlays, and "
+                                   "any currently selected or highlighted items.") -> dict:
+        """Take a screenshot and get a visual description of the current page state from the
+        vision model. Use this when:
+        - A dropdown, modal, or overlay is open and you need to see its options
+        - inspect_page() did not return an element you expected to see
+        - You are about to interact with dynamic content (date-pickers, rich selects, etc.)
+        - You are unsure what the page looks like right now
+        Returns 'visual_description' — a literal description of what is currently on screen."""
+        try:
+            shot = await _bro(ctx.deps.session.screenshot)
+        except Exception as e:
+            return {"ok": False, "error": f"screenshot failed: {e}"}
+        description = await _call_vision_oracle(ctx.deps.config, shot, question)
+        return {"ok": True, "visual_description": description}
+
+    @agent.tool
+    async def list_options(ctx: RunContext[Deps], filter_text: str = "") -> dict:
+        """Read the visible options from any currently open dropdown, autocomplete, listbox,
+        or menu. Waits up to 3 seconds for async-loaded options to appear (e.g. API-backed
+        customer/product searches). Use this AFTER typing in a search field if fill() did not
+        already return 'autocomplete_options'. Returns option texts you can pass to click_option.
+        filter_text: optional substring to narrow results."""
+        return await _bro(ctx.deps.session.get_options, filter_text)
+
+    @agent.tool
+    async def click_option(ctx: RunContext[Deps], text: str, exact: bool = False) -> dict:
+        """Click a visible option in an open dropdown / autocomplete / listbox by its text.
+        Searches the ENTIRE document including portal elements (MUI, Radix, Ant Design, etc.)
+        so stale inspect_page refs are not needed. Use after fill() on a search/autocomplete
+        field, or after list_options() tells you what is available.
+        text: the option label (partial match by default; set exact=True for exact match).
+        IMPORTANT: do NOT call inspect_page before this — the refs will be stale. Just call
+        click_option directly with the text you saw in autocomplete_options or list_options."""
+        return await _bro(ctx.deps.session.click_option_by_text, text, exact)
 
     @agent.tool
     async def fill(ctx: RunContext[Deps], ref: str, value: str) -> dict:
@@ -2068,6 +2256,32 @@ def build_agent(model, max_tokens=None):
         }
 
     @agent.tool
+    async def clear_auth_storage(ctx: RunContext[Deps]) -> dict:
+        """Wipe localStorage, sessionStorage, and cookies for the current origin so the
+        browser forgets any stale session token. Use this ONLY when navigate() returned
+        ⚠_AUTH_REQUIRED because API calls returned 401/403 but NO login form was visible
+        (i.e. the frontend still thinks it is logged in). After calling this, navigate to
+        the login URL and fill credentials. Do NOT call this on a clean session."""
+        def _clear():
+            try:
+                page = ctx.deps.session.page
+                url = page.url
+                try:
+                    page.evaluate("() => { try { localStorage.clear(); } catch(e){} "
+                                  "try { sessionStorage.clear(); } catch(e){} }")
+                except Exception:
+                    pass
+                try:
+                    ctx.deps.session.context.clear_cookies()
+                except Exception:
+                    pass
+                return {"ok": True, "cleared_for": url,
+                        "next": "Navigate to the login URL and fill credentials."}
+            except Exception as e:
+                return {"ok": False, "error": str(e)[:200]}
+        return await _bro(_clear)
+
+    @agent.tool
     async def ask_user(ctx: RunContext[Deps], question: str) -> str:
         """Pause the current task and ask the user a question. MANDATORY in these situations:
         - You are on a login form and the saved session was not accepted (credentials missing
@@ -2088,7 +2302,11 @@ def build_agent(model, max_tokens=None):
             answer = await ctx.deps.user_input_q.get()
         finally:
             ctx.deps._ask_state["waiting"] = False
-        return answer
+        # Wrap with a directive so the LLM doesn't respond conversationally — it must
+        # immediately continue the task sequence from the step that was suspended.
+        return (f"<user_reply>{answer}</user_reply>\n"
+                "TASK RESUMES NOW — execute the next pending step immediately. "
+                "Do NOT acknowledge the reply in text. Just act.")
 
     @agent.instructions
     async def _project_memory_and_context(ctx: RunContext[Deps]) -> str:

@@ -41,6 +41,11 @@ you must complete each item before moving to the next. A partially-completed ite
 done. If you cannot complete it, pause with `ask_user` — the sequence is suspended at that
 point until you get an answer and resume.
 
+**After `ask_user` returns — ALWAYS continue the task.** The tool wraps the user's reply
+with a directive to resume. You must act on that directive immediately — call the next tool
+in the sequence. Do NOT respond with acknowledgement text ("Got it, I'll try that") — just
+execute the next step. The user already knows you received their reply because you act on it.
+
 ## Auth failures — reading the navigate() signal
 
 The `navigate()` tool now detects authentication failures and returns a key named
@@ -49,11 +54,19 @@ The `navigate()` tool now detects authentication failures and returns a key name
 - API calls returned 401/403 after the page loaded (expired session on an SPA)
 
 When you see `⚠_AUTH_REQUIRED` in a navigate result, read the message — it tells you
-exactly what to do. The short version:
-1. Call `get_settings()` → find credentials under `platforms.seller.users[0]` or
-   `platforms.admin.users[0]`.
-2. Fill the login form and submit.
-3. If login still fails (or creds are absent) → call `ask_user()`.
+exactly what to do. Two distinct cases:
+
+**Case A — login form visible** (the session was rejected and you're on the login page):
+1. Call `get_settings()` → find credentials.
+2. Fill the login form with direct CSS selectors (`input[type="email"]`, `input[type="password"]`).
+3. If login still fails (or creds absent) → call `ask_user()`.
+
+**Case B — 401/403 from API but no login form** (stale localStorage token; frontend shows
+the app as if logged in but backend rejects requests):
+1. Call `clear_auth_storage()` — wipes the stale token from localStorage/sessionStorage/cookies.
+2. Navigate to the login URL.
+3. Call `get_settings()` → fill login form → submit.
+4. If login still fails → call `ask_user()`.
 
 The `⚠_AUTH_REQUIRED` signal overrides all "work autonomously" instructions. It is a
 hard stop. Do not navigate away. Do not proceed with the sequence.
@@ -79,6 +92,35 @@ colons. Jump straight to the type-based selectors above.
 If the type-based selectors also fail (0 elements found), call
 `ask_user("I'm on the admin panel login form but direct selectors also fail. What should I do?")`
 — never silently move to the next app.
+
+## Dropdowns, autocompletes, and dynamic content
+
+Modern dropdowns (MUI Autocomplete, Radix, Ant Design) load options asynchronously
+via API calls. inspect_page on an open-but-empty listbox means the options are still
+loading NOT that they don't exist. You have two tools that handle this correctly.
+
+### Autocomplete / search-field workflow (e.g. customer search, product search)
+
+After fill() on a search input:
+- If the result has "autocomplete_options": ["Option A", ...] -> call click_option("Option A")
+- If autocomplete_options is absent (API took longer than 3s) -> call list_options(), then click_option()
+
+### Click-to-open dropdown
+
+After click() on a trigger:
+- If result has "overlay_opened": true and "visual_state" -> read visual_state for option texts, then click_option()
+- If vision unavailable -> call list_options(), then click_option()
+
+### Rules
+
+- NEVER call inspect_page to find dropdown options. Refs are stale the moment the overlay opens. Use list_options + click_option.
+- NEVER give up after one empty inspect_page. The options are loading. Wait with list_options() (retries for 3s).
+- click_option searches the entire document including portals. Just pass the option text.
+- If click_option reports 0 matches, call list_options() to confirm what is actually visible.
+
+### When to call look manually
+- Before interacting with any rich widget (date-picker, multi-select, drag-and-drop).
+- When you cannot determine the page state from tool results alone.
 
 ## Browser lifecycle
 - You usually start ALREADY logged in (a saved session is loaded). Do not log in or type

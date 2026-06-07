@@ -26,6 +26,7 @@ Public API:
 import os
 import re
 import json
+import base64
 import urllib.request
 import urllib.error
 
@@ -205,6 +206,40 @@ def complete_json(provider, system, user, max_tokens=None, temperature=0.1):
     user2 = user + "\n\nRespond with ONLY valid JSON. No prose, no code fences."
     raw = provider.complete(system, user2, max_tokens=max_tokens, temperature=temperature)
     return extract_json(raw)
+
+
+# ── Vision oracle ────────────────────────────────────────────────────────────
+
+def call_vision_oracle(vision_cfg: dict, screenshot_bytes: bytes, question: str,
+                       timeout: int = 30) -> str:
+    """One-shot multimodal call to a vision-capable model (OpenAI-compatible).
+    vision_cfg: {model, base_url, api_key_env, max_tokens}
+    Returns the model's text description of the screenshot."""
+    model = vision_cfg.get("model", "")
+    base_url = (vision_cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
+    api_key_env = vision_cfg.get("api_key_env", "OPENAI_API_KEY")
+    max_tokens = int(vision_cfg.get("max_tokens", 512))
+    api_key = os.environ.get(api_key_env, "")
+    if not api_key:
+        raise LLMNotConfigured(
+            f"Vision oracle key not set (env {api_key_env!r}). "
+            f"Add it to Settings or set the env var."
+        )
+    img_b64 = base64.b64encode(screenshot_bytes).decode()
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": question},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+            ]
+        }]
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+    resp = _http_post_json(f"{base_url}/chat/completions", headers, payload, timeout=timeout)
+    return resp["choices"][0]["message"]["content"]
 
 
 # ── CLI (smoke) ──
