@@ -26,12 +26,19 @@
        take over and closes this window. -->
   <script type="text/babel">
     function AgentWindowRoot() {
-      const dock = () => { try { window.ats.agentDock(); } catch (e) {} };
+      const dock    = () => { try { window.ats.agentDock(); } catch (e) {} };
+      const history = () => { try { window.ats.openMainWindow(); } catch (e) {} };
+      const btnStyle = { position: 'fixed', top: 8, zIndex: 90 };
       return (
         <div style={{ position: 'relative', height: '100%' }}>
+          <button className="rv-cta" onClick={history}
+            title="Open test run history and results in the main window"
+            style={{ ...btnStyle, right: 76 }}>
+            <window.I.History size={12} /> Results
+          </button>
           <button className="rv-cta" onClick={dock}
             title="Dock into the main window's right panel"
-            style={{ position: 'fixed', top: 8, right: 12, zIndex: 90 }}>
+            style={{ ...btnStyle, right: 12 }}>
             <window.I.PanelRight size={12} /> Dock
           </button>
           <window.AgentApp />

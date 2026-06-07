@@ -13,5 +13,19 @@
     "TC-ORDERS-002": {
         "input_1": "PO"
     },
-    "TC-ORDERS-003": {}
+    "TC-ORDERS-003": {},
+    "TC-OLC-001": {},
+    "TC-OLC-002": {},
+    "TC-OLC-003": {
+        "input_1": "zzz",
+        "input_3": "zzz"
+    },
+    "TC-OLC-004": {},
+    "TC-OLC-005": {},
+    "TC-OLC-006": {},
+    "TC-OLC-007": {},
+    "TC-OLC-008": {},
+    "TC-OLC-009": {},
+    "TC-OLC-010": {},
+    "TC-OLC-011": {}
 }

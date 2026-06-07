@@ -73,6 +73,36 @@
     "on_every_step": true,
     "on_failure": true
   },
+  "tracing": {
+    "mode": "retain-on-failure",
+    "_comment": "Playwright trace recording. mode: 'on' (every test), 'off', or 'retain-on-failure' (default — save only failed tests). Traces capture DOM snapshots + network + console per action; open with the Trace button or `playwright show-trace <file>`."
+  },
+  "network": {
+    "capture": true,
+    "api_only": true,
+    "max_body_kb": 20,
+    "_comment": "Per-test API/XHR capture (method, url, request payload, response body, timing) -> results/<ts>/network/<tc_id>.json, shown per step in History. api_only skips static assets; override with ATS_NETWORK=on|off."
+  },
+  "pass_criteria": {
+    "mode": "critical_only",
+    "threshold_pct": 90,
+    "treat_skipped_as": "ignore",
+    "default_severity": "critical",
+    "retries": 1,
+    "flaky_label": true,
+    "_comment": "How a test's verdict is decided. mode: 'critical_only' (only a failed CRITICAL-severity checkpoint fails the test; normal/minor failures are recorded as warnings), 'all' (any failure fails), or 'threshold' (pass if >= threshold_pct of checkpoints pass AND every critical passes). treat_skipped_as: ignore|fail|pass. default_severity: applied to checkpoints.run() calls that don't pass severity= (critical = blocking; normal/minor = non-blocking warning). retries: re-run a failed test N times; if a later attempt passes it is labelled FLAKY (requires pytest-rerunfailures)."
+  },
+  "llm": {
+    "default_provider": "mimo",
+    "providers": {
+      "mimo": { "model": "mimo-v2.5-pro", "base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 4096 },
+      "anthropic": { "model": "claude-opus-4-8", "api_key_env": "ATS_ANTHROPIC_KEY", "max_tokens": 4096 },
+      "openai": { "model": "gpt-4o", "api_key_env": "ATS_OPENAI_KEY", "max_tokens": 4096 },
+      "ollama": { "model": "llama3.1", "base_url": "http://localhost:11434", "max_tokens": 4096 },
+      "mock": {}
+    },
+    "_comment": "Pluggable LLM for the explorer (browser-use agent), PRD extraction + test synthesis. Default = Xiaomi MiMo (OpenAI-compatible, key from MIMO_API_KEY) for testing; generalises to any provider. API keys are NEVER stored here — only the env-var name each provider reads."
+  },
   "jira": {
     "url": "https://agrim-product.atlassian.net",
     "email": "Devesh.yadav@agrim.app",

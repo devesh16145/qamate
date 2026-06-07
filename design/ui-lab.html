@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ATS · UI Lab (v2)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   ATS DESIGN SYSTEM — hollow lab v2.  Skin: JetBrains New UI (DataGrip).
+   Structure: Postman.  Toolbars: ATS's existing icon clusters (kept).
+   Everything is a TOKEN — reskin by editing :root only.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --editor:#ffffff; --panel:#f7f8fa; --hover:#f0f1f3;
+  --sel:#d8e4ff; --sel-soft:#edf3ff;
+  --border:#ebecf0; --border-2:#d8dae0;
+  --text:#1e1f22; --text-2:#6c707e; --text-3:#9ca0ab;
+  --accent:#3574f0; --accent-hover:#2f68d8; --accent-soft:#eaf1ff; --on-accent:#ffffff;
+  --pass:#1a9c4a; --pass-bg:#e7f5ec;
+  --fail:#d6402a; --fail-bg:#fcebe8;
+  --warn:#b3791a; --warn-bg:#fbf1de;
+  --run:#3574f0;  --run-bg:#eaf1ff;
+
+  --font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --fs-title:13.5px; --fs-body:13px; --fs-label:12px; --fs-meta:11px; --fs-micro:10px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px;
+  --r:6px; --r-sm:4px;
+  --h-title:44px; --h-status:26px; --h-row:28px;
+}
+html[data-theme="dark"]{
+  --editor:#1e1f22; --panel:#2b2d30; --hover:#393b40;
+  --sel:#2e436e; --sel-soft:#25324d;
+  --border:#393b40; --border-2:#4b4d52;
+  --text:#dfe1e5; --text-2:#9da0a8; --text-3:#6f737a;
+  --accent:#548af7; --accent-hover:#6b9bf9; --accent-soft:#2b3a57; --on-accent:#ffffff;
+  --pass:#5fad65; --pass-bg:#243327;
+  --fail:#e0705f; --fail-bg:#3a2a28;
+  --warn:#d6a85f; --warn-bg:#3a3324;
+  --run:#548af7;  --run-bg:#25324d;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{font-family:var(--font);font-size:var(--fs-body);color:var(--text);background:var(--editor);-webkit-font-smoothing:antialiased;letter-spacing:-0.01em;}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+svg.ic,svg.ic-sm{stroke:currentColor;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.ic{width:16px;height:16px;stroke-width:1.6;flex:none;}
+.ic-sm{width:14px;height:14px;stroke-width:1.6;flex:none;}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+.spacer{flex:1;}
+::-webkit-scrollbar{width:11px;height:11px;}
+::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:99px;border:3px solid transparent;background-clip:content-box;}
+::-webkit-scrollbar-thumb:hover{background:var(--text-3);background-clip:content-box;}
+
+.app{height:100%;display:grid;grid-template-rows:var(--h-title) 1fr var(--h-status);}
+
+/* ── Titlebar (brand · env · window-switcher · actions · win-ctl) ───────── */
+.titlebar{display:flex;align-items:center;gap:var(--s2);padding:0 var(--s2) 0 var(--s3);background:var(--panel);border-bottom:1px solid var(--border);}
+.brand{display:flex;align-items:center;gap:7px;}
+.brand .mark{width:22px;height:22px;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-weight:700;font-size:12px;}
+.brand .name{font-weight:600;font-size:var(--fs-label);}
+.env{display:flex;align-items:center;gap:5px;padding:4px 7px;border-radius:var(--r-sm);color:var(--text-2);font-size:var(--fs-label);}
+.env:hover{background:var(--hover);color:var(--text);}
+/* window switcher pill (image 17) — kept */
+.cluster{display:inline-flex;align-items:center;gap:2px;background:var(--editor);border:1px solid var(--border);border-radius:8px;padding:2px;}
+.cluster .cb{width:30px;height:28px;display:grid;place-items:center;border-radius:6px;color:var(--text-2);}
+.cluster .cb:hover{background:var(--hover);color:var(--text);}
+.cluster .cb.on{background:var(--accent-soft);color:var(--accent);}
+.cluster .cdiv{width:1px;height:14px;background:var(--border-2);margin:0 4px;}
+.tb-actions{display:flex;align-items:center;gap:2px;}
+.icon-btn{width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r-sm);color:var(--text-2);}
+.icon-btn:hover{background:var(--hover);color:var(--text);}
+.win-ctl{display:flex;margin-left:var(--s2);}
+.win-ctl button{width:30px;height:28px;display:grid;place-items:center;color:var(--text-2);border-radius:var(--r-sm);}
+.win-ctl button:hover{background:var(--hover);}
+.win-ctl .close:hover{background:var(--fail);color:#fff;}
+
+/* ── 3-pane ────────────────────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:252px 1fr 300px;min-height:0;}
+.pane{min-height:0;display:flex;flex-direction:column;overflow:hidden;}
+.pane.left{background:var(--panel);border-right:1px solid var(--border);}
+.pane.right{background:var(--panel);border-left:1px solid var(--border);}
+.pane.center{background:var(--editor);}
+
+/* left run bar (image 16) — kept, icon-only with dividers */
+.runbar{display:flex;align-items:center;gap:2px;height:38px;padding:0 6px;border-bottom:1px solid var(--border);flex:none;}
+.run-btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:var(--r);background:var(--accent);color:var(--on-accent);font-size:var(--fs-label);font-weight:600;margin-right:2px;}
+.run-btn:hover{background:var(--accent-hover);}
+.run-ic{width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r-sm);color:var(--text-2);}
+.run-ic:hover{background:var(--hover);color:var(--text);}
+.run-div{width:1px;height:16px;background:var(--border);margin:0 4px;}
+
+.pane-head{display:flex;align-items:center;gap:var(--s2);height:32px;padding:0 var(--s2) 0 var(--s3);flex:none;border-bottom:1px solid var(--border);}
+.pane-head .ph-title{font-size:var(--fs-label);font-weight:600;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-2);}
+.pane-head .ph-count{font-size:var(--fs-meta);color:var(--text-3);}
+
+/* left tree */
+.left-search{display:flex;align-items:center;gap:7px;height:28px;margin:var(--s2) var(--s2) var(--s1);padding:0 9px;background:var(--editor);border:1px solid var(--border);border-radius:var(--r);color:var(--text-3);font-size:var(--fs-label);}
+.tree{flex:1;overflow-y:auto;padding:var(--s1) 0 var(--s3);}
+.node{display:flex;align-items:center;gap:7px;height:var(--h-row);padding:0 var(--s3) 0 var(--s2);color:var(--text);font-size:var(--fs-body);cursor:pointer;}
+.node:hover{background:var(--hover);}
+.node.sel{background:var(--sel);}
+.node .twist{color:var(--text-3);display:grid;place-items:center;width:14px;}
+.node .twist svg{transition:transform .12s;}
+.node.open .twist svg{transform:rotate(90deg);}
+.node .label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.node .count{font-size:var(--fs-meta);color:var(--text-3);}
+.node.folder .label{font-weight:500;}
+.node.tc{padding-left:30px;}
+.node.tc .label{color:var(--text-2);}
+.node.tc.sel .label{color:var(--text);font-weight:500;}
+.st{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:0.03em;width:30px;text-align:right;flex:none;}
+.st.pass{color:var(--pass);} .st.fail{color:var(--fail);} .st.flaky{color:var(--warn);} .st.none{color:var(--text-3);}
+
+/* ── CENTER — only TWO chrome bands above the editor ───────────────────── */
+/* band 1: tabs (+ Run pinned right) */
+.tabs{display:flex;align-items:stretch;height:36px;background:var(--panel);border-bottom:1px solid var(--border);flex:none;}
+.tab{display:flex;align-items:center;gap:7px;padding:0 9px 0 12px;border-right:1px solid var(--border);font-size:var(--fs-label);color:var(--text-2);cursor:pointer;position:relative;background:var(--panel);white-space:nowrap;}
+.tab:hover{color:var(--text);}
+.tab.on{background:var(--editor);color:var(--text);}
+.tab.on::after{content:'';position:absolute;left:0;right:0;top:-1px;height:2px;background:var(--accent);}
+.tab .dot{width:7px;height:7px;border-radius:99px;flex:none;}
+.tab .x{width:16px;height:16px;display:grid;place-items:center;border-radius:3px;color:var(--text-3);}
+.tab .x:hover{background:var(--hover);color:var(--text);}
+.tab-add{width:32px;display:grid;place-items:center;color:var(--text-3);border-right:1px solid var(--border);}
+.tab-add:hover{color:var(--text);background:var(--hover);}
+.tabs-right{display:flex;align-items:center;gap:6px;padding:0 8px;margin-left:auto;}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:var(--r);font-size:var(--fs-label);font-weight:500;color:var(--text);border:1px solid var(--border-2);background:var(--editor);}
+.btn:hover{background:var(--hover);}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:600;}
+.btn.primary:hover{background:var(--accent-hover);}
+.btn.icon{padding:0;width:28px;justify-content:center;border-color:transparent;color:var(--text-2);}
+.btn.icon:hover{background:var(--hover);color:var(--text);}
+
+/* band 2: sub-tabs (left) + editor controls (right) merged */
+.subtabs{display:flex;align-items:center;gap:var(--s4);padding:0 var(--s4);border-bottom:1px solid var(--border);flex:none;height:38px;}
+.subtab{display:flex;align-items:center;gap:6px;height:38px;font-size:var(--fs-label);color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;}
+.subtab:hover{color:var(--text);}
+.subtab.on{color:var(--text);font-weight:500;border-bottom-color:var(--accent);}
+.subtab .badge{font-family:var(--mono);font-size:var(--fs-micro);color:var(--text-2);background:var(--border-2);border-radius:99px;padding:0 5px;line-height:15px;}
+.editor-ctl{margin-left:auto;display:flex;align-items:center;gap:var(--s2);}
+.seg{display:inline-flex;align-items:center;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:2px;gap:2px;}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:var(--r-sm);color:var(--text-2);font-size:var(--fs-label);}
+.seg button:hover{color:var(--text);}
+.seg button.on{background:var(--editor);color:var(--text);font-weight:500;}
+html[data-theme="dark"] .seg button.on{background:var(--hover);}
+.select{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;background:var(--editor);border:1px solid var(--border-2);border-radius:var(--r);font-size:var(--fs-label);color:var(--text-2);}
+.select:hover{background:var(--hover);}
+
+/* body — the editor gets the room now */
+.body{flex:1;overflow-y:auto;padding:var(--s3) var(--s4);}
+.tc-line{display:flex;align-items:center;gap:8px;margin-bottom:var(--s3);}
+.tc-line .dot{width:8px;height:8px;border-radius:99px;background:var(--pass);flex:none;}
+.tc-line .tc-id{font-family:var(--mono);font-size:var(--fs-label);font-weight:600;color:var(--text-2);}
+.tc-line .tc-title{font-size:var(--fs-title);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kv{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;}
+.kv-row{display:grid;grid-template-columns:200px 1fr 30px;border-bottom:1px solid var(--border);}
+.kv-row:last-child{border-bottom:none;}
+.kv-row.head{background:var(--panel);}
+.kv-row.head span{padding:6px 11px;font-size:var(--fs-micro);font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-3);}
+.kv-row input{border:none;background:transparent;padding:7px 11px;font-family:var(--mono);font-size:var(--fs-label);color:var(--text);outline:none;min-width:0;}
+.kv-row input.k{border-right:1px solid var(--border);color:var(--text-2);}
+.kv-row input:focus{background:var(--sel-soft);}
+.kv-row .del{display:grid;place-items:center;color:var(--text-3);border-left:1px solid var(--border);}
+.kv-row .del:hover{background:var(--fail-bg);color:var(--fail);}
+.kv-add{display:flex;align-items:center;gap:6px;width:100%;padding:7px 11px;font-size:var(--fs-label);color:var(--text-3);border-top:1px solid var(--border);}
+.kv-add:hover{color:var(--accent);background:var(--hover);}
+
+/* collapsed last-run summary (one line) */
+.result{border-top:1px solid var(--border);background:var(--panel);flex:none;}
+.result-head{display:flex;align-items:center;gap:var(--s3);padding:7px var(--s4);cursor:pointer;}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:99px;font-size:var(--fs-meta);font-weight:600;background:var(--pass-bg);color:var(--pass);}
+.result-meta{color:var(--text-2);font-family:var(--mono);font-size:var(--fs-meta);}
+.result .chev{margin-left:auto;color:var(--text-3);}
+
+/* ── RIGHT: AI ─────────────────────────────────────────────────────────── */
+.ai-list{flex:1;overflow-y:auto;padding:var(--s3);display:flex;flex-direction:column;gap:var(--s3);}
+.msg{font-size:var(--fs-body);line-height:1.5;}
+.msg .who{font-size:var(--fs-meta);font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:3px;}
+.msg.you .bubble{background:var(--editor);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;}
+.ai-input{margin:var(--s2) var(--s3) var(--s3);border:1px solid var(--border);border-radius:var(--r);background:var(--editor);}
+.ai-input textarea{width:100%;resize:none;border:none;background:transparent;outline:none;padding:9px 10px;font:inherit;font-size:var(--fs-label);color:var(--text);height:54px;}
+.ai-input .row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-top:1px solid var(--border);}
+.ai-input .mdl{font-size:var(--fs-meta);color:var(--text-2);padding:3px 7px;border-radius:var(--r-sm);}
+.ai-input .mdl:hover{background:var(--hover);}
+.send{width:28px;height:26px;display:grid;place-items:center;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent);}
+.send:hover{background:var(--accent-hover);}
+
+/* status bar */
+.statusbar{display:flex;align-items:center;gap:8px;padding:0 var(--s3);background:var(--panel);border-top:1px solid var(--border);font-size:var(--fs-meta);color:var(--text-2);}
+.crumb{display:flex;align-items:center;gap:6px;}
+.crumb .cur{color:var(--text);font-weight:600;}
+.status-ok{display:inline-flex;align-items:center;gap:5px;color:var(--pass);font-weight:500;}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="11"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.9" y1="4.9" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.1" y2="19.1"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.9" y1="19.1" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.1" y2="4.9"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M12 3v18"/></symbol>
+  <symbol id="i-braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-listchecks" viewBox="0 0 24 24"><polyline points="3 8 5 10 9 6"/><polyline points="3 16 5 18 9 14"/><line x1="12" y1="8" x2="21" y2="8"/><line x1="12" y1="16" x2="21" y2="16"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+  <symbol id="i-record" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6z"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- TITLEBAR -->
+  <header class="titlebar">
+    <div class="brand"><div class="mark">A</div><div class="name">ATS</div></div>
+    <button class="env">dev <svg class="ic-sm"><use href="#i-down"/></svg></button>
+    <div class="spacer"></div>
+    <!-- window switcher (image 17) — kept as-is, reskinned -->
+    <div class="cluster">
+      <button class="cb on" title="Test Explorer"><svg class="ic"><use href="#i-listchecks"/></svg></button>
+      <button class="cb" title="Live Log"><svg class="ic"><use href="#i-activity"/></svg></button>
+      <button class="cb" title="Results"><svg class="ic"><use href="#i-chart"/></svg></button>
+      <button class="cb" title="Recorder"><svg class="ic"><use href="#i-record"/></svg></button>
+      <button class="cb" title="Schedules"><svg class="ic"><use href="#i-calendar"/></svg></button>
+      <span class="cdiv"></span>
+      <button class="cb on" title="History"><svg class="ic"><use href="#i-clock"/></svg></button>
+      <span class="cdiv"></span>
+      <button class="cb" title="More"><svg class="ic"><use href="#i-dots"/></svg></button>
+    </div>
+    <div class="spacer"></div>
+    <div class="tb-actions">
+      <button class="icon-btn" title="Search ⌘K"><svg class="ic"><use href="#i-search"/></svg></button>
+      <button class="icon-btn" title="AI Agent"><svg class="ic"><use href="#i-spark"/></svg></button>
+      <button class="icon-btn" title="Notifications"><svg class="ic"><use href="#i-bell"/></svg></button>
+      <button class="icon-btn" id="theme" title="Theme"><svg class="ic"><use href="#i-moon"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg class="ic"><use href="#i-settings"/></svg></button>
+    </div>
+    <div class="win-ctl"><button>&#8211;</button><button>&#9633;</button><button class="close"><svg class="ic-sm"><use href="#i-x"/></svg></button></div>
+  </header>
+
+  <!-- 3-PANE -->
+  <div class="grid">
+
+    <!-- LEFT -->
+    <aside class="pane left">
+      <!-- run controls (image 16) — kept, icon-only -->
+      <div class="runbar">
+        <button class="run-btn"><svg class="ic-sm"><use href="#i-play"/></svg> Run <span class="mono" style="opacity:.85">2</span></button>
+        <span class="run-div"></span>
+        <button class="run-ic" title="Seller · Seller 1"><svg class="ic"><use href="#i-user"/></svg></button>
+        <button class="run-ic" title="Admin · Admin 1"><svg class="ic"><use href="#i-shield"/></svg></button>
+        <span class="run-div"></span>
+        <button class="run-ic" title="Mode · Sequential"><svg class="ic"><use href="#i-zap"/></svg></button>
+        <button class="run-ic" title="Headless"><svg class="ic"><use href="#i-eye"/></svg></button>
+        <div class="spacer"></div>
+        <button class="run-ic" title="Hide panel"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="pane-head"><span class="ph-title">Collections</span><span class="ph-count">4</span><div class="spacer"></div><button class="icon-btn"><svg class="ic-sm"><use href="#i-plus"/></svg></button></div>
+      <label class="left-search"><svg class="ic-sm"><use href="#i-search"/></svg> Filter</label>
+      <div class="tree">
+        <div class="node folder open"><span class="twist"><svg class="ic-sm"><use href="#i-chev"/></svg></span><svg class="ic-sm" style="color:var(--text-2)"><use href="#i-folder"/></svg><span class="label">Catalog</span><span class="count">10</span></div>
+        <div class="node tc sel"><span class="st pass">PASS</span><span class="label">TC-CATALOG-001 · Page load</span></div>
+        <div class="node tc"><span class="st pass">PASS</span><span class="label">TC-CATALOG-002 · Search filter</span></div>
+        <div class="node tc"><span class="st fail">FAIL</span><span class="label">TC-CATALOG-003 · Super category</span></div>
+        <div class="node tc"><span class="st flaky">FLAKY</span><span class="label">TC-CATALOG-004 · Sort &amp; brand</span></div>
+        <div class="node tc"><span class="st none">—</span><span class="label">TC-CATALOG-005 · Packing size</span></div>
+        <div class="node tc"><span class="st pass">PASS</span><span class="label">TC-CATALOG-006 · Card types</span></div>
+        <div class="node folder"><span class="twist"><svg class="ic-sm"><use href="#i-chev"/></svg></span><svg class="ic-sm" style="color:var(--text-2)"><use href="#i-folder"/></svg><span class="label">Orders</span><span class="count">63</span></div>
+        <div class="node folder"><span class="twist"><svg class="ic-sm"><use href="#i-chev"/></svg></span><svg class="ic-sm" style="color:var(--text-2)"><use href="#i-folder"/></svg><span class="label">Sign In</span><span class="count">2</span></div>
+        <div class="node folder"><span class="twist"><svg class="ic-sm"><use href="#i-chev"/></svg></span><svg class="ic-sm" style="color:var(--text-2)"><use href="#i-folder"/></svg><span class="label">Admin</span><span class="count">2</span></div>
+      </div>
+    </aside>
+
+    <!-- CENTER -->
+    <section class="pane center">
+      <!-- band 1: tabs + Run -->
+      <div class="tabs">
+        <div class="tab on"><span class="dot" style="background:var(--pass)"></span> TC-CATALOG-001 <span class="x"><svg class="ic-sm"><use href="#i-x"/></svg></span></div>
+        <div class="tab"><span class="dot" style="background:var(--fail)"></span> TC-CATALOG-003 <span class="x"><svg class="ic-sm"><use href="#i-x"/></svg></span></div>
+        <div class="tab"><svg class="ic-sm" style="color:var(--text-3)"><use href="#i-clock"/></svg> Live Log <span class="x"><svg class="ic-sm"><use href="#i-x"/></svg></span></div>
+        <button class="tab-add"><svg class="ic-sm"><use href="#i-plus"/></svg></button>
+        <div class="tabs-right">
+          <button class="btn icon" title="More"><svg class="ic-sm"><use href="#i-dots"/></svg></button>
+          <button class="btn primary"><svg class="ic-sm"><use href="#i-play"/></svg> Run</button>
+        </div>
+      </div>
+      <!-- band 2: sub-tabs + editor controls -->
+      <div class="subtabs">
+        <div class="subtab on">Test Data</div>
+        <div class="subtab">User Story</div>
+        <div class="subtab">Steps <span class="badge">7</span></div>
+        <div class="subtab">Checkpoints <span class="badge">7</span></div>
+        <div class="subtab">Network</div>
+        <div class="editor-ctl">
+          <div class="seg"><button class="on"><svg class="ic-sm"><use href="#i-grid"/></svg> Table</button><button><svg class="ic-sm"><use href="#i-braces"/></svg> Raw</button></div>
+          <button class="select">default (flat) <svg class="ic-sm"><use href="#i-down"/></svg></button>
+          <button class="btn"><svg class="ic-sm"><use href="#i-play"/></svg> Save</button>
+        </div>
+      </div>
+      <!-- editor (gets the height back) -->
+      <div class="body">
+        <div class="tc-line"><span class="dot"></span><span class="tc-id">TC-CATALOG-001</span><span class="tc-title">Catalog page loads with search, filters, cards &amp; tabs</span></div>
+        <div class="kv">
+          <div class="kv-row head"><span>Key</span><span>Value</span><span></span></div>
+          <div class="kv-row"><input class="k" value="brand"><input value="Jay Bharat Organics"><button class="del"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+          <div class="kv-row"><input class="k" value="packing_size"><input value="500 ML"><button class="del"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+          <div class="kv-row"><input class="k" value="mrp"><input value="300"><button class="del"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+          <button class="kv-add"><svg class="ic-sm"><use href="#i-plus"/></svg> Add field</button>
+        </div>
+      </div>
+      <!-- collapsed last run -->
+      <div class="result">
+        <div class="result-head">
+          <span class="pill"><span style="width:6px;height:6px;border-radius:99px;background:var(--pass);display:inline-block"></span> Passed</span>
+          <span class="result-meta">1.4s · 7 / 7 checkpoints · 19:51:20</span>
+          <span class="chev"><svg class="ic-sm"><use href="#i-chev"/></svg></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT -->
+    <aside class="pane right">
+      <div class="pane-head"><svg class="ic-sm" style="color:var(--accent)"><use href="#i-spark"/></svg><span class="ph-title">AI Agent</span><div class="spacer"></div><button class="icon-btn"><svg class="ic-sm"><use href="#i-plus"/></svg></button><button class="icon-btn"><svg class="ic-sm"><use href="#i-clock"/></svg></button></div>
+      <div class="ai-list">
+        <div class="msg you"><div class="who">You</div><div class="bubble">Why did TC-CATALOG-003 fail on the last run?</div></div>
+        <div class="msg ai"><div class="who">Agent</div><div class="bubble">The Super-Category dropdown didn't open — the locator <span class="mono">role=button[name="Super Category"]</span> matched 2 elements. I can repair it to the test-id and re-run. Want me to?</div></div>
+      </div>
+      <div class="ai-input">
+        <textarea placeholder="Ask anything · @ to mention a test · / for actions"></textarea>
+        <div class="row"><button class="mdl">Auto <svg class="ic-sm"><use href="#i-down"/></svg></button><div class="spacer"></div><button class="send"><svg class="ic-sm"><use href="#i-send"/></svg></button></div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- STATUS BAR -->
+  <footer class="statusbar">
+    <div class="crumb"><span>Catalog</span><svg class="ic-sm" style="width:11px;height:11px;color:var(--text-3)"><use href="#i-chev"/></svg><span class="cur">TC-CATALOG-001</span></div>
+    <div class="spacer"></div>
+    <span class="result-meta">22 tests · 1 selected</span>
+    <span class="status-ok"><svg class="ic-sm" style="width:12px;height:12px"><use href="#i-play"/></svg> Ready</span>
+  </footer>
+
+</div>
+
+<script>
+  const root = document.documentElement;
+  document.getElementById('theme').onclick = () => {
+    const dark = root.getAttribute('data-theme') === 'dark';
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+    document.querySelector('#theme use').setAttribute('href', dark ? '#i-moon' : '#i-sun');
+  };
+  const pick = (sel, cls) => document.querySelectorAll(sel).forEach(el =>
+    el.onclick = () => { el.parentElement.querySelectorAll(sel).forEach(x => x.classList.remove(cls)); el.classList.add(cls); });
+  pick('.subtab', 'on'); pick('.tab', 'on');
+  document.querySelectorAll('.node.tc').forEach(n => n.onclick = () => {
+    document.querySelectorAll('.node.tc').forEach(x => x.classList.remove('sel')); n.classList.add('sel'); });
+  document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b =>
+    b.onclick = () => { seg.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); }));
+</script>
+</body>
+</html>

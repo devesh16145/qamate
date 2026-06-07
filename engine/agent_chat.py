@@ -64,6 +64,7 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project_store
 import agent_sessions
+import input_registry as _ireg
 from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link
 from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
 import llm as _llm
@@ -78,11 +79,9 @@ from pydantic_ai.usage import UsageLimits
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
 
-# Max tool calls per chat turn — a bound on runaway loops AND on turn duration
-# (each call is a model round-trip + a browser action). When hit, we preserve the
-# full history and summarize findings so the user can say "continue". Override
-# with ATS_AGENT_TOOL_BUDGET.
-TOOL_BUDGET = int(os.environ.get("ATS_AGENT_TOOL_BUDGET") or 30)
+# Default max tool calls per chat turn. 0 = unlimited (no pause).
+# Overridden per-session via the init command's tool_budget field or ATS_AGENT_TOOL_BUDGET env var.
+TOOL_BUDGET_DEFAULT = int(os.environ.get("ATS_AGENT_TOOL_BUDGET") or 30)
 
 # Per-request OUTPUT cap (max_tokens) — NOT the context window. A model's context length (MiMo's
 # ~1M) is how much it can READ; max_tokens only bounds how much it WRITES per turn. The old fixed
@@ -322,11 +321,12 @@ def _attachment_paths(attachments):
     return out
 
 
-def _build_user_prompt(message, attachments):
+def _build_user_prompt(message, attachments, vision=False):
     """Assemble the prompt for agent.run(). Returns a plain str when there are no
     binary (image/PDF) parts, else a list [text, BinaryContent, ...] — the shape
     pydantic-ai accepts for multimodal input. Docs are inlined as labeled text blocks;
-    images/scanned-PDFs are appended as binary parts."""
+    images/scanned-PDFs are appended as binary parts only when vision=True — otherwise
+    they are noted as skipped so text-only/non-vision endpoints never receive image data."""
     pairs = _attachment_paths(attachments)
     if not pairs:
         return message
@@ -337,6 +337,9 @@ def _build_user_prompt(message, attachments):
             continue
         ext = os.path.splitext(path)[1].lower()
         if ext in IMAGE_MIME:
+            if not vision:
+                notes.append(f"[image '{name}' not sent — model does not support image input]")
+                continue
             bc = _binary_part(path, IMAGE_MIME[ext])
             notes.append(f"[image: {name}]" if bc else f"[image '{name}' unreadable or >12MB]")
             if bc:
@@ -398,10 +401,11 @@ def _pytest_summary(text):
 
 
 def _find_failure_artifacts(results_dir):
-    """Locate the FAILED.png screenshot + captured ERRORS.txt from a verify run's results dir
-    (conftest's capture_screenshot_on_failure writes both). Returns (screenshot_path|None, err_text|None)."""
+    """Locate failure artifacts from a verify run's screenshots/ dir.
+    Returns (screenshot_path|None, err_text|None, page_text|None).
+    conftest writes: *_FAILED.png, *_ERRORS.txt (filtered errors), *_FAILED_TEXT.txt (full body text)."""
     import glob
-    shot, err = None, None
+    shot, err, page_text = None, None, None
     sdir = os.path.join(results_dir or "", "screenshots")
     try:
         pngs = sorted(glob.glob(os.path.join(sdir, "*_FAILED.png")), key=os.path.getmtime, reverse=True)
@@ -411,9 +415,14 @@ def _find_failure_artifacts(results_dir):
         if txts:
             with open(txts[0], "r", encoding="utf-8", errors="replace") as f:
                 err = f.read()
+        # Full page text saved by conftest for non-vision models (replaces OCR)
+        ptxts = sorted(glob.glob(os.path.join(sdir, "*_FAILED_TEXT.txt")), key=os.path.getmtime, reverse=True)
+        if ptxts:
+            with open(ptxts[0], "r", encoding="utf-8", errors="replace") as f:
+                page_text = f.read()[:4000]  # cap to keep tokens reasonable
     except Exception:
         pass
-    return shot, err
+    return shot, err, page_text
 
 
 # Values that look DYNAMIC (ids / dates / times / order numbers / uuids) — asserting on these
@@ -505,20 +514,26 @@ class BrowserSession:
         self.step_id = 0
         self.input_counter = 0
         self.issues = []        # breakage: console errors / JS exceptions / failed requests
+        self._auth_failures = []  # 401/403 responses since last navigate (reset each navigate)
         self._start_args = None  # remembered so restart() can relaunch after a crash/close
 
     # -- lifecycle -----------------------------------------------------------
     def start(self, start_url="", storage_state=None, headless=True, credentials=None,
-              save_state_path=None, record_first_step=True):
+              save_state_path=None, record_first_step=True, extra_init_states=None):
         """Launch the browser, reuse a saved login if present, and — if we still
         land on a login form — log in ONCE from configured credentials and persist
         a fresh storage_state for next time (so the agent never has to log in by
         hand). Returns {url, title, authed} where authed is
-        'storage_state' | 'login' | 'session' | 'none'."""
+        'storage_state' | 'login' | 'session' | 'none'.
+
+        extra_init_states: list of storage-state dicts (origins/localStorage) to
+        inject via add_init_script so e.g. the admin panel JWT is pre-loaded without
+        a separate login step."""
         # Remember how we were started so restart() can relaunch identically after a crash.
         self._start_args = dict(start_url=start_url, storage_state=storage_state,
                                 headless=headless, credentials=credentials,
-                                save_state_path=save_state_path)
+                                save_state_path=save_state_path,
+                                extra_init_states=extra_init_states)
         from playwright.sync_api import sync_playwright
         self.pw = sync_playwright().start()
         self.browser = self.pw.chromium.launch(
@@ -527,6 +542,35 @@ class BrowserSession:
         if storage_state:
             ctx_args["storage_state"] = storage_state
         self.context = self.browser.new_context(**ctx_args)
+        # Pre-inject localStorage for additional origins (e.g. admin panel JWT auth).
+        # add_init_script runs before the page's own scripts on every navigation,
+        # so the token is already set when the SPA boots — no manual login needed.
+        for state in (extra_init_states or []):
+            for origin_data in (state.get("origins") or []):
+                ls_items = origin_data.get("localStorage") or []
+                if not ls_items:
+                    continue
+                origin = origin_data.get("origin", "")
+                # Build a hostname check so we only inject on the right domain
+                try:
+                    from urllib.parse import urlparse
+                    hostname = urlparse(origin).hostname or ""
+                except Exception:
+                    hostname = ""
+                if not hostname:
+                    continue
+                ls_json = json.dumps(ls_items, ensure_ascii=True)
+                script = (
+                    f"if (window.location.hostname === {json.dumps(hostname)}) {{"
+                    f"  try {{ const _i={ls_json};"
+                    f"  _i.forEach(function(x){{localStorage.setItem(x.name,x.value);}});"
+                    f"  }} catch(e) {{}} }}"
+                )
+                try:
+                    self.context.add_init_script(script)
+                    log(f"[agent] pre-loaded {len(ls_items)} localStorage items for {hostname}")
+                except Exception as e:
+                    log(f"[agent] could not add init script for {hostname}: {e}")
         self.page = self.context.new_page()
         self.page.set_default_timeout(10000)
         self.page.set_default_navigation_timeout(20000)
@@ -535,6 +579,17 @@ class BrowserSession:
         self.page.on("pageerror", lambda e: self._issue("js_exception", e))
         self.page.on("requestfailed", lambda r: self._issue(
             "request_failed", f"{getattr(r, 'method', '')} {getattr(r, 'url', '')}"))
+        # Track 401/403 responses — used by navigate() to surface auth failures clearly.
+        def _on_response(resp):
+            try:
+                if resp.status in (401, 403):
+                    u = getattr(resp, "url", "")
+                    # Ignore favicon / analytics noise; focus on same-origin API calls.
+                    if not u.endswith((".ico", ".png", ".gif", ".woff", ".woff2")):
+                        self._auth_failures.append(f"{resp.status} {u[:120]}")
+            except Exception:
+                pass
+        self.page.on("response", _on_response)
 
         authed = "none"
         if start_url:
@@ -597,6 +652,28 @@ class BrowserSession:
         except Exception as e:
             return {"ok": False, "error": f"restart failed: {str(e)[:160]}"}
         return {"ok": True, **info}
+
+    def show_browser(self):
+        """Make the testing browser window visible. If currently headless, restarts in headed
+        mode (same URL and session) so the user can watch what the agent is doing."""
+        if not self._start_args:
+            return {"ok": False, "error": "browser not started yet"}
+        if not self._start_args.get("headless", True):
+            return {"ok": True, "message": "Browser is already visible (headed mode).", "url": self._url()}
+        # Switch from headless to headed by restarting with headless=False
+        headed_args = {**self._start_args, "headless": False}
+        try:
+            self.close()
+        except Exception:
+            pass
+        self.pw = self.browser = self.context = self.page = None
+        self.by_ref = {}
+        try:
+            info = self.start(**headed_args, record_first_step=False)
+        except Exception as e:
+            return {"ok": False, "error": f"could not switch to headed mode: {str(e)[:160]}"}
+        self._start_args["headless"] = False   # stay headed for future restarts this session
+        return {"ok": True, "message": "Browser is now visible.", "url": info.get("url", "")}
 
     def _ensure_alive(self):
         """Restart the browser if it has died. Returns True if a live page is available."""
@@ -689,6 +766,7 @@ class BrowserSession:
     def navigate(self, url):
         if not self._ensure_alive():
             return {"ok": False, "error": "browser is closed and could not be restarted; call restart_browser"}
+        self._auth_failures = []   # reset per-navigate counter
         before = len(self.issues)
         try:
             self._goto(url)
@@ -702,8 +780,29 @@ class BrowserSession:
             else:
                 return {"ok": False, "error": f"navigation failed: {str(e)[:160]}", "url": self._url()}
         self._record_navigate(url)
-        return {"ok": True, "url": self._url(), "title": self._title(),
-                "new_issues": self.issues[before:]}
+        on_login = self._on_login_page()
+        auth_failures = list(self._auth_failures)
+        result = {"ok": True, "url": self._url(), "title": self._title(),
+                  "new_issues": self.issues[before:]}
+        if on_login:
+            result["⚠_AUTH_REQUIRED"] = (
+                "LOGIN FORM DETECTED. The session was NOT accepted — you are on the login page. "
+                "Step 1: call get_settings() and check platforms.[seller|admin].users for credentials. "
+                "Step 2: if credentials found, fill the form and log in. "
+                "Step 3: if login still fails OR no credentials found, call ask_user() immediately. "
+                "DO NOT navigate to any other URL. DO NOT continue the task sequence. "
+                "SEQUENCE IS SUSPENDED HERE until authentication is resolved."
+            )
+        elif auth_failures:
+            result["⚠_AUTH_REQUIRED"] = (
+                f"SESSION EXPIRED — {len(auth_failures)} request(s) returned 401/403: "
+                f"{auth_failures[0]}{'...' if len(auth_failures)>1 else ''}. "
+                "The saved session is no longer valid. "
+                "Step 1: call get_settings() for credentials and attempt a fresh login. "
+                "Step 2: if login fails, call ask_user() for new credentials. "
+                "DO NOT continue the task sequence until authentication is resolved."
+            )
+        return result
 
     def inspect(self, limit=40, include_hidden=False):
         if not self._ensure_alive():
@@ -779,8 +878,34 @@ class BrowserSession:
                 f"(distinct text/label, or one exposing a test id).")
         return prim, _locator_str(prim), warn
 
+    @staticmethod
+    def _is_direct_selector(ref):
+        """True when ref looks like a CSS/XPath/Playwright selector rather than an inspect_page ref name.
+        Used as a fallback path for elements whose refs are broken (e.g. MUI :r3: colon IDs)."""
+        if not ref:
+            return False
+        return (
+            ref.startswith("input[") or ref.startswith("button[") or
+            ref.startswith("select[") or ref.startswith("textarea[") or
+            ref.startswith("[role=") or ref.startswith("[type=") or
+            ref.startswith("[aria-") or ref.startswith("[placeholder") or
+            ref.startswith("[name=") or ref.startswith("[id=") or
+            ref.startswith("//") or            # XPath
+            ref.startswith("text=") or         # Playwright text selector
+            ref.startswith("role=") or         # Playwright role selector
+            (ref.startswith("[") and "=" in ref and "]" in ref)
+        )
+
     def act(self, kind, ref, value=None):
         el = self.by_ref.get(ref)
+
+        # Direct-selector fallback: if ref isn't a known inspect_page ref but looks like a
+        # CSS/XPath selector (e.g. input[type="password"]), try it directly on the page.
+        # This handles MUI forms where inspect_page returns colon-based IDs (:r3:, :r5:)
+        # that break Playwright's selector engine — the agent can fall back to type-based selectors.
+        if not el and self._is_direct_selector(ref):
+            return self._act_direct(kind, ref, value)
+
         if not el:
             return {"ok": False, "error": f"ref '{ref}' is not on the current page; call inspect_page first"}
         if not self._alive():
@@ -828,6 +953,51 @@ class BrowserSession:
             result["warning"] = warning
         return result
 
+    def _act_direct(self, kind, ref, value=None):
+        """Act on an element via a direct CSS/XPath/Playwright selector, bypassing by_ref lookup.
+        Used when inspect_page refs are broken (MUI dynamic IDs, colon selectors, etc.)."""
+        if not self._ensure_alive():
+            return {"ok": False, "error": "browser is closed; call restart_browser"}
+        before = len(self.issues)
+        self.step_id += 1
+        try:
+            loc = self.page.locator(ref)
+            n = loc.count()
+            if n == 0:
+                self.step_id -= 1
+                return {"ok": False, "error": f"direct selector '{ref}' matched 0 elements on current page"}
+            target = loc.first if n > 1 else loc
+            loc_str = f'page.locator("{ref}")'
+            if kind == "fill":
+                val = str(value or "")
+                target.fill(val)
+                self.input_counter += 1
+                self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.fill("{_q(val)}")',
+                                   "type": "fill", "target": loc_str,
+                                   "targetDescription": f'Enter "{val}" in {ref}',
+                                   "value": val, "varName": f"input_{self.input_counter}"})
+            elif kind == "select":
+                val = str(value or "")
+                target.select_option(val)
+                self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.select_option("{_q(val)}")',
+                                   "type": "select", "target": loc_str,
+                                   "targetDescription": f'Select "{val}" in {ref}',
+                                   "value": val, "varName": ""})
+            else:  # click
+                target.click()
+                self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.click()',
+                                   "type": "click", "target": loc_str,
+                                   "targetDescription": f'Click {ref}', "value": "", "varName": ""})
+        except Exception as e:
+            self.step_id -= 1
+            return {"ok": False, "error": f"{kind} with selector '{ref}' failed: {str(e)[:160]}"}
+        self._settle()
+        result = {"ok": True, "url": self._url(), "title": self._title(),
+                  "new_issues": self.issues[before:]}
+        if n > 1:
+            result["warning"] = f"Selector '{ref}' matched {n} elements — acted on the first one."
+        return result
+
     def add_checkpoint(self, name, assert_type, value):
         after = self.steps[-1]["id"] if self.steps else 0
         self.assertions.append({"type": assert_type, "value": value,
@@ -843,8 +1013,9 @@ class BrowserSession:
                     preconditions="", expected=""):
         if len(self.steps) <= 1:
             return {"status": "error",
-                    "message": "no flow recorded yet — drive the complete scenario "
-                               "(navigate/click/fill) before creating the test"}
+                    "message": "only a page navigation is recorded — the test needs at least one "
+                               "interaction (click, fill, or select_option) after navigating. "
+                               "Drive the flow further, then call create_test_case again."}
         pname = (project or {}).get("name") or (project or {}).get("id") or "the app"
         payload = {
             "tc_id": tc_id, "description": (description or tc_id)[:200], "flowId": flow_id,
@@ -985,6 +1156,8 @@ class Deps:
     context_dir: str = ""     # folder of user-supplied context files (read_context_file)
     memory_path: str = ""     # the agent's durable memory file (read/update_memory)
     vision: bool = False      # model can see images -> run_test_case returns failure screenshots
+    user_input_q: Optional[asyncio.Queue] = None  # ask_user tool blocks on this
+    _ask_state: dict = field(default_factory=dict)  # {"waiting": True} while ask_user is blocked
 
 
 # ── System prompt ──────────────────────────────────────────────────────────
@@ -1020,6 +1193,10 @@ _SYSTEM = (
     "- Note: you usually do NOT need credentials to log in — the session is already authenticated "
     "for you; get_settings is for answering questions and for flows that explicitly need an account.\n\n"
     "Context about the app (use what you're given — don't ask the user to paste things you can read):\n"
+    "- Before filling any form: call get_input_registry(url_filter='<route>') to retrieve "
+    "known-good values from past sessions. Use those as your first attempt. After selecting "
+    "an autocomplete option call record_input(field_name, selected_label, 'autocomplete') "
+    "so future sessions can reuse the exact displayed value.\n"
     "- At the start of a new project: (1) call map_app to discover all screens; "
     "(2) call extract_flows(context_file='<prd>') to turn the spec into a structured work order "
     "(list of flows, each with entry URL, steps, success criteria, suggested TC id); "
@@ -1044,7 +1221,13 @@ _SYSTEM = (
     "do everything in one turn.\n"
     "- Pursue ONLY the user's goal; do not wander into unrelated pages or features.\n"
     "- If you get stuck (an element is missing, a modal will not close, a page is unexpectedly "
-    "complex) or you are unsure, STOP and ASK the user — do NOT keep clicking around hoping it works.\n"
+    "complex, or a login form will not accept your credentials) STOP and call ask_user — do NOT "
+    "keep clicking around and do NOT skip the blocked step to continue with the next app or section. "
+    "Skipping a blocked step is NEVER acceptable. A blocked step suspends the sequence until you "
+    "get an answer from the user and resolve it.\n"
+    "- Login is a hard blocker: if you land on a login form and the saved session was not accepted, "
+    "first check get_settings() for credentials. If login still fails or creds are absent, call "
+    "ask_user immediately — do not navigate away, do not start a different app.\n"
     "- Report any breakage you surface (console errors, JS exceptions, failed requests, broken "
     "images) as findings.\n\n"
     "Rules:\n"
@@ -1087,7 +1270,13 @@ def build_agent(model, max_tokens=None):
     @agent.tool
     async def navigate(ctx: RunContext[Deps], url: str) -> dict:
         """Navigate the browser to a URL (absolute http(s) URL). Returns the resulting URL,
-        page title, and any new breakage issues triggered by the load."""
+        page title, and any new breakage issues triggered by the load.
+
+        CRITICAL — if the result contains the key '⚠_AUTH_REQUIRED', read its value.
+        It means either (a) you landed on a login form, or (b) API calls returned 401/403
+        (expired session). In BOTH cases you MUST follow the steps in that message before
+        doing anything else. DO NOT navigate to another URL. DO NOT continue the sequence.
+        The sequence is SUSPENDED at this point until authentication is resolved."""
         return await _bro(ctx.deps.session.navigate, url)
 
     @agent.tool
@@ -1110,17 +1299,81 @@ def build_agent(model, max_tokens=None):
     @agent.tool
     async def click(ctx: RunContext[Deps], ref: str) -> dict:
         """Click the element with the given ref (from the latest inspect_page). Records the action
-        as a test step. Returns ok, the new URL/title, and any breakage triggered."""
+        as a test step. Returns ok, the new URL/title, and any breakage triggered.
+        FALLBACK: if a ref is broken (e.g. MUI colon IDs like :r3:), pass a direct CSS selector
+        instead — e.g. 'button[type="submit"]' or '[role="button"]'. Direct selectors are
+        detected automatically and bypass the ref lookup."""
         return await _bro(ctx.deps.session.act, "click", ref, None)
 
     @agent.tool
     async def fill(ctx: RunContext[Deps], ref: str, value: str) -> dict:
-        """Type `value` into the input/textbox with the given ref. Records a test step."""
-        return await _bro(ctx.deps.session.act, "fill", ref, value)
+        """Type `value` into the input/textbox with the given ref. Records a test step.
+        FALLBACK: if a ref is broken (e.g. MUI colon IDs like :r3:, :r5:), pass a direct CSS
+        selector instead — e.g. 'input[type="email"]' or 'input[type="password"]' or
+        'input[name="username"]'. Direct selectors are detected automatically and bypass
+        the ref lookup. This is the correct approach for MUI login forms.
+        Successful fills are automatically saved to the project input registry."""
+        result = await _bro(ctx.deps.session.act, "fill", ref, value)
+        if result.get("ok") and value and value.strip():
+            # Auto-record to input registry (skips sensitive fields automatically)
+            el = ctx.deps.session.by_ref.get(ref, {})
+            field_name = el.get("name") or el.get("label") or ref
+            proj_id = (ctx.deps.project or {}).get("id") or ""
+            _ireg.record(
+                ats_root=ctx.deps.ats_root,
+                project_id=proj_id or None,
+                url=result.get("url", ""),
+                field_name=str(field_name),
+                value=value,
+                field_type=el.get("type") or "text",
+                selector=ref if BrowserSession._is_direct_selector(ref) else "",
+            )
+        return result
+
+    @agent.tool
+    async def get_input_registry(ctx: RunContext[Deps], url_filter: str = "") -> dict:
+        """Read the project's input registry — all successful form-field values recorded
+        across past sessions, grouped by URL route. Use this at the start of a task to
+        discover what values are known to work for each page and field.
+        Pass url_filter (e.g. '#/oms/cart') to narrow to a specific route.
+        Returns a dict: { route: [ {field, type, value, ts, note?}, ... ] }"""
+        proj_id = (ctx.deps.project or {}).get("id") or None
+        data = _ireg.get(ctx.deps.ats_root, proj_id, url_filter)
+        if not data:
+            msg = "Input registry is empty" if not url_filter else f"No entries for '{url_filter}'"
+            return {"ok": True, "entries": {}, "note": msg}
+        total = sum(len(v) for v in data.values())
+        return {"ok": True, "entries": data, "route_count": len(data), "total_inputs": total}
+
+    @agent.tool
+    async def record_input(ctx: RunContext[Deps], field_name: str, value: str,
+                           field_type: str = "text", note: str = "") -> dict:
+        """Manually save a successful input value to the project registry.
+        Use this after selecting an autocomplete option, choosing a dropdown value,
+        or any interaction where the auto-recorder couldn't capture the final value
+        (e.g. the selected label differs from what was typed in the search box).
+        field_type: 'text', 'autocomplete', 'dropdown', 'number', 'radio', 'checkbox'
+        note: optional context (e.g. 'selected after typing Supertech')"""
+        proj_id = (ctx.deps.project or {}).get("id") or None
+        url = ctx.deps.session._url() if ctx.deps.session and ctx.deps.session.page else ""
+        saved = _ireg.record(
+            ats_root=ctx.deps.ats_root,
+            project_id=proj_id,
+            url=url,
+            field_name=field_name,
+            value=value,
+            field_type=field_type,
+            note=note,
+        )
+        if saved:
+            return {"ok": True, "recorded": True, "field": field_name, "value": value}
+        return {"ok": True, "recorded": False,
+                "note": "Skipped — value is empty or field is sensitive (password/token/otp)"}
 
     @agent.tool
     async def select_option(ctx: RunContext[Deps], ref: str, value: str) -> dict:
-        """Select `value` in the <select>/combobox with the given ref. Records a test step."""
+        """Select `value` in the <select>/combobox with the given ref. Records a test step.
+        FALLBACK: accepts direct CSS selectors (e.g. 'select[name="role"]') when refs are broken."""
         return await _bro(ctx.deps.session.act, "select", ref, value)
 
     @agent.tool
@@ -1146,6 +1399,40 @@ def build_agent(model, max_tokens=None):
         Returns the created test's flow/path."""
         return await _bro(ctx.deps.session.create_test, ctx.deps.ats_root, ctx.deps.project,
                           tc_id, flow_id, description, preconditions, expected_result)
+
+    @agent.tool
+    async def save_user_story(ctx: RunContext[Deps], tc_id: str, flow_id: str,
+                               summary: str, role: str, want: str, benefit: str,
+                               acceptance_criteria: list, test_steps: list) -> dict:
+        """Save a user story and step-by-step test steps for a test case.
+        Call this right after create_test_case to populate the user story JSON.
+        - acceptance_criteria: list of strings, one per acceptance criterion.
+        - test_steps: list of {step, action, expected} dicts matching the spec table.
+        Writes to tests/flows/<flow_id>/<flow_id>_user_stories.json."""
+        ats_root = ctx.deps.ats_root
+        flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
+        if not os.path.isdir(flow_dir):
+            return {"status": "error", "message": f"flow '{flow_id}' not found"}
+        stories_path = os.path.join(flow_dir, f"{flow_id}_user_stories.json")
+        try:
+            existing = _read_json_file(stories_path, {})
+            existing[tc_id] = {
+                "user_story": {
+                    "summary": summary,
+                    "role": role,
+                    "want": want,
+                    "benefit": benefit,
+                    "acceptance_criteria": acceptance_criteria or [],
+                },
+                "test_steps": test_steps or [],
+            }
+            with open(stories_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2, ensure_ascii=False)
+            return {"status": "success", "tc_id": tc_id, "flow": flow_id,
+                    "steps_count": len(test_steps or []),
+                    "criteria_count": len(acceptance_criteria or [])}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     @agent.tool
     async def run_test_case(ctx: RunContext[Deps], tc_id: str, flow_id: str):
@@ -1233,9 +1520,12 @@ def build_agent(model, max_tokens=None):
             return result
         failed = next((r for r in runs if not r["passed"]), runs[-1])
         result["tail"] = (failed["text"] or "")[-2500:]
-        shot, err = _find_failure_artifacts(failed["rdir"])
+        shot, err, page_text = _find_failure_artifacts(failed["rdir"])
         if err:
             result["error_detail"] = err[:800]
+        # Page text (what was visible on screen) — works for non-vision models via DOM extraction
+        if page_text:
+            result["page_text_on_failure"] = ("Visible page content when test failed:\n" + page_text)
         # Vision: hand the model the actual failure screenshot so it can SEE the problem and fix it.
         if shot and ctx.deps.vision:
             img = _binary_part(shot, "image/png", max_bytes=8_000_000)
@@ -1607,12 +1897,16 @@ def build_agent(model, max_tokens=None):
             return {"ok": False, "error": f"unexpected error: {str(e)[:200]}"}
 
         if not isinstance(flows, list):
-            # LLM may return {"flows": [...]} — unwrap
             if isinstance(flows, dict):
-                for key in ("flows", "test_flows", "items", "results"):
-                    if isinstance(flows.get(key), list):
-                        flows = flows[key]
-                        break
+                # Single flow returned as a bare dict (not wrapped in [])
+                if "id" in flows and "name" in flows:
+                    flows = [flows]
+                else:
+                    # Wrapped: {"flows": [...]} or similar
+                    for key in ("flows", "test_flows", "items", "results"):
+                        if isinstance(flows.get(key), list):
+                            flows = flows[key]
+                            break
         if not isinstance(flows, list):
             return {"ok": False, "error": "LLM did not return a JSON array of flows",
                     "raw": str(flows)[:400]}
@@ -1773,6 +2067,29 @@ def build_agent(model, max_tokens=None):
             "navigation": nav[:60],
         }
 
+    @agent.tool
+    async def ask_user(ctx: RunContext[Deps], question: str) -> str:
+        """Pause the current task and ask the user a question. MANDATORY in these situations:
+        - You are on a login form and the saved session was not accepted (credentials missing
+          or wrong) — ask for the correct email/password. Do NOT navigate away or skip to
+          another app. The sequence is suspended here until you get the answer.
+        - You need an OTP, a confirmation code, or any value only the user can supply.
+        - A step is blocked and you cannot proceed without user input (wrong element, form
+          rejection, unexpected state, missing data).
+        - You are unsure which of multiple options to choose.
+        NEVER skip a blocked step and continue with the next item — always call this first.
+        The session pauses, the user sees your question highlighted in the chat, types their
+        answer, and you resume from exactly this point. Returns whatever the user typed."""
+        if ctx.deps.user_input_q is None:
+            return "(no input channel — run_explore.py mode; cannot pause for user input)"
+        emit({"event": "input_required", "question": question})
+        ctx.deps._ask_state["waiting"] = True
+        try:
+            answer = await ctx.deps.user_input_q.get()
+        finally:
+            ctx.deps._ask_state["waiting"] = False
+        return answer
+
     @agent.instructions
     async def _project_memory_and_context(ctx: RunContext[Deps]) -> str:
         """Injected fresh each turn (instructions are regenerated per run and not stored in
@@ -1906,8 +2223,11 @@ class AgentRuntime:
         self.session_id = None   # persisted session this runtime is attached to
         self.project_id = None
         self.max_tokens = AGENT_MAX_TOKENS   # effective per-turn output cap (set in init)
+        self.tool_budget = TOOL_BUDGET_DEFAULT  # max tool calls per turn; 0 = unlimited
         self.session_tokens = {"input": 0, "output": 0, "total": 0}  # cumulative token usage
         self.ready_info = None   # the 'ready' payload, re-emitted on reattach
+        self._user_input_q: asyncio.Queue = asyncio.Queue()  # ask_user tool drains this
+        self._chat_task: Optional[asyncio.Task] = None       # current running chat turn
         self.ats_root = os.environ.get("ATS_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config = {}
         try:
@@ -1956,9 +2276,26 @@ class AgentRuntime:
         creds = _resolve_credentials(project, self.config, cmd.get("platform") or "seller", idx)
 
         headless = not cmd.get("headed", False)
+
+        # Collect extra storage states (e.g. admin panel JWT) to inject via init_script.
+        extra_init_states = []
+        if project_id and project:
+            admin_cfg = (project or {}).get("admin") or {}
+            admin_ss_rel = admin_cfg.get("storage_state")
+            if admin_ss_rel:
+                admin_ss_path = os.path.join(self.ats_root, "projects", project_id, admin_ss_rel)
+                if os.path.exists(admin_ss_path):
+                    try:
+                        with open(admin_ss_path, "r", encoding="utf-8") as _f:
+                            extra_init_states.append(json.load(_f))
+                        log(f"[agent] admin panel auth found: {admin_ss_path}")
+                    except Exception as _e:
+                        log(f"[agent] could not load admin storage state: {_e}")
+
         self.session = BrowserSession()
         try:
-            info = await _bro(self.session.start, start_url, load_state, headless, creds, ss)
+            info = await _bro(self.session.start, start_url, load_state, headless, creds, ss,
+                              True, extra_init_states)
         except Exception as e:
             emit({"event": "error", "message": f"browser failed to start: {e}"})
             return
@@ -1966,13 +2303,23 @@ class AgentRuntime:
         prov_cfg = ((self.config.get("llm", {}) or {}).get("providers", {}) or {}).get(pname, {}) or {}
         self.max_tokens = int(prov_cfg.get("max_tokens") or AGENT_MAX_TOKENS)
         self.agent = build_agent(model, self.max_tokens)
+        # Tool budget: from init command > env var default. 0 = unlimited (no pause between turns).
+        _tb = cmd.get("tool_budget")
+        if _tb is not None:
+            self.tool_budget = max(0, int(_tb))
+        else:
+            self.tool_budget = TOOL_BUDGET_DEFAULT
         # Vision-capable? -> run_test_case can hand failure SCREENSHOTS back to the model.
+        # Default is OFF — many model endpoints (incl. mimo-v2.5-pro) reject image input with 404.
+        # Enable explicitly via ATS_AGENT_VISION=on or per-provider "vision": true in config.json.
         _vis = (os.environ.get("ATS_AGENT_VISION") or "").lower()
-        vision = (_vis == "on") if _vis in ("on", "off") else (pname in ("mimo", "openai"))
+        _prov_vision = bool(prov_cfg.get("vision"))   # opt-in via config.json provider block
+        vision = (_vis == "on") or (_vis != "off" and _prov_vision)
         ctx_dir = project_store.resolve_context_dir(self.ats_root, project_id, project)
         mem_path = project_store.resolve_memory_path(self.ats_root, project_id)
         self.deps = Deps(session=self.session, ats_root=self.ats_root, project=project,
-                         config=self.config, context_dir=ctx_dir, memory_path=mem_path, vision=vision)
+                         config=self.config, context_dir=ctx_dir, memory_path=mem_path, vision=vision,
+                         user_input_q=self._user_input_q)
         # Restore the model's conversation memory on resume (this is what lets it "continue
         # from a point"); a fresh session starts empty. Then mark the session running and load
         # the saved transcript so the window can redraw the visible chat.
@@ -2013,14 +2360,15 @@ class AgentRuntime:
         # plain string when there are no binary parts (so text-only models are unaffected).
         prompt = _build_user_prompt(
             message or "Use the attached file(s) as context for the app under test.",
-            attachments)
+            attachments,
+            vision=self.deps.vision)
         hist_before = len(self.history)
         with capture_run_messages() as messages:
             try:
                 result = await self.agent.run(
                     prompt, deps=self.deps, message_history=self.history,
                     event_stream_handler=_stream_handler,
-                    usage_limits=UsageLimits(tool_calls_limit=TOOL_BUDGET))
+                    usage_limits=UsageLimits(tool_calls_limit=self.tool_budget or None))
                 self.history = result.all_messages()
                 self._add_usage(result)
                 self._persist_turn(message, attachment_names, result.new_messages())
@@ -2048,6 +2396,15 @@ class AgentRuntime:
                                 "provider/model that allows more output per response.)")
                 emit({"event": "error", "message": msg})
                 log(traceback.format_exc())
+
+    async def show_browser(self, cmd):
+        """Switch the testing browser to headed (visible) mode so the user can watch.
+        If already headed, reports that. Emits show_browser_result with ok/message/url."""
+        if not self.session:
+            emit({"event": "show_browser_result", "ok": False, "error": "no active session"})
+            return
+        result = await _bro(self.session.show_browser)
+        emit({"event": "show_browser_result", **result})
 
     async def reattach(self):
         """Re-emit `ready` (+ current transcript + token total) so a reopened window/dock reconnects
@@ -2133,7 +2490,7 @@ class AgentRuntime:
                 summary = ""
         except Exception as e:
             log(f"[agent] post-budget summary failed: {e}")
-        note = (f"(Paused after {TOOL_BUDGET} exploration steps — my per-turn budget. I've kept "
+        note = (f"(Paused after {self.tool_budget} exploration steps — my per-turn budget. I've kept "
                 f"everything I found, so just say \"continue\" to keep going, or tell me what to focus on.)")
         emit({"event": "turn_complete", "text": (summary + "\n\n" + note) if summary else note})
         return summary
@@ -2200,9 +2557,17 @@ async def main_loop():
         if action == "init":
             await rt.init(cmd)
         elif action == "chat":
-            await rt.chat(cmd)
+            # If ask_user is blocking, route the reply directly to it; otherwise start a chat turn.
+            if rt.deps and rt.deps._ask_state.get("waiting"):
+                await rt._user_input_q.put(cmd.get("message", ""))
+            elif rt._chat_task and not rt._chat_task.done():
+                emit({"event": "log", "message": "Still processing — your message will be sent when ready."})
+            else:
+                rt._chat_task = asyncio.create_task(rt.chat(cmd))
         elif action == "reattach":
             await rt.reattach()
+        elif action == "show_browser":
+            await rt.show_browser(cmd)
         elif action == "reset":
             rt.reset()
         elif action in ("shutdown", "quit", "exit"):

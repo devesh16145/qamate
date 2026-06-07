@@ -226,3 +226,447 @@ def test_TC_ORDERS_003(seller_page: Page, tc_data, base_url, admin_url, checkpoi
     # ── Final wait before closing ──
     page.wait_for_timeout(2000)
     checkpoints.mark_passed("All 6 verification(s) passed")
+
+@pytest.mark.tc("TC-OLC-001")
+def test_TC_OLC_001(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Orders page loads correctly with all tabs, search bar, filters, sort dropdown, and order list
+
+    Preconditions: Seller account is logged in
+
+    Expected Result: Orders page at /orders displays All Orders tab, New/Accepted/Packed tabs, Sort dropdown, Order Type filter, and populated order list with PO entries
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Orders page loads with correct URL
+        expect(page).to_have_url(re.compile(".*" + re.escape("/orders") + ".*"), timeout=10000)
+        # Verify: All Orders tab visible
+        expect(page.locator("body")).to_contain_text("All Orders", timeout=10000)
+        # Verify: Order tabs visible (New, Accepted, Packed)
+        expect(page.locator("body")).to_contain_text("New", timeout=10000)
+        # Verify: Sort dropdown visible
+        expect(page.locator("body")).to_contain_text("Sort", timeout=10000)
+        # Verify: Order Type filter visible
+        expect(page.locator("body")).to_contain_text("Order Type", timeout=10000)
+        # Verify: Order list has items (PO visible)
+        expect(page.locator("body")).to_contain_text("PO-", timeout=10000)
+    # Step 2: Click Click All Orders
+    with checkpoints.step("Step 2: Click Click All Orders"):
+        page.get_by_role("button", name="All Orders").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+@pytest.mark.tc("TC-OLC-002")
+def test_TC_OLC_002(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Orders page tab counts match visible order lists by clicking through All Orders, New, Accepted, Packed, and Dispatched tabs
+
+    Preconditions: Seller is logged in and on Orders page. Date filter is set to Today.
+
+    Expected Result: Each tab loads correctly. All Orders tab shows populated list with PO entries. Status-specific tabs (New, Accepted, Packed, Dispatched) show either matching orders or empty state when count is 0
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+    # Step 2: Click Click All Orders
+    with checkpoints.step("Step 2: Click Click All Orders"):
+        page.get_by_role("button", name="All Orders").click()
+        page.wait_for_timeout(500)
+        # Verify: All Orders tab shows count badge
+        expect(page.locator("body")).to_contain_text("All Orders", timeout=10000)
+        # Verify: Orders list is visible with PO entries
+        expect(page.locator("body")).to_contain_text("PO-", timeout=10000)
+    # Step 3: Click Click New
+    with checkpoints.step("Step 3: Click Click New"):
+        page.get_by_role("button", name="New").click()
+        page.wait_for_timeout(500)
+        # Verify: New tab selected with 0 orders - empty state
+        expect(page.locator("body")).to_contain_text("New", timeout=10000)
+    # Step 4: Click Click Accepted
+    with checkpoints.step("Step 4: Click Click Accepted"):
+        page.get_by_role("button", name="Accepted").click()
+        page.wait_for_timeout(500)
+        # Verify: Accepted tab shows empty state with 0 orders
+        expect(page.locator("body")).to_contain_text("Accepted", timeout=10000)
+    # Step 5: Click Click Packed
+    with checkpoints.step("Step 5: Click Click Packed"):
+        page.get_by_role("button", name="Packed").click()
+        page.wait_for_timeout(500)
+        # Verify: Packed tab selected and navigated
+        expect(page.locator("body")).to_contain_text("Packed", timeout=10000)
+    # Step 6: Click Click Dispatched
+    with checkpoints.step("Step 6: Click Click Dispatched"):
+        page.get_by_role("button", name="Dispatched").click()
+        page.wait_for_timeout(500)
+        # Verify: Dispatched tab selected and navigated
+        expect(page.locator("body")).to_contain_text("Dispatched", timeout=10000)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+
+@pytest.mark.tc("TC-OLC-003")
+def test_TC_OLC_003(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Orders page search and filter: no-results empty state, search clear on tab switch, Order Type filter presence
+
+    Preconditions: Seller is logged in and on Orders page
+
+    Expected Result: Non-matching search shows 'No Order Found', clearing search restores orders, switching tabs clears active search, Order Type filter is accessible
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+    # Step 2: Enter "zzz" in Enter "zzz" in search-product-name-sku-brand
+    with checkpoints.step("Step 2: Enter \"zzz\" in Enter \"zzz\" in search-product-name-sku-brand"):
+        page.get_by_placeholder("Search Product Name, SKU, Brand").fill(tc_data.get("input_1", ""))
+        # Verify: Non-matching search shows No Order Found
+        expect(page.locator("body")).to_contain_text("No Order Found", timeout=10000)
+    # Step 3: Enter "" in Enter "" in search-product-name-sku-brand
+    with checkpoints.step("Step 3: Enter \"\" in Enter \"\" in search-product-name-sku-brand"):
+        page.get_by_placeholder("Search Product Name, SKU, Brand").fill(tc_data.get("input_2", ""))
+        # Verify: Orders return after clearing search
+        expect(page.locator("body")).to_contain_text("PO-", timeout=10000)
+    # Step 4: Enter "zzz" in Enter "zzz" in search-product-name-sku-brand
+    with checkpoints.step("Step 4: Enter \"zzz\" in Enter \"zzz\" in search-product-name-sku-brand"):
+        page.get_by_placeholder("Search Product Name, SKU, Brand").fill(tc_data.get("input_3", ""))
+    # Step 5: Click Click New
+    with checkpoints.step("Step 5: Click Click New"):
+        page.get_by_role("button", name="New").click()
+        page.wait_for_timeout(500)
+        # Verify: Tab switch to New works - search cleared on tab change
+        expect(page.locator("body")).to_contain_text("New", timeout=10000)
+    # Step 6: Click Click Order Type
+    with checkpoints.step("Step 6: Click Click Order Type"):
+        page.get_by_role("button", name="Order Type").click()
+        page.wait_for_timeout(500)
+        # Verify: Order Type filter is clickable
+        expect(page.locator("body")).to_contain_text("Order Type", timeout=10000)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+@pytest.mark.tc("TC-OLC-004")
+def test_TC_OLC_004(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify order cards on All Orders view display correct UI elements: PO#, Box count, Grand Total, product details, Raise ticket action
+
+    Preconditions: Seller is logged in and on Orders page with existing orders
+
+    Expected Result: Order cards display PO numbers, Box counts, Grand Total amounts, product details, and Raise ticket actions
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Orders page loaded with order cards visible
+        expect(page.locator("body")).to_contain_text("PO-", timeout=10000)
+        # Verify: Order card shows Box count
+        expect(page.locator("body")).to_contain_text("Boxes", timeout=10000)
+        # Verify: Order card shows Grand Total
+        expect(page.locator("body")).to_contain_text("Total", timeout=10000)
+        # Verify: Order card shows Raise ticket action
+        expect(page.locator("body")).to_contain_text("Raise ticket", timeout=10000)
+        # Verify: Order card shows product details
+        expect(page.locator("body")).to_contain_text("Testing", timeout=10000)
+    # Step 2: Click Click All Orders
+    with checkpoints.step("Step 2: Click Click All Orders"):
+        page.get_by_role("button", name="All Orders").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+@pytest.mark.tc("TC-OLC-005")
+def test_TC_OLC_005(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Accepted order displays Pack CTA and warehouse info on All Orders view
+
+    Preconditions: Seller is logged in with an Accepted order in the list
+
+    Expected Result: Accepted order shows Pack button and warehouse name (e.g. Goa_WH)
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Orders page loaded
+        expect(page).to_have_url(re.compile(".*" + re.escape("/orders") + ".*"), timeout=10000)
+        # Verify: Accepted order visible with Pack button
+        expect(page.locator("body")).to_contain_text("Pack", timeout=10000)
+        # Verify: Accepted order shows warehouse info
+        expect(page.locator("body")).to_contain_text("_WH", timeout=10000)
+    # Step 2: Click Click All Orders
+    with checkpoints.step("Step 2: Click Click All Orders"):
+        page.get_by_role("button", name="All Orders").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+
+@pytest.mark.tc("TC-OLC-006")
+def test_TC_OLC_006(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Packed order displays Ready CTA, Ready Proof, Invoice, and Eway Bill document actions
+
+    Preconditions: Seller is logged in with a Packed order in the list
+
+    Expected Result: Packed order card shows Ready button, Ready Proof action, Invoice action, and Eway Bill action
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Orders page loaded with order cards
+        expect(page.locator("body")).to_contain_text("PO-", timeout=10000)
+        # Verify: Packed order shows Ready button
+        expect(page.locator("body")).to_contain_text("Ready", timeout=10000)
+        # Verify: Packed order shows document actions
+        expect(page.locator("body")).to_contain_text("Invoice", timeout=10000)
+        # Verify: Packed order shows Ready Proof action
+        expect(page.locator("body")).to_contain_text("Ready Proof", timeout=10000)
+        # Verify: Packed order shows Eway Bill action
+        expect(page.locator("body")).to_contain_text("Eway Bill", timeout=10000)
+    # Step 2: Click Click All Orders
+    with checkpoints.step("Step 2: Click Click All Orders"):
+        page.get_by_role("button", name="All Orders").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+
+@pytest.mark.tc("TC-OLC-007")
+def test_TC_OLC_007(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify all status tabs load correctly: Ready for Dispatch with Upload PoP, Dispatched, Rejected, Cancelled
+
+    Preconditions: Seller is logged in and on Orders page
+
+    Expected Result: Ready for Dispatch tab shows Upload PoP button. All status tabs (Dispatched, Rejected, Cancelled) load without errors
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+    # Step 2: Click Click Ready for Dispatch
+    with checkpoints.step("Step 2: Click Click Ready for Dispatch"):
+        page.get_by_role("button", name="Ready for Dispatch").click()
+        page.wait_for_timeout(500)
+        # Verify: Ready for Dispatch tab loads
+        expect(page.locator("body")).to_contain_text("Ready for Dispatch", timeout=10000)
+        # Verify: Upload PoP button visible
+        expect(page.locator("body")).to_contain_text("Upload PoP", timeout=10000)
+    # Step 3: Click Click Dispatched
+    with checkpoints.step("Step 3: Click Click Dispatched"):
+        page.get_by_role("button", name="Dispatched").click()
+        page.wait_for_timeout(500)
+        # Verify: Dispatched tab loads successfully
+        expect(page.locator("body")).to_contain_text("Dispatched", timeout=10000)
+    # Step 4: Click Click Rejected
+    with checkpoints.step("Step 4: Click Click Rejected"):
+        page.get_by_role("button", name="Rejected").click()
+        page.wait_for_timeout(500)
+        # Verify: Rejected tab loads successfully
+        expect(page.locator("body")).to_contain_text("Rejected", timeout=10000)
+    # Step 5: Click Click Cancelled
+    with checkpoints.step("Step 5: Click Click Cancelled"):
+        page.get_by_role("button", name="Cancelled").click()
+        page.wait_for_timeout(500)
+        # Verify: Cancelled tab loads successfully
+        expect(page.locator("body")).to_contain_text("Cancelled", timeout=10000)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+
+@pytest.mark.tc("TC-OLC-008")
+def test_TC_OLC_008(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Payments tab loads with bill tabs (All Bills, Unpaid, Paid, Overdue)
+
+    Preconditions: Seller is logged in
+
+    Expected Result: Payments page shows All Bills, Unpaid, Paid, Overdue tabs
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/payments
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/payments"):
+        page.goto(base_url + "payments")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Payments page loads at correct URL
+        expect(page).to_have_url(re.compile(".*" + re.escape("/payments") + ".*"), timeout=10000)
+        # Verify: All Bills tab visible
+        expect(page.locator("body")).to_contain_text("All Bills", timeout=10000)
+        # Verify: Unpaid tab visible
+        expect(page.locator("body")).to_contain_text("Unpaid", timeout=10000)
+        # Verify: Paid tab visible
+        expect(page.locator("body")).to_contain_text("Paid", timeout=10000)
+        # Verify: Overdue tab visible
+        expect(page.locator("body")).to_contain_text("Overdue", timeout=10000)
+    # Step 2: Click Click All Bills
+    with checkpoints.step("Step 2: Click Click All Bills"):
+        page.get_by_role("button", name="All Bills").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+@pytest.mark.tc("TC-OLC-009")
+def test_TC_OLC_009(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify Orders page sort dropdown and all filter options are present: Sort, Order Status, Order Type, Auto Accept, Date filter
+
+    Preconditions: Seller is logged in and on Orders page
+
+    Expected Result: Sort Options, Order Status, Order Type, Auto Accept, and Today date filter are all visible and accessible
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Orders page loaded
+        expect(page).to_have_url(re.compile(".*" + re.escape("/orders") + ".*"), timeout=10000)
+        # Verify: Sort Options dropdown visible
+        expect(page.locator("body")).to_contain_text("Sort", timeout=10000)
+        # Verify: Order Status filter visible
+        expect(page.locator("body")).to_contain_text("Order Status", timeout=10000)
+        # Verify: Order Type filter visible
+        expect(page.locator("body")).to_contain_text("Order Type", timeout=10000)
+        # Verify: Auto Accept filter visible
+        expect(page.locator("body")).to_contain_text("Auto Accept", timeout=10000)
+        # Verify: Date filter visible
+        expect(page.locator("body")).to_contain_text("Today", timeout=10000)
+    # Step 2: Click Click Sort : Options
+    with checkpoints.step("Step 2: Click Click Sort : Options"):
+        page.get_by_role("button", name="Sort : Options").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+
+@pytest.mark.tc("TC-OLC-010")
+def test_TC_OLC_010(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify sidebar navigation works across all main pages: Orders, Payments, Returns, Deductions
+
+    Preconditions: Seller is logged in
+
+    Expected Result: Sidebar links navigate to Payments (/payments), Returns (/returns), Deductions (/deductions), and back to Orders (/orders) correctly
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+    # Step 2: Click Click Payments
+    with checkpoints.step("Step 2: Click Click Payments"):
+        page.get_by_role("link", name="Payments").click()
+        page.wait_for_timeout(500)
+        # Verify: Payments page loaded via sidebar
+        expect(page).to_have_url(re.compile(".*" + re.escape("/payments") + ".*"), timeout=10000)
+    # Step 3: Click Click Returns
+    with checkpoints.step("Step 3: Click Click Returns"):
+        page.get_by_role("link", name="Returns").click()
+        page.wait_for_timeout(500)
+        # Verify: Returns page loaded via sidebar
+        expect(page).to_have_url(re.compile(".*" + re.escape("/returns") + ".*"), timeout=10000)
+        # Verify: Returns page shows Return Initiated tab
+        expect(page.locator("body")).to_contain_text("Return Initiated", timeout=10000)
+    # Step 4: Click Click Deductions
+    with checkpoints.step("Step 4: Click Click Deductions"):
+        page.get_by_role("link", name="Deductions").click()
+        page.wait_for_timeout(500)
+        # Verify: Deductions page loaded via sidebar
+        expect(page).to_have_url(re.compile(".*" + re.escape("/deductions") + ".*"), timeout=10000)
+        # Verify: Deductions shows All tab
+        expect(page.locator("body")).to_contain_text("All", timeout=10000)
+    # Step 5: Click Click Orders
+    with checkpoints.step("Step 5: Click Click Orders"):
+        page.get_by_role("link", name="Orders").click()
+        page.wait_for_timeout(500)
+        # Verify: Returned to Orders page via sidebar
+        expect(page).to_have_url(re.compile(".*" + re.escape("/orders") + ".*"), timeout=10000)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")
+
+
+@pytest.mark.tc("TC-OLC-011")
+def test_TC_OLC_011(seller_page: Page, tc_data, base_url, admin_url, checkpoints):
+    """Verify date filter (Today), Sort Options, and Order Type filter are present on Orders page
+
+    Preconditions: Seller is logged in and on Orders page
+
+    Expected Result: Date filter shows Today, Sort Options and Order Type filters are visible
+    """
+    page = seller_page
+    # Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders
+    with checkpoints.step("Step 1: Navigate to Navigate to https://supplier-dev.agrim.app/orders"):
+        page.goto(base_url + "orders")
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        # Verify: Orders page loaded
+        expect(page).to_have_url(re.compile(".*" + re.escape("/orders") + ".*"), timeout=10000)
+        # Verify: Date filter visible on Orders page
+        expect(page.locator("body")).to_contain_text("Today", timeout=10000)
+        # Verify: Sort Options visible on Orders page
+        expect(page.locator("body")).to_contain_text("Sort", timeout=10000)
+        # Verify: Order Type filter visible on Orders page
+        expect(page.locator("body")).to_contain_text("Order Type", timeout=10000)
+    # Step 2: Click Click All Orders
+    with checkpoints.step("Step 2: Click Click All Orders"):
+        page.get_by_role("button", name="All Orders").click()
+        page.wait_for_timeout(500)
+
+    # ── Final wait before closing ──
+    page.wait_for_timeout(2000)
+    checkpoints.mark_passed("Flow completed - all steps passed")

@@ -25,6 +25,21 @@ contextBridge.exposeInMainWorld('ats', {
   // ── Conversational AI agent (agent_chat.py): concurrent persisted sessions ──
   // Each call carries a sessionId; events arrive on 'agent-event' tagged with sessionId.
   agentOpenWindow: () => ipcRenderer.invoke('agent-open-window'),
+  historyOpenWindow: () => ipcRenderer.invoke('history-open-window'),       // open history as floating window
+  historyDock: () => ipcRenderer.invoke('history-dock'),                    // from floating history: dock back into IDE
+  onHistoryDockRequest: (cb) => {                                            // main window: react to history dock request
+    const h = () => cb();
+    ipcRenderer.on('history-dock-request', h);
+    return () => ipcRenderer.removeListener('history-dock-request', h);
+  },
+  openRunInMain: (runId) => ipcRenderer.invoke('open-run-in-main', runId),  // from float history: open run in main IDE
+  onOpenRunRequest: (cb) => {                                                // main window: react to open-run-request
+    const h = (_e, runId) => cb(runId);
+    ipcRenderer.on('open-run-request', h);
+    return () => ipcRenderer.removeListener('open-run-request', h);
+  },
+  openMainWindow: () => ipcRenderer.invoke('open-main-window'),
+  agentShowBrowser: (opts) => ipcRenderer.invoke('agent-show-browser', opts),
   agentDock: () => ipcRenderer.invoke('agent-dock'),                     // from the floating window: dock into the IDE
   onAgentDockRequest: (callback) => {                                    // main window: react to a dock request
     const handler = () => callback();

@@ -1,0 +1,42 @@
+[
+    {
+        "tc_id": "TC-ACCT-001",
+        "description": "Verify Account Statement page loads with date range options and Request Statement button is clickable",
+        "steps": [
+            {
+                "id": 1,
+                "rawLine": "page.goto(\"https://supplier-dev.agrim.app/account-statement\")",
+                "type": "navigate",
+                "target": "https://supplier-dev.agrim.app/account-statement",
+                "targetDescription": "Navigate to https://supplier-dev.agrim.app/account-statement",
+                "value": "",
+                "varName": ""
+            },
+            {
+                "id": 2,
+                "rawLine": "page.get_by_role(\"button\", name=\"Request Statement\").click()",
+                "type": "click",
+                "target": "page.get_by_role(\"button\", name=\"Request Statement\")",
+                "targetDescription": "Click Request Statement",
+                "value": "",
+                "varName": ""
+            }
+        ],
+        "preconditions": "test reachable; logged in if required",
+        "expected_result": "Account Statement page displays date range radio buttons and the Request Statement button is present and clickable.",
+        "assertions": [
+            {
+                "type": "page_contains_text",
+                "value": "Request Statement",
+                "afterStep": 1,
+                "description": "Account Statement page loads with date range options"
+            },
+            {
+                "type": "url_contains",
+                "value": "account-statement",
+                "afterStep": 2,
+                "description": "Request Statement button is clickable"
+            }
+        ]
+    }
+]
