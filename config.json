@@ -104,7 +104,7 @@
     "_comment": "Pluggable LLM for the explorer (browser-use agent), PRD extraction + test synthesis. Default = Xiaomi MiMo (OpenAI-compatible, key from MIMO_API_KEY) for testing; generalises to any provider. API keys are NEVER stored here — only the env-var name each provider reads."
   },
   "vision_oracle": {
-    "model": "CONFIGURE_ME",
+    "model": "mimo-v2-omni",
     "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
     "api_key_env": "MIMO_API_KEY",
     "max_tokens": 512,
