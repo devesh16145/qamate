@@ -171,10 +171,19 @@ def test_build_prompt_inlines_document_text(tmp_path):
 def test_build_prompt_image_becomes_binary_part(tmp_path):
     img = tmp_path / "shot.png"
     img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
-    out = ac._build_user_prompt("look", [str(img)])
+    # vision=True required — without it images are intentionally skipped for text-only models
+    out = ac._build_user_prompt("look", [str(img)], vision=True)
     assert isinstance(out, list) and len(out) >= 2    # [body, BinaryContent]
     assert isinstance(out[0], str) and "[image: shot.png]" in out[0]
     assert isinstance(out[1], ac.BinaryContent)
+
+
+def test_build_prompt_image_skipped_when_no_vision(tmp_path):
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    out = ac._build_user_prompt("look", [str(img)])   # vision=False default
+    assert isinstance(out, str)
+    assert "not sent" in out
 
 
 def test_build_prompt_missing_file_noted_text_only(tmp_path):
@@ -233,14 +242,26 @@ def test_find_failure_artifacts(tmp_path):
     sdir.mkdir()
     (sdir / "test_x_FAILED.png").write_bytes(b"png")
     (sdir / "test_x_ERRORS.txt").write_text("boom: element not found", encoding="utf-8")
-    shot, err = ac._find_failure_artifacts(str(tmp_path))
+    shot, err, page_text = ac._find_failure_artifacts(str(tmp_path))
     assert shot.endswith("_FAILED.png")
     assert "boom" in err
+    assert page_text is None   # no _FAILED_TEXT.txt written
+
+
+def test_find_failure_artifacts_with_page_text(tmp_path):
+    sdir = tmp_path / "screenshots"
+    sdir.mkdir()
+    (sdir / "tc_FAILED.png").write_bytes(b"png")
+    (sdir / "tc_FAILED_TEXT.txt").write_text("page body here", encoding="utf-8")
+    shot, err, page_text = ac._find_failure_artifacts(str(tmp_path))
+    assert shot.endswith("_FAILED.png")
+    assert err is None
+    assert page_text == "page body here"
 
 
 def test_find_failure_artifacts_empty(tmp_path):
-    assert ac._find_failure_artifacts(str(tmp_path)) == (None, None)
-    assert ac._find_failure_artifacts(str(tmp_path / "nope")) == (None, None)
+    assert ac._find_failure_artifacts(str(tmp_path)) == (None, None, None)
+    assert ac._find_failure_artifacts(str(tmp_path / "nope")) == (None, None, None)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
