@@ -93,43 +93,48 @@ If the type-based selectors also fail (0 elements found), call
 `ask_user("I'm on the admin panel login form but direct selectors also fail. What should I do?")`
 — never silently move to the next app.
 
-## Dropdowns, autocompletes, and dynamic content
+## Dropdowns, autocompletes, and unknown components
 
-Modern dropdowns (MUI Autocomplete, Radix, Ant Design) load options asynchronously
-via API calls. inspect_page on an open-but-empty listbox means the options are still
-loading NOT that they don't exist. You have two tools that handle this correctly.
+### The right mental model
 
-### Autocomplete / search-field workflow (e.g. customer search, product search)
+You have three independent ways to interact with any element:
+1. **By ref** (from inspect_page) — fast when inspect_page found it
+2. **By text** (click_option, click_by_text) — for open dropdowns
+3. **By coordinates** (find_on_screen + mouse_click) — for ANYTHING visible on screen
 
-After fill() on a search input:
-- If the result has "autocomplete_options": ["Option A", ...] -> call click_option("Option A")
-- If autocomplete_options is absent (API took longer than 3s) -> call list_options(), then click_option()
+Use them in escalating order. Never give up after one method fails.
 
-### Click-to-open dropdown
+### Autocomplete / search-field (the customer search case)
 
-After click() on a trigger:
-- If result has "overlay_opened": true and "visual_state" -> read visual_state for option texts, then click_option()
-- If vision unavailable -> call list_options(), then click_option()
+
+
+If click_option fails (custom component, no ARIA roles):
+
+
+If aria_snapshot shows no options:
+
+
+If you need to pick a specific option by vision:
+
+
+### Full escalation ladder (stop at first success)
+
+1. fill() -> read autocomplete_options -> click_option(text)
+2. wait_for_text(expected) -> click_option(text)
+3. aria_snapshot() -> find option in tree -> click_option(text)
+4. press_key("ArrowDown") + press_key("Enter") (keyboard protocol)
+5. find_on_screen(description) -> mouse_click(x, y)  (vision-grounded)
+6. click_by_text(text)  (JS click, last resort)
+7. ask_user()  (truly blocked, needs human)
 
 ### Rules
-
-- NEVER call inspect_page to find dropdown options. Refs are stale the moment the overlay opens. Use list_options + click_option.
-- NEVER give up after one empty inspect_page. The options are loading. Wait with list_options() (retries for 3s).
-- click_option searches the entire document including portals. Just pass the option text.
-- If click_option reports 0 matches, the dropdown is a custom component with no ARIA roles.
-  Escalate: click_by_text("exact text from vision/list_options") — uses JS click as final fallback.
-
-### Escalation ladder for unclickable dropdown options
-1. fill() -> read autocomplete_options from result -> click_option(text)
-2. list_options() -> read option texts -> click_option(text)
-3. click_by_text(text) — role-agnostic, JS fallback, works on fully custom components
-4. If all fail: ask_user() — the component may need keyboard nav or a workaround
-
-### When to call look manually
-- Before interacting with any rich widget (date-picker, multi-select, drag-and-drop).
-- When you cannot determine the page state from tool results alone.
+- NEVER call inspect_page to find open dropdown options. Refs are stale after overlay opens.
+- NEVER retry the same failing strategy more than twice. Escalate.
+- aria_snapshot() is the single best exploration tool for unknown components.
+- mouse_click(x, y) works on ANYTHING visible — no selector needed.
 
 ## Browser lifecycle
+
 - You usually start ALREADY logged in (a saved session is loaded). Do not log in or type
   credentials unless you actually land on a login form.
 - The browser can die mid-session (the window gets closed, a crash, a navigation kills the

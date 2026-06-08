@@ -847,13 +847,32 @@ class BrowserSession:
             return []
 
     def get_options(self, filter_text: str = "") -> dict:
-        """Read option texts from any open dropdown. Waits up to 3s for options to load."""
+        """Read option texts from any open dropdown.
+        Primary strategy: aria_snapshot (browser accessibility engine — finds custom
+        components the DOM scraper misses). Falls back to JS DOM scan."""
         self._wait_for_options(3000)
+        # Primary: aria_snapshot — the browser resolves roles even for custom divs
+        try:
+            snap = self.page.locator("body").aria_snapshot()
+            opts = []
+            for line in snap.splitlines():
+                s = line.strip()
+                # aria_snapshot uses YAML-like format: '- option "Name"'
+                if s.startswith('- option "') and s.endswith('"'):
+                    opts.append(s[len('- option "'):-1])
+            if opts:
+                if filter_text:
+                    low = filter_text.lower()
+                    opts = [o for o in opts if low in o.lower()]
+                return {"ok": True, "count": len(opts), "options": opts, "source": "aria"}
+        except Exception:
+            pass
+        # Fallback: JS DOM scan (Tier 3 sweep of positioned containers)
         opts = self._get_visible_options()
         if filter_text:
             low = filter_text.lower()
             opts = [o for o in opts if low in o.lower()]
-        return {"ok": True, "count": len(opts), "options": opts}
+        return {"ok": True, "count": len(opts), "options": opts, "source": "dom"}
 
     def click_option_by_text(self, text: str, exact: bool = False) -> dict:
         """Click a visible dropdown option by its text content.
@@ -954,6 +973,56 @@ class BrowserSession:
 
     def screenshot(self) -> bytes:
         return self.page.screenshot(type="png")
+
+    def aria_snapshot_page(self, selector: str = "body") -> dict:
+        """Return the ARIA accessibility tree for the page or a subtree.
+        Uses Playwright's built-in accessibility engine — more complete than any
+        DOM scraper, finds custom components and portals."""
+        try:
+            loc = self.page.locator(selector)
+            if loc.count() == 0:
+                return {"ok": False, "error": f"selector '{selector}' matched 0 elements"}
+            tree = loc.first.aria_snapshot()
+            return {"ok": True, "selector": selector, "tree": tree}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
+
+    def mouse_click_coords(self, x: float, y: float) -> dict:
+        """Click at pixel coordinates. Works on any element regardless of ARIA roles."""
+        try:
+            self.page.mouse.click(x, y)
+            self._settle()
+            result = {"ok": True, "x": x, "y": y, "url": self._url()}
+            if self.overlay_opened():
+                result["overlay_opened"] = True
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
+
+    def press_key(self, key: str, times: int = 1) -> dict:
+        """Press a keyboard key N times."""
+        try:
+            for _ in range(max(1, times)):
+                self.page.keyboard.press(key)
+            self._settle()
+            result = {"ok": True, "key": key, "times": times, "url": self._url()}
+            if self.overlay_opened():
+                result["overlay_opened"] = True
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
+
+    def wait_for_text_on_page(self, text: str, timeout_ms: int = 5000) -> dict:
+        """Wait for specific text to appear on the page."""
+        try:
+            self.page.wait_for_selector(f"text={text}", state="visible", timeout=timeout_ms)
+            return {"ok": True, "found": text}
+        except Exception:
+            return {"ok": False, "error": f"'{text}' did not appear within {timeout_ms}ms"}
+
+    def viewport_size(self) -> dict:
+        vs = self.page.viewport_size or {"width": 1280, "height": 720}
+        return dict(vs)
 
     def _on_login_page(self):
         """A visible password field is the most reliable 'not logged in' signal."""
@@ -1608,6 +1677,85 @@ def build_agent(model, max_tokens=None):
         bypassing Playwright's interactability checks entirely.
         Do NOT use for navigation links or buttons that have inspect_page refs — use click() for those."""
         return await _bro(ctx.deps.session.click_by_text_direct, text)
+
+    @agent.tool
+    async def aria_snapshot(ctx: RunContext[Deps], selector: str = "body") -> dict:
+        """Get the ARIA accessibility tree for the page or a specific element subtree.
+        The browser's accessibility engine assigns roles and names to ALL elements —
+        including custom components with no explicit ARIA attributes. This is the most
+        complete view of interactive content available, and it often reveals dropdown
+        options, dialog contents, and widget states that inspect_page misses.
+        Use this: (1) for broad exploration of an unknown page, (2) when inspect_page
+        misses elements you expect to be there, (3) to confirm what options are in an
+        open dropdown before calling click_option.
+        selector: CSS selector for the subtree root (default 'body' = entire page)."""
+        return await _bro(ctx.deps.session.aria_snapshot_page, selector)
+
+    @agent.tool
+    async def mouse_click(ctx: RunContext[Deps], x: float, y: float) -> dict:
+        """Click at pixel coordinates (x, y) on the page. Use this when:
+        - look() or find_on_screen() told you where something is visually
+        - click_option / click_by_text failed on a fully custom component
+        This bypasses ALL selector/role/ref lookups — it clicks exactly where a
+        human would click, making it reliable for ANY visible element.
+        Get coordinates from find_on_screen() or estimate from a look() description."""
+        return await _bro(ctx.deps.session.mouse_click_coords, x, y)
+
+    @agent.tool
+    async def find_on_screen(ctx: RunContext[Deps], description: str) -> dict:
+        """Take a screenshot and ask the vision model to find the pixel coordinates
+        of an element you describe. Returns {x, y} to pass to mouse_click().
+        This is the vision-grounded coordinate pipeline: look() to understand the
+        page → find_on_screen() to get coordinates → mouse_click(x, y) to act.
+        description: describe what you want to click, e.g. 'SUPERTECH LIMITED option
+        in the customer search dropdown'."""
+        try:
+            shot = await _bro(ctx.deps.session.screenshot)
+            dims = await _bro(ctx.deps.session.viewport_size)
+        except Exception as e:
+            return {"ok": False, "error": f"screenshot failed: {e}"}
+        question = (
+            f"Screenshot is {dims.get('width', 1280)}x{dims.get('height', 720)} pixels. "
+            f"Find: \"{description}\". "
+            f"Reply ONLY with valid JSON: {{\"x\": <number>, \"y\": <number>, "
+            f"\"confidence\": \"high|medium|low\"}}. "
+            f"x=0 is left edge, y=0 is top edge. "
+            f"If not found: {{\"x\": null, \"y\": null, \"confidence\": \"none\"}}."
+        )
+        raw = await _call_vision_oracle(ctx.deps.config, shot, question)
+        try:
+            import re as _re
+            m = _re.search(r'\{[^}]+\}', raw)
+            if m:
+                coords = json.loads(m.group())
+                if coords.get("x") is not None:
+                    return {"ok": True, "x": float(coords["x"]), "y": float(coords["y"]),
+                            "confidence": coords.get("confidence", "unknown"),
+                            "hint": f"Call mouse_click({coords['x']}, {coords['y']})"}
+        except Exception:
+            pass
+        return {"ok": False, "raw_response": raw[:300],
+                "hint": "Vision could not extract coordinates. Try mouse_click with an estimated position."}
+
+    @agent.tool
+    async def press_key(ctx: RunContext[Deps], key: str, times: int = 1) -> dict:
+        """Press a keyboard key (optionally multiple times). Essential for:
+        - Autocomplete navigation: ArrowDown (open/move down list), Enter (select), Escape (close)
+        - Form navigation: Tab (next field), Shift+Tab (prev field)
+        - Text editing: Control+a (select all), Backspace, Delete
+        Standard autocomplete protocol: fill() the search text, then press ArrowDown
+        to open the suggestion list, ArrowDown again to move to an option, Enter to select.
+        key examples: 'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab', 'Control+a'"""
+        return await _bro(ctx.deps.session.press_key, key, times)
+
+    @agent.tool
+    async def wait_for_text(ctx: RunContext[Deps], text: str,
+                             timeout_ms: int = 5000) -> dict:
+        """Wait for specific text to appear visibly on the page (up to timeout_ms ms).
+        Use AFTER fill() on a search/autocomplete field to wait for API results to load
+        before trying to click an option. Much more reliable than a fixed sleep.
+        Returns ok:True when the text appears, ok:False on timeout."""
+        return await _bro(ctx.deps.session.wait_for_text_on_page, text, timeout_ms)
 
     @agent.tool
     async def fill(ctx: RunContext[Deps], ref: str, value: str) -> dict:
