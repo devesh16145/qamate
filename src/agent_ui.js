@@ -760,7 +760,11 @@
         {!connected ? (
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--accent-bg)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider" style={{ fontSize: 11, padding: '3px 6px' }}>
-              <option value="mimo">Xiaomi MiMo</option><option value="openai">OpenAI</option><option value="ollama">Local (Ollama)</option>
+              <option value="mimo">Xiaomi MiMo</option>
+              <option value="mimo-ultraspeed">MiMo Ultraspeed</option>
+              <option value="anthropic">Claude (Anthropic)</option>
+              <option value="openai">OpenAI</option>
+              <option value="ollama">Local (Ollama)</option>
             </select>
             <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none' }}>
               <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
