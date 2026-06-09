@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('ats', {
   listProjects: () => ipcRenderer.invoke('list-projects'),
   createProject: (opts) => ipcRenderer.invoke('create-project', opts),
   setActiveProject: (opts) => ipcRenderer.invoke('set-active-project', opts),
+  createFlow: (opts) => ipcRenderer.invoke('create-flow', opts),               // {flowId}
+  createTestCase: (opts) => ipcRenderer.invoke('create-test-case', opts),      // {flowId, tcId, description, preconditions, expectedResult, steps[]}
+  listCloneSources: () => ipcRenderer.invoke('list-clone-sources'),
+  cloneTests: (opts) => ipcRenderer.invoke('clone-tests', opts),               // {sourceProjectId|null, flowIds[]}
   deleteProject: (opts) => ipcRenderer.invoke('delete-project', opts),
   captureLogin: (opts) => ipcRenderer.invoke('capture-login', opts),
   // ── Conversational AI agent (agent_chat.py): concurrent persisted sessions ──

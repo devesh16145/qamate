@@ -440,6 +440,12 @@ def main(argv):
             _emit({"status": "error", "message": "usage: update <id> <json-patch>"})
             return 1
         _emit({"status": "success", "project": update_project(ats_root, argv[2], json.loads(argv[3]))})
+    elif cmd == "ensure-suite":
+        # Make sure a project has its own test suite (scaffold if missing).
+        if len(argv) < 3:
+            _emit({"status": "error", "message": "usage: ensure-suite <project-id>"})
+            return 1
+        _emit({"status": "success", "tests_root": ensure_tests_scaffold(ats_root, argv[2])})
     elif cmd == "set-active":
         # '' or '-' selects the built-in legacy suite (active = null).
         pid = argv[2] if len(argv) > 2 and argv[2] not in ("", "-") else None

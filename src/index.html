@@ -1764,7 +1764,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         {menuOpen && (
           <div className="dd-menu" style={{ minWidth: 200 }}>
             <button onClick={() => { setMenuOpen(false); onOpenCmd(); }}>Search everywhere… <span className="sub">⌘K</span></button>
-            <button onClick={() => { setMenuOpen(false); toast('New test case'); }}>New test case…</button>
+            <button onClick={() => { setMenuOpen(false); if (window.openNewTestCaseModal) window.openNewTestCaseModal(); else toast('Open the Test Explorer first'); }}>New test case…</button>
             <button onClick={() => { setMenuOpen(false); toast('Import from CSV'); }}>Import tests…</button>
             <div className="div"></div>
             <button onClick={() => { setMenuOpen(false); onOpenSettings(); }}>Preferences…</button>
@@ -2155,6 +2155,171 @@ function LeftToolWindow(props) {
   return <TestExplorer {...props} />;
 }
 
+/* ── Suite management modals: new test case, new folder (flow), clone from
+   another project. All mutate the ACTIVE suite and reload on success. ─────── */
+function _SuiteModalShell({ title, onClose, children }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ width: 460, maxHeight: '86vh', overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 14px 40px rgba(0,0,0,0.35)', padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <b style={{ fontSize: 13.5 }}>{title}</b>
+          <span style={{ flex: 1 }}></span>
+          <button className="editor-action" onClick={onClose}><I.X size={13} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+const _suiteInput = { width: '100%', fontSize: 12.5, padding: '6px 9px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' };
+
+function NewTestCaseModal({ modules, onClose, toast }) {
+  const flows = (modules || []).map(m => m.id);
+  const [flowId, setFlowId] = useState(flows[0] || '');
+  const [newFlow, setNewFlow] = useState('');
+  const [tcId, setTcId] = useState('');
+  const [desc, setDesc] = useState('');
+  const [pre, setPre] = useState('');
+  const [expected, setExpected] = useState('');
+  const [stepsText, setStepsText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const create = async () => {
+    let flow = flowId;
+    setBusy(true);
+    if (flowId === '__new__') {
+      const r0 = await window.ats.createFlow({ flowId: newFlow });
+      if (!r0 || r0.status !== 'success') { setBusy(false); toast((r0 && r0.message) || 'Could not create folder'); return; }
+      flow = r0.flowId;
+    }
+    const r = await window.ats.createTestCase({
+      flowId: flow, tcId, description: desc, preconditions: pre, expectedResult: expected,
+      steps: stepsText.split('\n').map(s => s.trim()).filter(Boolean),
+    });
+    setBusy(false);
+    if (!r || r.status !== 'success') { toast((r && r.message) || 'Could not create test case'); return; }
+    toast(`${r.tcId} added to "${flow}" — author its steps via Record or the Agent`);
+    setTimeout(() => window.location.reload(), 600);
+  };
+  return (
+    <_SuiteModalShell title="New test case" onClose={onClose}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 10 }}>
+        Creates the test case SPEC (id, description, steps). Make it runnable afterwards by
+        recording the flow or asking the Agent to drive and verify it.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Folder (flow)
+          <select style={_suiteInput} value={flowId} onChange={e => setFlowId(e.target.value)}>
+            {flows.map(f => <option key={f} value={f}>{f}</option>)}
+            <option value="__new__">+ New folder…</option>
+          </select></label>
+        {flowId === '__new__' && (
+          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>New folder name
+            <input style={_suiteInput} value={newFlow} onChange={e => setNewFlow(e.target.value)} placeholder="checkout" /></label>
+        )}
+        <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Test case ID
+          <input style={_suiteInput} value={tcId} onChange={e => setTcId(e.target.value)} placeholder="TC-CHECKOUT-001" autoFocus /></label>
+        <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Description
+          <input style={_suiteInput} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Verify checkout completes with COD payment" /></label>
+        <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Preconditions
+          <input style={_suiteInput} value={pre} onChange={e => setPre(e.target.value)} placeholder="User is logged in; cart has 1 item" /></label>
+        <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Steps / checkpoints (one per line)
+          <textarea style={{ ..._suiteInput, minHeight: 84, resize: 'vertical', fontFamily: 'inherit' }} value={stepsText} onChange={e => setStepsText(e.target.value)} placeholder={'Navigate to checkout\nSelect COD\nVerify order confirmation'} /></label>
+        <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Expected result
+          <input style={_suiteInput} value={expected} onChange={e => setExpected(e.target.value)} placeholder="Order is placed and confirmation number shown" /></label>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+        <button className="editor-action" onClick={onClose}>Cancel</button>
+        <button className="editor-action primary" onClick={create} disabled={busy || !tcId.trim()}>{busy ? 'Creating…' : 'Create test case'}</button>
+      </div>
+    </_SuiteModalShell>
+  );
+}
+
+function NewFolderModal({ onClose, toast }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const create = async () => {
+    setBusy(true);
+    const r = await window.ats.createFlow({ flowId: name });
+    setBusy(false);
+    if (!r || r.status !== 'success') { toast((r && r.message) || 'Could not create folder'); return; }
+    toast(`Folder "${r.flowId}" created`);
+    setTimeout(() => window.location.reload(), 600);
+  };
+  return (
+    <_SuiteModalShell title="New folder" onClose={onClose}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 10 }}>
+        A folder is a test flow — a group of related test cases (e.g. <b>checkout</b>, <b>orders</b>).
+      </div>
+      <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Folder name
+        <input style={_suiteInput} value={name} onChange={e => setName(e.target.value)} placeholder="checkout" autoFocus
+          onKeyDown={e => { if (e.key === 'Enter' && name.trim()) create(); }} /></label>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+        <button className="editor-action" onClick={onClose}>Cancel</button>
+        <button className="editor-action primary" onClick={create} disabled={busy || !name.trim()}>{busy ? 'Creating…' : 'Create folder'}</button>
+      </div>
+    </_SuiteModalShell>
+  );
+}
+
+function CloneTestsModal({ onClose, toast }) {
+  const [sources, setSources] = useState(null);   // null = loading
+  const [srcIdx, setSrcIdx] = useState(0);
+  const [sel, setSel] = useState({});             // flowId -> bool
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    window.ats.listCloneSources().then(r => setSources((r && r.sources) || [])).catch(() => setSources([]));
+  }, []);
+  const src = sources && sources[srcIdx];
+  const chosen = src ? src.flows.filter(f => sel[f.id]).map(f => f.id) : [];
+  const clone = async () => {
+    setBusy(true);
+    const r = await window.ats.cloneTests({ sourceProjectId: src.id, flowIds: chosen });
+    setBusy(false);
+    if (!r || r.status !== 'success') { toast((r && r.message) || 'Clone failed'); return; }
+    const msg = `Cloned ${r.copied.length} folder(s)` + (r.skipped.length ? ` · skipped: ${r.skipped.join(', ')}` : '');
+    toast(msg);
+    if (r.copied.length) setTimeout(() => window.location.reload(), 800);
+  };
+  return (
+    <_SuiteModalShell title="Clone test cases from another project" onClose={onClose}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 10 }}>
+        Copies whole folders (flow + test cases + test data + generated code) into the current
+        suite. Existing folders with the same name are never overwritten.
+      </div>
+      {sources === null && <div style={{ fontSize: 12, color: 'var(--text-3)', padding: 8 }}>Loading sources…</div>}
+      {sources !== null && !sources.length && <div style={{ fontSize: 12, color: 'var(--text-3)', padding: 8 }}>No other suites with test cases were found.</div>}
+      {src && (
+        <React.Fragment>
+          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Copy from
+            <select style={_suiteInput} value={srcIdx} onChange={e => { setSrcIdx(Number(e.target.value)); setSel({}); }}>
+              {sources.map((s, i) => <option key={String(s.id)} value={i}>{s.name}</option>)}
+            </select></label>
+          <div style={{ margin: '10px 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>Folders</span>
+            <span style={{ flex: 1 }}></span>
+            <button className="editor-action" onClick={() => setSel(Object.fromEntries(src.flows.map(f => [f.id, true])))}>All</button>
+            <button className="editor-action" onClick={() => setSel({})}>None</button>
+          </div>
+          <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: '4px 8px' }}>
+            {src.flows.map(f => (
+              <label key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px', fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!sel[f.id]} onChange={e => setSel(prev => ({ ...prev, [f.id]: e.target.checked }))} />
+                <span style={{ flex: 1, fontFamily: 'var(--mono)' }}>{f.id}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>{f.tcCount} TC{f.tcCount !== 1 ? 's' : ''}</span>
+              </label>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+        <button className="editor-action" onClick={onClose}>Cancel</button>
+        <button className="editor-action primary" onClick={clone} disabled={busy || !chosen.length}>{busy ? 'Cloning…' : `Clone ${chosen.length || ''} folder${chosen.length === 1 ? '' : 's'}`}</button>
+      </div>
+    </_SuiteModalShell>
+  );
+}
+
 function TestExplorer(props) {
   const {
     modules, allCount, failingCount, newCount, pinnedCount,
@@ -2171,11 +2336,22 @@ function TestExplorer(props) {
   } = props;
   const showing = modules.reduce((s, m) => s + m.tests.length, 0);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [suiteModal, setSuiteModal] = useState(null);   // 'tc' | 'folder' | 'clone' | null
   const filterRef = useRef(null);
+  const addRef = useRef(null);
   useEffect(() => {
-    const h = (e) => { if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false); };
+    const h = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false);
+      if (addRef.current && !addRef.current.contains(e.target)) setAddOpen(false);
+    };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
+  }, []);
+  useEffect(() => {
+    // The titlebar menu's "New test case…" routes here (same pattern as toggleLogDrawer).
+    window.openNewTestCaseModal = () => setSuiteModal('tc');
+    return () => { if (window.openNewTestCaseModal) delete window.openNewTestCaseModal; };
   }, []);
 
   const filterOpts = [
@@ -2279,8 +2455,21 @@ function TestExplorer(props) {
             )}
           </div>
         </div>
-        <button className="ic" title="New test case" onClick={() => toast && toast('New test case')}><I.Plus size={15} /></button>
+        <div ref={addRef} style={{ position: 'relative' }}>
+          <button className="ic" title="Add: test case, folder, or clone from another project" onClick={() => setAddOpen(o => !o)}><I.Plus size={15} /></button>
+          {addOpen && (
+            <div className="dd-menu" style={{ minWidth: 230, top: 'calc(100% + 4px)', right: 0, left: 'auto' }}>
+              <button onClick={() => { setAddOpen(false); setSuiteModal('tc'); }}>New test case…</button>
+              <button onClick={() => { setAddOpen(false); setSuiteModal('folder'); }}>New folder…</button>
+              <div className="div"></div>
+              <button onClick={() => { setAddOpen(false); setSuiteModal('clone'); }}>Clone from another project…</button>
+            </div>
+          )}
+        </div>
       </div>
+      {suiteModal === 'tc' && <NewTestCaseModal modules={modules} toast={toast} onClose={() => setSuiteModal(null)} />}
+      {suiteModal === 'folder' && <NewFolderModal toast={toast} onClose={() => setSuiteModal(null)} />}
+      {suiteModal === 'clone' && <CloneTestsModal toast={toast} onClose={() => setSuiteModal(null)} />}
 
       {checkedCount > 0 && (
         <div className="sel-bar">

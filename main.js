@@ -1325,6 +1325,114 @@ ipcMain.handle('save-tc-meta', async (event, { flowId, tcId, heading, descriptio
     return { success: false, error: e.message };
   }
 });
+// IPC: Create a new flow folder in the active suite (a flow = a tree folder).
+ipcMain.handle('create-flow', async (event, { flowId } = {}) => {
+  try {
+    const slug = String(flowId || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!slug) return { status: 'error', message: 'Folder name is required' };
+    const dir = path.join(_flowsDir(), slug);
+    if (fs.existsSync(dir)) return { status: 'error', message: `Folder "${slug}" already exists` };
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '__init__.py'), '');
+    fs.writeFileSync(path.join(dir, 'test_cases.json'), '[]\n');
+    fs.writeFileSync(path.join(dir, 'test_data.json'), '{}\n');
+    return { status: 'success', flowId: slug };
+  } catch (err) { return { status: 'error', message: err.message }; }
+});
+
+// IPC: Add a test case to a flow's test_cases.json. It starts as a SPEC entry
+// (id/description/steps) — runnable code is authored via Record or the Agent.
+ipcMain.handle('create-test-case', async (event, { flowId, tcId, description, preconditions, expectedResult, steps } = {}) => {
+  try {
+    const dir = path.join(_flowsDir(), flowId || '');
+    if (!flowId || !fs.existsSync(dir)) return { status: 'error', message: `Folder "${flowId}" not found` };
+    const id = String(tcId || '').trim().toUpperCase().replace(/\s+/g, '-');
+    if (!/^TC(-[A-Z0-9]+)+$/.test(id)) return { status: 'error', message: 'TC ID must look like TC-AREA-001' };
+    const tcFile = path.join(dir, 'test_cases.json');
+    let list = [];
+    if (fs.existsSync(tcFile)) { try { list = JSON.parse(fs.readFileSync(tcFile, 'utf8')) || []; } catch (e) { list = []; } }
+    if (list.some(t => t && t.tc_id === id)) return { status: 'error', message: `${id} already exists in "${flowId}"` };
+    list.push({
+      tc_id: id,
+      module: flowId,
+      description: String(description || '').trim() || id,
+      preconditions: String(preconditions || '').trim(),
+      steps: (Array.isArray(steps) ? steps : []).map(s => String(s).trim()).filter(Boolean),
+      expected_result: String(expectedResult || '').trim(),
+    });
+    fs.writeFileSync(tcFile, JSON.stringify(list, null, 4), 'utf8');
+    return { status: 'success', tcId: id, flowId };
+  } catch (err) { return { status: 'error', message: err.message }; }
+});
+
+// IPC: Clone test flows from another suite (built-in or another project) into
+// the ACTIVE suite. Never overwrites an existing flow folder.
+function _suiteFlowsDirFor(projectId) {
+  return projectId ? path.join(__dirname, 'projects', projectId, 'tests', 'flows')
+                   : path.join(__dirname, 'tests', 'flows');
+}
+function _listSuiteFlows(flowsDir) {
+  const out = [];
+  try {
+    for (const name of fs.readdirSync(flowsDir)) {
+      if (name.startsWith('_') || name.startsWith('.')) continue;
+      const dir = path.join(flowsDir, name);
+      try { if (!fs.lstatSync(dir).isDirectory()) continue; } catch (e) { continue; }
+      let tcCount = 0;
+      try { tcCount = (JSON.parse(fs.readFileSync(path.join(dir, 'test_cases.json'), 'utf8')) || []).length; } catch (e) { /* no tc file */ }
+      out.push({ id: name, tcCount });
+    }
+  } catch (e) { /* missing dir */ }
+  return out;
+}
+ipcMain.handle('list-clone-sources', async () => {
+  try {
+    const active = _activeProjectId();
+    const sources = [];
+    if (active !== null) {   // built-in suite is a source unless it IS the target
+      sources.push({ id: null, name: 'ATS (built-in suite)', flows: _listSuiteFlows(_suiteFlowsDirFor(null)) });
+    }
+    const projDir = path.join(__dirname, 'projects');
+    if (fs.existsSync(projDir)) {
+      for (const pid of fs.readdirSync(projDir)) {
+        if (pid === active) continue;
+        const pf = path.join(projDir, pid, 'project.json');
+        const flowsDir = _suiteFlowsDirFor(pid);
+        if (!fs.existsSync(pf) || !fs.existsSync(flowsDir)) continue;
+        let name = pid;
+        try { name = JSON.parse(fs.readFileSync(pf, 'utf8')).name || pid; } catch (e) { /* keep id */ }
+        const flows = _listSuiteFlows(flowsDir);
+        if (flows.length) sources.push({ id: pid, name, flows });
+      }
+    }
+    return { status: 'success', target: active, sources: sources.filter(s => s.flows.length) };
+  } catch (err) { return { status: 'error', message: err.message }; }
+});
+ipcMain.handle('clone-tests', async (e, { sourceProjectId, flowIds } = {}) => {
+  try {
+    const active = _activeProjectId();
+    if ((sourceProjectId || null) === (active || null)) return { status: 'error', message: 'Source and target are the same suite' };
+    if (active) {   // make sure the target project has a suite (conftest shim etc.)
+      await runEngine(e, [PROJECT_STORE, 'ensure-suite', active], null);
+    }
+    const srcRoot = _suiteFlowsDirFor(sourceProjectId || null);
+    const dstRoot = _flowsDir();
+    const copied = [], skipped = [];
+    for (const flowId of (flowIds || [])) {
+      const src = path.join(srcRoot, flowId);
+      const dst = path.join(dstRoot, flowId);
+      if (!fs.existsSync(src)) { skipped.push(`${flowId} (not found)`); continue; }
+      if (fs.existsSync(dst)) { skipped.push(`${flowId} (already exists here)`); continue; }
+      fs.cpSync(src, dst, {
+        recursive: true,
+        filter: (p) => !/__pycache__|\.pytest_cache/.test(p),
+      });
+      copied.push(flowId);
+    }
+    return { status: 'success', copied, skipped };
+  } catch (err) { return { status: 'error', message: err.message }; }
+});
+
 // IPC: Delete test case — removes from test_cases.json, test_data.json, and Python file
 ipcMain.handle('delete-test', async (event, { flowId, tcId }) => {
   try {
