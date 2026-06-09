@@ -30,12 +30,12 @@ PHASE 1 — MAP + EXECUTE: Admin Panel Cart Creation
 Auth is pre-loaded. Navigate to https://admin-dev.agrim.app/
 If login page appears: fill amit.dalal@agrim.app / Amit@12345, sign in, wait 5s.
 
-1a. Navigate to OMS > Carts. inspect_page — record:
+1a. Navigate to OMS > Carts. observe — record:
     - Cart list URL
     - "Create Cart" button ref
     - Status filter tab refs
 
-1b. Click "Create Cart". inspect_page — record ALL form field refs:
+1b. Click "Create Cart". observe — record ALL form field refs:
     - Customer autocomplete ref
     - Shipping address dropdown ref
     - SKU search ref
@@ -57,7 +57,7 @@ If login page appears: fill amit.dalal@agrim.app / Amit@12345, sign in, wait 5s.
     - Click "Save as Draft" (do NOT send to customer yet)
     - Record the Cart ID from the URL or success message
 
-1d. Open the created/saved cart. inspect_page — record:
+1d. Open the created/saved cart. observe — record:
     - Cart status badge ref
     - "Send to Customer" button ref
     - Payment status ref
@@ -65,22 +65,22 @@ If login page appears: fill amit.dalal@agrim.app / Amit@12345, sign in, wait 5s.
 
 PHASE 2 — MAP: Payment/Finance Flow
 =====================================================================
-2a. On the cart detail, inspect_page and record:
+2a. On the cart detail, observe and record:
     - UTR submission form refs (if visible)
     - Finance approval refs
     - Any "Approve Payment" / "Confirm UTR" button refs
 
-2b. Navigate to the Finance / Payments section in the sidebar. inspect_page.
+2b. Navigate to the Finance / Payments section in the sidebar. observe.
     Record: URL route, list columns, filter tabs, payment action button refs.
 
 PHASE 3 — MAP: Parent Orders & Manual Fulfilment
 =====================================================================
 3a. Navigate to #/oms/parent/all or OMS > Orders/Parent Orders.
-    inspect_page — record: URL, search ref, filter tab refs.
+    observe — record: URL, search ref, filter tab refs.
     Note: MUI DataGrid rows are invisible — don't click on rows.
 
 3b. Navigate to #/oms/parent/manual-fulfilment (or sidebar Manual Fulfilment).
-    inspect_page — record ALL form refs:
+    observe — record ALL form refs:
     - Order/SKU search ref
     - Seller autocomplete ref (where you'd select M&M_Brand1)
     - Source type dropdown ref
@@ -91,18 +91,18 @@ PHASE 3 — MAP: Parent Orders & Manual Fulfilment
 
 PHASE 4 — MAP: Purchase Orders (Admin side)
 =====================================================================
-4a. Navigate to #/oms/po. inspect_page — status tab refs, search ref.
+4a. Navigate to #/oms/po. observe — status tab refs, search ref.
 4b. Try to open any PO detail (use last page of pagination or search).
-    inspect_page on PO detail — record all visible action button refs.
-4c. #/oms/po/ready-proofs — inspect_page — approve/reject refs, file upload ref
-4d. #/oms/po/tax-invoice — inspect_page — approve/reject refs
-4e. #/oms/po/pickup-proofs — inspect_page — approve/reject refs
+    observe on PO detail — record all visible action button refs.
+4c. #/oms/po/ready-proofs — observe — approve/reject refs, file upload ref
+4d. #/oms/po/tax-invoice — observe — approve/reject refs
+4e. #/oms/po/pickup-proofs — observe — approve/reject refs
 
 PHASE 5 — MAP: Bills / Payments (post-dispatch)
 =====================================================================
 5a. Look in sidebar for Bills, Payments, or Vendor Payments.
     Try #/oms/bills, #/payments, #/vendor-payments.
-    inspect_page — URL route, filter tabs, action button refs.
+    observe — URL route, filter tabs, action button refs.
 
 PHASE 6 — MAP: Seller App order detail at each status stage
 =====================================================================

@@ -10,7 +10,7 @@ This replaces the fire-and-forget loop in `agent_recorder.py` (one LLM call =
 one action, no memory, no chat) with a persistent Pydantic AI `Agent` whose
 tools wrap the engine functions we already have:
 
-    navigate / inspect_page / click / fill / select_option   -> drive the app
+    navigate / observe / click / fill / select_option        -> drive the app
         (dom_inspector comprehensive snapshot + smart_locator, both reused)
     add_checkpoint / get_recorded_flow / create_test_case     -> author a test
         (recorder_parser.generate_from_review, reused as-is)
@@ -66,6 +66,7 @@ import project_store
 import agent_sessions
 import input_registry as _ireg
 from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link, _slug
+from normalizer import disambiguate, infer_hints, match_option
 from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
 import llm as _llm
 from smart_locator import smart_locator, SelfHealError, to_locator
@@ -874,6 +875,14 @@ class BrowserSession:
             const pos = style.position;
             if (pos !== 'absolute' && pos !== 'fixed') continue;
             if (el.offsetWidth < 50 || el.offsetHeight < 20) continue;
+            // Must actually be rendered on top (some apps keep permanent
+            // 'Please wait...' spinner divs positioned but covered/inert —
+            // they are NOT open dropdowns).
+            const cr = el.getBoundingClientRect();
+            const topEl = document.elementFromPoint(
+                Math.min(cr.x + cr.width / 2, window.innerWidth - 2),
+                Math.min(cr.y + Math.min(cr.height / 2, 20), window.innerHeight - 2));
+            if (!topEl || (!el.contains(topEl) && !topEl.contains(el))) continue;
             // Must be roughly below/near the active input
             if (inputRect) {
                 const r = el.getBoundingClientRect();
@@ -943,9 +952,25 @@ class BrowserSession:
             opts = [o for o in opts if low in o.lower()]
         return {"ok": True, "count": len(opts), "options": opts, "source": "dom"}
 
-    def click_option_by_text(self, text: str, exact: bool = False) -> dict:
+    def _record_option_click(self, text: str, strategy: str):
+        """Append the test step for a dropdown-option click so the generated test
+        replays the selection. rawLines are emitted verbatim by generate_from_review."""
+        if strategy == "role-option":
+            raw = f'page.get_by_role("option").filter(has_text="{_q(text)}").first.click()'
+        elif strategy == "listbox-child":
+            raw = f"page.locator(\"[role='listbox'] *:has-text('{text}'), [role='menu'] *:has-text('{text}')\").first.click()"
+        else:  # get_by_text / js-click / vision — replay by visible text
+            raw = f'page.get_by_text("{_q(text)}").first.click()'
+        self.step_id += 1
+        self.steps.append({"id": self.step_id, "rawLine": raw,
+                           "type": "click", "target": raw.rsplit(".click", 1)[0],
+                           "targetDescription": f'Select option "{text}"',
+                           "value": "", "varName": ""})
+
+    def click_option_by_text(self, text: str, exact: bool = False, record: bool = False) -> dict:
         """Click a visible dropdown option by its text content.
-        Searches the entire document including portal elements."""
+        Searches the entire document including portal elements.
+        record=True also appends a test step (used by the select_from_dropdown ladder)."""
         try:
             # Tier 1: role=option (MUI, Radix, standard)
             # Use filter(has_text=) first to handle decorated option text like
@@ -956,6 +981,8 @@ class BrowserSession:
             if loc.count() > 0:
                 loc.first.click()
                 self._settle()
+                if record:
+                    self._record_option_click(text, "role-option")
                 return {"ok": True, "clicked": text, "url": self._url()}
             # Tier 2: any element inside a role=listbox/menu container
             loc2 = self.page.locator(
@@ -964,6 +991,8 @@ class BrowserSession:
             if loc2.count() > 0:
                 loc2.first.click()
                 self._settle()
+                if record:
+                    self._record_option_click(text, "listbox-child")
                 return {"ok": True, "clicked": text, "url": self._url(), "strategy": "listbox-child"}
             # Tier 3: get_by_text — finds any element by visible text, including
             # custom non-ARIA dropdown items (plain divs, custom components).
@@ -978,16 +1007,19 @@ class BrowserSession:
                         if bb and 10 < bb["height"] < 80:
                             item.click()
                             self._settle()
+                            if record:
+                                self._record_option_click(text, "get_by_text")
                             return {"ok": True, "clicked": text, "url": self._url(), "strategy": "get_by_text"}
                     except Exception:
                         continue
                 # If all were too large (containers), click the first one anyway
                 loc3.first.click()
                 self._settle()
+                if record:
+                    self._record_option_click(text, "get_by_text")
                 return {"ok": True, "clicked": text, "url": self._url(), "strategy": "get_by_text-first"}
             return {"ok": False,
-                    "error": f"No element matching '{text}' found. "
-                             f"Call list_options() or click_by_text() with exact text from the screen."}
+                    "error": f"No element matching '{text}' found in any open dropdown."}
         except Exception as e:
             return {"ok": False, "error": f"click_option failed: {str(e)[:200]}"}
 
@@ -1147,16 +1179,18 @@ class BrowserSession:
             "hidden", "not actionable", "covered by another element",
         ))
 
-    def _smart_click(self, locator, loc_str: str, input_type: str = "") -> str:
+    def _smart_click(self, locator, loc_str: str, input_type: str = "", prefer_force: bool = False) -> str:
         """Click with automatic fallback for Tailwind hidden radio/checkbox inputs.
         Returns the rawLine string actually used (click vs set_checked vs force).
+        prefer_force=True (from a 'force-click' hint) skips the doomed plain click.
         Raises on final failure so callers can surface the error."""
-        try:
-            locator.click()
-            return f"{loc_str}.click()"
-        except Exception as e:
-            if not self._is_hidden_input_error(str(e)):
-                raise
+        if not prefer_force:
+            try:
+                locator.click()
+                return f"{loc_str}.click()"
+            except Exception as e:
+                if not self._is_hidden_input_error(str(e)):
+                    raise
         # Element is hidden or pointer-intercepted — use the right Playwright API.
         # set_checked is Playwright's dedicated radio/checkbox method; it's more
         # reliable than force=True and handles label-interception correctly.
@@ -1341,9 +1375,16 @@ class BrowserSession:
             models.append(m)
 
         # --- Aria snapshot augmentation (adds fixed-footer buttons, hidden inputs, etc. native misses) ---
+        snap = None
         try:
             snap = self.page.locator("body").aria_snapshot()
-            native_names_lower = {m["name"].lower() for m in models if m.get("name")}
+            # Dedupe against name AND placeholder: a native element may carry an
+            # empty accessible name while aria names it from the placeholder.
+            native_names_lower = set()
+            for m in models:
+                for v in (m.get("name"), m.get("placeholder")):
+                    if v:
+                        native_names_lower.add(v.lower())
             for i, ae in enumerate(_parse_aria_snapshot(snap)):
                 if ae["name"].lower() not in native_names_lower:
                     am = _aria_el_to_model(ae["role"], ae["name"], i)
@@ -1361,6 +1402,11 @@ class BrowserSession:
         if not models:
             return {"ok": False, "error": native_err or "no interactive elements found on the page"}
 
+        # --- Normalizer detectors: fix name collisions (exact=True), compute hints ---
+        disambiguate(models)
+        for m in models:
+            m["hints"] = infer_hints(m)
+
         self.by_ref = {m["ref"]: m for m in models}
 
         compact, hidden_total = [], 0
@@ -1377,12 +1423,36 @@ class BrowserSession:
                 item["disabled"] = True
             if m.get("broken"):
                 item["broken"] = True
+            if m.get("ambiguous"):
+                item["ambiguous"] = True
             compact.append(item)
             if len(compact) >= limit:
                 break
-        return {"ok": True, "url": self._url(), "title": self._title(),
-                "element_count": len(models), "hidden_count": hidden_total,
-                "elements": compact, "issues": self.issues[-8:]}
+        result = {"ok": True, "url": self._url(), "title": self._title(),
+                  "element_count": len(models), "hidden_count": hidden_total,
+                  "elements": compact, "issues": self.issues[-8:]}
+
+        # --- Unified percept extras: open dropdown options + visible validation errors ---
+        try:
+            if self.overlay_opened():
+                opts = []
+                if snap:
+                    for line in snap.splitlines():
+                        s = line.strip()
+                        if s.startswith('- option "') and s.endswith('"'):
+                            opts.append(s[len('- option "'):-1])
+                opts = opts or self._get_visible_options()
+                if opts:
+                    result["open_dropdown_options"] = opts[:30]
+        except Exception:
+            pass
+        try:
+            errs = self._scan_dom_errors()
+            if errs:
+                result["validation_errors"] = errs[:8]
+        except Exception:
+            pass
+        return result
 
     def _record_strategy(self, el):
         """Pick the locator to RECORD so the generated test hits exactly the intended element on a
@@ -1408,6 +1478,25 @@ class BrowserSession:
                 f"one. If that is not the element you meant, pick a more uniquely identifiable element "
                 f"(distinct text/label, or one exposing a test id).")
         return prim, _locator_str(prim), warn
+
+    def _auth_signal(self, before_auth):
+        """Return the ⚠_AUTH_REQUIRED message when new 401/403s appeared since
+        before_auth, else None. Without this, a stale token mid-form is invisible:
+        the SPA swallows the 401 and shows an innocent empty state ('No customers
+        found') while every search silently fails."""
+        new_auth = self._auth_failures[before_auth:]
+        if not new_auth:
+            return None
+        return (
+            f"SESSION EXPIRED — {len(new_auth)} request(s) returned 401/403 during this "
+            f"action: {new_auth[0]}{'...' if len(new_auth) > 1 else ''}. "
+            "Any empty results / 'not found' messages you just saw are NOT real data — the "
+            "backend rejected the request. "
+            "Step 1: call clear_auth_storage(). Step 2: navigate to the login URL. "
+            "Step 3: call get_settings() for credentials and log in. "
+            "Step 4: if login still fails, call ask_user(). "
+            "DO NOT continue the task sequence until authentication is resolved."
+        )
 
     @staticmethod
     def _is_direct_selector(ref):
@@ -1438,7 +1527,7 @@ class BrowserSession:
             return self._act_direct(kind, ref, value)
 
         if not el:
-            return {"ok": False, "error": f"ref '{ref}' is not on the current page; call inspect_page first"}
+            return {"ok": False, "error": f"ref '{ref}' is not on the current page; call observe first"}
         if not self._alive():
             restarted = self._ensure_alive()
             return {"ok": False, "error": ("browser had closed; restarted -- re-inspect the page (refs are stale) and retry"
@@ -1452,12 +1541,23 @@ class BrowserSession:
 
         before = len(self.issues)
         before_api = len(self._api_errors)
+        before_auth = len(self._auth_failures)
         name = el.get("name") or ref
+        hints = el.get("hints") or []
         self.step_id += 1
         try:
             if kind == "fill":
                 val = str(value or "")
-                live.fill(val)
+                if "sequential-fill" in hints:
+                    # MUI number inputs reject fill() (React onChange never fires).
+                    # Type for real; the rawLine stays .fill() — codegen rewrites it
+                    # to press_sequentially + Tab via _is_mui_numeric_input_fill.
+                    live.click()
+                    live.press("Control+a")
+                    live.press_sequentially(val, delay=40)
+                    live.press("Tab")
+                else:
+                    live.fill(val)
                 self.input_counter += 1
                 self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.fill("{_q(val)}")',
                                    "type": "fill", "target": loc_str,
@@ -1471,7 +1571,8 @@ class BrowserSession:
                                    "targetDescription": f'Select "{val}" in {name}',
                                    "value": val, "varName": ""})
             else:  # click — auto-fallback for Tailwind hidden radio/checkbox inputs
-                used_raw = self._smart_click(live, loc_str, el.get("input_type", ""))
+                used_raw = self._smart_click(live, loc_str, el.get("input_type", ""),
+                                             prefer_force="force-click" in hints)
                 self.steps.append({"id": self.step_id, "rawLine": used_raw,
                                    "type": "click", "target": loc_str,
                                    "targetDescription": f'Click {name}', "value": "", "varName": ""})
@@ -1481,6 +1582,9 @@ class BrowserSession:
         self._settle()
         result = {"ok": True, "url": self._url(), "title": self._title(),
                   "new_issues": self.issues[before:]}
+        auth_msg = self._auth_signal(before_auth)
+        if auth_msg:
+            result["⚠_AUTH_REQUIRED"] = auth_msg
         new_api = self._api_errors[before_api:]
         if new_api:
             result["api_errors"] = new_api
@@ -1506,7 +1610,9 @@ class BrowserSession:
                 opts = self.get_options()["options"]
             if opts:
                 result["autocomplete_options"] = opts
-                result["hint"] = "Call click_option(text) with one of these values to select it."
+                result["hint"] = ("Autocomplete options appeared. To pick one, call "
+                                  "select_option(ref, value) with this field's ref — it selects "
+                                  "the matching option and records the step.")
         return result
 
     def _act_direct(self, kind, ref, value=None):
@@ -1516,6 +1622,7 @@ class BrowserSession:
             return {"ok": False, "error": "browser is closed; call restart_browser"}
         before = len(self.issues)
         before_api = len(self._api_errors)
+        before_auth = len(self._auth_failures)
         self.step_id += 1
         try:
             loc = self.page.locator(ref)
@@ -1551,6 +1658,9 @@ class BrowserSession:
         self._settle()
         result = {"ok": True, "url": self._url(), "title": self._title(),
                   "new_issues": self.issues[before:]}
+        auth_msg = self._auth_signal(before_auth)
+        if auth_msg:
+            result["⚠_AUTH_REQUIRED"] = auth_msg
         new_api = self._api_errors[before_api:]
         if new_api:
             result["api_errors"] = new_api
@@ -1567,8 +1677,193 @@ class BrowserSession:
             opts = self.get_options()["options"]
             if opts:
                 result["autocomplete_options"] = opts
-                result["hint"] = "Call click_option(text) with one of these values to select it."
+                result["hint"] = ("Autocomplete options appeared. To pick one, call "
+                                  "select_option(ref, value) with this field's ref — it selects "
+                                  "the matching option and records the step.")
         return result
+
+    # Dropdown texts that are messages, not options ("No customers found for X",
+    # "Start typing to search", "Loading..."). Selecting these is the classic
+    # false-positive — the keyboard tier must never fire on them.
+    _EMPTY_STATE_RE = re.compile(
+        r"^no .{0,50}(found|results?|match)|^nothing found|^no options"
+        r"|^start typing|^type to search|^loading|^searching|^please wait|^fetching", re.I)
+    # Subset of empty-state: transient loading texts — wait them out, don't give up.
+    _LOADING_RE = re.compile(r"^(loading|searching|fetching|please wait)", re.I)
+    # Options the ladder must NEVER auto-click unless the agent literally asked for
+    # them. Menus (profile, row actions) can be misread as dropdowns; clicking
+    # "Logout" because it was the first option is catastrophic.
+    _DESTRUCTIVE_OPT_RE = re.compile(
+        r"^(log\s?-?out|sign\s?-?out|delete|remove|cancel|reject|deactivate)\b", re.I)
+
+    def _real_options(self, opts):
+        return [o for o in (opts or []) if not self._EMPTY_STATE_RE.search((o or "").strip())]
+
+    def select_from_dropdown(self, ref, value):
+        """Intent-level dropdown selection: ONE call runs the whole escalation ladder
+        (native select -> type-to-search (full term, then first word) -> wait for
+        async options -> option click -> keyboard) and records test steps for
+        whichever tier worked. The agent never chooses between tiers. Returns
+        blocked:true when every tier failed so the async tool wrapper can try the
+        vision tier."""
+        el = self.by_ref.get(ref)
+        direct = el is None and self._is_direct_selector(ref)
+        if el is None and not direct:
+            return {"ok": False, "error": f"ref '{ref}' is not on the current page; call observe first"}
+
+        # Tier 0: native <select> — Playwright handles it outright.
+        if el is not None and el.get("tag") == "select":
+            r = self.act("select", ref, value)
+            if r.get("ok"):
+                r.update({"selected": value, "via": "native-select"})
+            return r
+
+        tried = []
+        opts, raw_opts = [], []
+        role = (el.get("role") or "") if el else ""
+        tag = (el.get("tag") or "") if el else ""
+        typeable = direct or tag in ("input", "textarea") or role in (
+            "textbox", "searchbox", "combobox", "spinbutton")
+
+        # Tier 1: type the value — full term first, then first word (search backends
+        # often miss the full legal name but hit the distinctive first token).
+        terms = [value]
+        first_word = (value.split() or [""])[0]
+        if first_word and first_word.lower() != value.lower():
+            terms.append(first_word)
+        if typeable:
+            for ti, term in enumerate(terms):
+                if ti > 0 and self.steps and self.steps[-1].get("type") == "fill":
+                    self.steps.pop()        # drop the no-result search from the recording
+                    self.step_id -= 1
+                r = self.act("fill", ref, term) if not direct else self._act_direct("fill", ref, term)
+                if r.get("⚠_AUTH_REQUIRED"):
+                    return {"ok": False, "blocked": True,
+                            "⚠_AUTH_REQUIRED": r["⚠_AUTH_REQUIRED"],
+                            "error": "authentication required — the search API returned 401/403"}
+                if not r.get("ok"):
+                    tried.append(f"fill('{term[:30]}') failed: {(r.get('error') or '')[:60]}")
+                    break
+                raw_opts = r.get("autocomplete_options") or self.get_options().get("options") or []
+                opts = self._real_options(raw_opts)
+                # 'Please wait...' / 'Loading' = the API is still working — be patient
+                # (up to ~8s) instead of concluding there are no options.
+                waited = 0
+                while (not opts and waited < 8
+                       and any(self._LOADING_RE.search((o or "").strip()) for o in raw_opts)):
+                    try:
+                        self.page.wait_for_timeout(1000)
+                    except Exception:
+                        break
+                    waited += 1
+                    raw_opts = self.get_options().get("options") or []
+                    opts = self._real_options(raw_opts)
+                tried.append(f"fill('{term[:30]}') -> {len(opts)} options"
+                             + (f" (waited {waited}s for loading)" if waited else ""))
+                if opts:
+                    break
+        # Tier 1b: non-typeable trigger (or fill failed) — click to open, then read options.
+        if not opts:
+            if not typeable or (tried and "failed" in tried[-1]):
+                rc = self.act("click", ref) if not direct else self._act_direct("click", ref)
+                tried.append("click-to-open" if rc.get("ok")
+                             else f"click-to-open failed: {(rc.get('error') or '')[:80]}")
+            raw_opts = self.get_options().get("options") or raw_opts
+            opts = self._real_options(raw_opts)
+
+        # Tier 2: targeted wait for the value text (async API results), then re-read.
+        if not match_option(opts, value):
+            if self.wait_for_text_on_page(value, 3000).get("ok"):
+                opts = self._real_options(self.get_options().get("options")) or opts
+
+        target = match_option(opts, value)
+        # Destructive guard: never auto-click logout/delete/etc. via fuzzy match —
+        # only when the agent asked for that option verbatim.
+        if target and self._DESTRUCTIVE_OPT_RE.search(target.strip()) \
+                and target.strip().casefold() != str(value).strip().casefold():
+            tried.append(f"matched '{target[:40]}' but it is destructive — refused to auto-click")
+            target = None
+        if target:
+            res = self.click_option_by_text(target, record=True)
+            if res.get("ok"):
+                return {"ok": True, "selected": target, "via": "option-click",
+                        "url": self._url(), "options_seen": opts[:10]}
+            tried.append(f"option-click failed: {(res.get('error') or '')[:80]}")
+
+        # Tier 3: keyboard protocol — only when the MATCHED option is the first in
+        # the list (ArrowDown+Enter selects the first; firing it blind would pick
+        # an arbitrary — possibly destructive — entry).
+        if target and opts and opts[0] == target:
+            try:
+                self.page.keyboard.press("ArrowDown")
+                self.page.keyboard.press("Enter")
+                self._settle()
+                if not self.overlay_opened():           # dropdown closed -> something got selected
+                    for key in ("ArrowDown", "Enter"):
+                        self.step_id += 1
+                        self.steps.append({"id": self.step_id,
+                                           "rawLine": f'page.keyboard.press("{key}")',
+                                           "type": "press", "target": "page.keyboard",
+                                           "targetDescription": f"Press {key} (select dropdown option)",
+                                           "value": key, "varName": ""})
+                    return {"ok": True, "selected": target, "via": "keyboard", "url": self._url(),
+                            "options_seen": opts[:10],
+                            "verify": "selection made via keyboard — confirm the field now shows the intended value"}
+                tried.append("keyboard: dropdown still open")
+            except Exception as e:
+                tried.append(f"keyboard failed: {str(e)[:80]}")
+
+        res = {"ok": False, "blocked": True, "tried": tried, "options_seen": opts[:15],
+               "error": f"could not select '{value}' — no tier matched an option",
+               "hint": ("If options_seen contains the right item under a different label, call "
+                        "select_option again with that EXACT text. Otherwise the dropdown may "
+                        "need vision or user input.")}
+        empty_msgs = [o for o in (raw_opts or []) if self._EMPTY_STATE_RE.search((o or "").strip())]
+        if empty_msgs:
+            res["dropdown_message"] = empty_msgs[0][:120]
+            res["hint"] = ("The dropdown reported: '" + empty_msgs[0][:80] + "'. The search "
+                           "term likely has no match in this environment's data — ask_user "
+                           "for the correct value instead of retrying more variations.")
+        return res
+
+    _IDENTIFY_JS = """([x, y]) => {
+        let el = document.elementFromPoint(x, y);
+        if (!el) return null;
+        el = el.closest('button,[role],a[href],input,select,textarea,[tabindex],[onclick],[data-testid]') || el;
+        const r = el.getBoundingClientRect();
+        return {tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+                text: (el.innerText || el.textContent || '').trim().slice(0, 150),
+                aria_label: el.getAttribute('aria-label') || '',
+                placeholder: el.getAttribute('placeholder') || '',
+                name: el.getAttribute('name') || '', type: el.getAttribute('type') || '',
+                id: el.id || '',
+                test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
+                visible: true, hidden_reason: '',
+                rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)}};
+    }"""
+
+    def identify_at(self, x, y):
+        """Vision -> ref grounding: resolve pixel coordinates to the DOM element at
+        that point, build an element model for it, and register it in by_ref so the
+        agent can act on it with a normal ref (no coordinate clicking)."""
+        try:
+            info = self.page.evaluate(self._IDENTIFY_JS, [x, y])
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+        if not info:
+            return {"ok": False, "error": f"no DOM element at ({x},{y}) — possibly canvas content"}
+        m = element_to_model(info)
+        m["hints"] = infer_hints(m)
+        ref = m["ref"]
+        if ref in self.by_ref and self.by_ref[ref].get("fingerprint") != m.get("fingerprint"):
+            i = 2
+            while f"{ref}-{i}" in self.by_ref:
+                i += 1
+            ref = f"{ref}-{i}"
+            m["ref"] = ref
+        self.by_ref[ref] = m
+        return {"ok": True, "ref": ref, "role": m.get("role") or m.get("tag"),
+                "name": (m.get("name") or "")[:80]}
 
     def add_checkpoint(self, name, assert_type, value):
         after = self.steps[-1]["id"] if self.steps else 0
@@ -1741,10 +2036,16 @@ _SYSTEM = (
     "Operating loop:\n"
     "- You usually start ALREADY logged in (a saved session is loaded for you). Do NOT attempt to "
     "log in or type credentials unless you actually land on a login form.\n"
-    "- Before acting on a page, call inspect_page to see its interactive elements (each has a "
-    "stable 'ref'). Use ONLY refs from the MOST RECENT inspect_page. Re-inspect after any "
+    "- Before acting on a page, call observe — your unified percept. It returns every "
+    "interactive element with a stable 'ref', plus any open dropdown options and visible "
+    "validation errors. Use ONLY refs from the MOST RECENT observe. Re-observe after any "
     "navigation or click that changes the page.\n"
-    "- Drive the flow the user asked for, one action at a time (navigate / click / fill / select_option).\n"
+    "- Drive the flow the user asked for, one action at a time (navigate / click / fill / select_option). "
+    "These tools handle quirks internally (hidden inputs, number fields, portal dropdowns, "
+    "keyboard fallbacks) — express WHAT you want, not HOW to click it. For ANY dropdown or "
+    "autocomplete selection use select_option(ref, value); never improvise with raw key presses.\n"
+    "- If observe is missing an element you can SEE (per look()), use find_on_screen(description) "
+    "— it returns a ref you can act on.\n"
     "- To open an item's detail, click its main row or title link — NOT inline per-row action "
     "buttons (invoice, ready, raise ticket, accept, ...) unless the goal explicitly needs them.\n"
     "- Add a checkpoint (add_checkpoint) at each meaningful outcome so the test verifies results.\n"
@@ -1755,7 +2056,7 @@ _SYSTEM = (
     "(give up after ~3 tries and report what's failing). NEVER hand the user a test you have not seen "
     "pass. Use delete_test_case to clean up a stub or a bad test.\n"
     "- If the browser reports it is closed or crashed and actions keep failing, call restart_browser, "
-    "then inspect_page again (your old refs are stale).\n\n"
+    "then observe again (your old refs are stale).\n\n"
     "Using the ATS app itself (as a user, never editing its code):\n"
     "- You CAN read and change the app's Settings: get_settings (environments, the seller/admin "
     "accounts WITH their credentials, execution options, Jira) and update_setting. So when asked to "
@@ -1766,9 +2067,9 @@ _SYSTEM = (
     "for you; get_settings is for answering questions and for flows that explicitly need an account.\n\n"
     "Context about the app (use what you're given — don't ask the user to paste things you can read):\n"
     "- Before filling any form: call get_input_registry(url_filter='<route>') to retrieve "
-    "known-good values from past sessions. Use those as your first attempt. After selecting "
-    "an autocomplete option call record_input(field_name, selected_label, 'autocomplete') "
-    "so future sessions can reuse the exact displayed value.\n"
+    "known-good values from past sessions. Use those as your first attempt. (fill and "
+    "select_option auto-record successful values; record_input is only for values you "
+    "confirmed some other way.)\n"
     "- At the start of a new project: (1) call map_app to discover all screens; "
     "(2) call extract_flows(context_file='<prd>') to turn the spec into a structured work order "
     "(list of flows, each with entry URL, steps, success criteria, suggested TC id); "
@@ -1855,25 +2156,29 @@ def build_agent(model, max_tokens=None):
     async def restart_browser(ctx: RunContext[Deps]) -> dict:
         """Relaunch the browser after it has closed or crashed (you saw a 'page/context/browser
         has been closed' error and navigate/inspect/click keep failing). Reuses the saved login.
-        Your old refs become stale — call inspect_page before acting again. Returns the
+        Your old refs become stale — call observe before acting again. Returns the
         post-restart url and title."""
         return await _bro(ctx.deps.session.restart)
 
     @agent.tool
-    async def inspect_page(ctx: RunContext[Deps], include_hidden: bool = False) -> dict:
-        """Capture the interactive elements on the CURRENT page. Each element has a stable 'ref'
-        you pass to click/fill/select_option. Also returns counts of hidden elements and any
-        breakage (console errors, JS exceptions, failed requests, broken images). Call this
-        before acting, and again after any navigation or click that changes the page. Set
-        include_hidden=true to also list elements users miss (display:none, zero-size, aria-hidden)."""
+    async def observe(ctx: RunContext[Deps], include_hidden: bool = False) -> dict:
+        """Your ONE unified percept of the CURRENT page. Returns every interactive element
+        (DOM + accessibility tree merged, including role-less clickable divs) with a stable
+        'ref' you pass to click/fill/select_option. Ambiguous names are pre-disambiguated and
+        interaction quirks (hidden inputs, number fields) are handled automatically when you
+        act. Also includes: 'open_dropdown_options' if a dropdown is currently open,
+        'validation_errors' if the page shows form errors, and breakage issues (console
+        errors, failed requests). Call this before acting, and again after any navigation or
+        click that changes the page. Set include_hidden=true to also list hidden elements."""
         return await _bro(ctx.deps.session.inspect, 40, include_hidden)
 
     @agent.tool
     async def click(ctx: RunContext[Deps], ref: str) -> dict:
-        """Click the element with the given ref (from the latest inspect_page). Records the action
-        as a test step. Returns ok, the new URL/title, and any breakage triggered.
-        If the click opened a dropdown / dialog / menu, the result includes 'overlay_opened: true'
-        AND a 'visual_state' key — read that description to find option text before acting.
+        """Click the element with the given ref (from the latest observe). Records the action
+        as a test step. Hidden styled inputs (Tailwind radio/checkbox) are force-clicked
+        automatically — you do not need a special tool. Returns ok, the new URL/title, and
+        any breakage triggered. If the click opened a dropdown / dialog / menu, the result
+        includes 'overlay_opened: true' AND a 'visual_state' description of what appeared.
         FALLBACK: if a ref is broken (e.g. MUI colon IDs like :r3:), pass a direct CSS selector
         instead — e.g. 'button[type="submit"]' or '[role="button"]'. Direct selectors are
         detected automatically and bypass the ref lookup."""
@@ -1891,7 +2196,7 @@ def build_agent(model, max_tokens=None):
         """Take a screenshot and get a visual description of the current page state from the
         vision model. Use this when:
         - A dropdown, modal, or overlay is open and you need to see its options
-        - inspect_page() did not return an element you expected to see
+        - observe() did not return an element you expected to see
         - You are about to interact with dynamic content (date-pickers, rich selects, etc.)
         - You are unsure what the page looks like right now
         Returns 'visual_description' — a literal description of what is currently on screen."""
@@ -1903,59 +2208,12 @@ def build_agent(model, max_tokens=None):
         return {"ok": True, "visual_description": description}
 
     @agent.tool
-    async def list_options(ctx: RunContext[Deps], filter_text: str = "") -> dict:
-        """Read the visible options from any currently open dropdown, autocomplete, listbox,
-        or menu. Waits up to 3 seconds for async-loaded options to appear (e.g. API-backed
-        customer/product searches). Use this AFTER typing in a search field if fill() did not
-        already return 'autocomplete_options'. Returns option texts you can pass to click_option.
-        filter_text: optional substring to narrow results."""
-        return await _bro(ctx.deps.session.get_options, filter_text)
-
-    @agent.tool
-    async def click_option(ctx: RunContext[Deps], text: str, exact: bool = False) -> dict:
-        """Click a visible option in an open dropdown / autocomplete / listbox by its text.
-        Searches the ENTIRE document including portal elements (MUI, Radix, Ant Design, etc.)
-        so stale inspect_page refs are not needed. Use after fill() on a search/autocomplete
-        field, or after list_options() tells you what is available.
-        text: the option label (partial match by default; set exact=True for exact match).
-        IMPORTANT: do NOT call inspect_page before this — the refs will be stale. Just call
-        click_option directly with the text you saw in autocomplete_options or list_options."""
-        return await _bro(ctx.deps.session.click_option_by_text, text, exact)
-
-    @agent.tool
-    async def click_by_text(ctx: RunContext[Deps], text: str) -> dict:
-        """LAST RESORT — click any visible element on the page that contains `text`,
-        regardless of its HTML element type or ARIA role. Use this when:
-        - click_option() fails because the dropdown uses plain <div> elements (no role=option)
-        - The component is fully custom and has no standard ARIA attributes
-        Uses three strategies: get_by_text → text= selector → JavaScript click.
-        The JS fallback clicks the smallest visible element whose text contains `text`,
-        bypassing Playwright's interactability checks entirely.
-        Do NOT use for navigation links or buttons that have inspect_page refs — use click() for those."""
-        return await _bro(ctx.deps.session.click_by_text_direct, text)
-
-    @agent.tool
-    async def aria_snapshot(ctx: RunContext[Deps], selector: str = "body") -> dict:
-        """Get the ARIA accessibility tree for the page or a specific element subtree.
-        The browser's accessibility engine assigns roles and names to ALL elements —
-        including custom components with no explicit ARIA attributes. This is the most
-        complete view of interactive content available, and it often reveals dropdown
-        options, dialog contents, and widget states that inspect_page misses.
-        Use this: (1) for broad exploration of an unknown page, (2) when inspect_page
-        misses elements you expect to be there, (3) to confirm what options are in an
-        open dropdown before calling click_option.
-        selector: CSS selector for the subtree root (default 'body' = entire page)."""
-        return await _bro(ctx.deps.session.aria_snapshot_page, selector)
-
-    @agent.tool
     async def mouse_click(ctx: RunContext[Deps], x: float, y: float) -> dict:
-        """Click at pixel coordinates (x, y) on the page. Use this when:
-        - look() or find_on_screen() told you where something is visually
-        - click_option / click_by_text failed on a fully custom component
-        Internally snaps to the nearest interactive DOM element via elementFromPoint —
-        vision gives the neighborhood, DOM gives the exact target. More reliable than
-        raw coordinates for small buttons (delete icons, row actions, chips).
-        Get coordinates from find_on_screen() or estimate from a look() description."""
+        """LAST RESORT — click at pixel coordinates (x, y). Only for content with NO DOM
+        element (canvas, SVG drawings) when find_on_screen returned raw coordinates
+        instead of a ref. For everything else use click(ref) — coordinate clicks cannot
+        be recorded into the generated test reliably.
+        Internally snaps to the nearest interactive DOM element via elementFromPoint."""
         return await _bro(ctx.deps.session.mouse_click_coords, x, y)
 
     @agent.tool
@@ -1972,32 +2230,14 @@ def build_agent(model, max_tokens=None):
         return await _bro(ctx.deps.session.scan_page_errors_dom)
 
     @agent.tool
-    async def force_click(ctx: RunContext[Deps], selector: str, nth: int = 0) -> dict:
-        """Click a hidden input using force=True, bypassing Playwright's visibility check.
-        USE FOR: Tailwind-styled radio buttons and checkboxes where the real <input> is
-        hidden behind a styled wrapper. Regular click() and click_by_text() hit the
-        visible label/wrapper but React's onChange only fires on the actual input.
-
-        selector: CSS selector for the hidden input, e.g.:
-          'input[type="radio"]'    — radio buttons (nth=0 for first, nth=1 for second...)
-          'input[type="checkbox"]' — checkboxes
-          'input[value="COD"]'     — radio by value
-        nth: index when selector matches multiple elements (0-based, default 0)
-
-        Example — select COD payment method:
-          force_click('input[type="radio"]', nth=0)
-        Example — select PREPAID:
-          force_click('input[type="radio"]', nth=1)"""
-        return await _bro(ctx.deps.session.force_click_hidden, selector, nth)
-
-    @agent.tool
     async def find_on_screen(ctx: RunContext[Deps], description: str) -> dict:
-        """Take a screenshot and ask the vision model to find the pixel coordinates
-        of an element you describe. Returns {x, y} to pass to mouse_click().
-        This is the vision-grounded coordinate pipeline: look() to understand the
-        page → find_on_screen() to get coordinates → mouse_click(x, y) to act.
-        description: describe what you want to click, e.g. 'SUPERTECH LIMITED option
-        in the customer search dropdown'."""
+        """Find an element VISUALLY and get back a ref you can act on with click()/fill().
+        Takes a screenshot, asks the vision model where the described element is, then
+        resolves those pixels to the actual DOM element and registers it as a ref.
+        Use when observe() did not list the element you can clearly see on screen.
+        Returns {ref, role, name} on success — act on the ref like any other.
+        Only if the target has NO DOM element (canvas/SVG drawing) you get raw {x, y}
+        for mouse_click(). description example: 'the trash icon on the first table row'."""
         try:
             shot = await _bro(ctx.deps.session.screenshot)
             dims = await _bro(ctx.deps.session.viewport_size)
@@ -2018,22 +2258,29 @@ def build_agent(model, max_tokens=None):
             if m:
                 coords = json.loads(m.group())
                 if coords.get("x") is not None:
-                    return {"ok": True, "x": float(coords["x"]), "y": float(coords["y"]),
+                    x, y = float(coords["x"]), float(coords["y"])
+                    ident = await _bro(ctx.deps.session.identify_at, x, y)
+                    if ident.get("ok"):
+                        ident["confidence"] = coords.get("confidence", "unknown")
+                        ident["hint"] = f"Call click('{ident['ref']}') (or fill/select_option) to act on it."
+                        return ident
+                    return {"ok": True, "x": x, "y": y,
                             "confidence": coords.get("confidence", "unknown"),
-                            "hint": f"Call mouse_click({coords['x']}, {coords['y']})"}
+                            "note": ident.get("error", ""),
+                            "hint": f"No DOM element there — call mouse_click({x}, {y})."}
         except Exception:
             pass
         return {"ok": False, "raw_response": raw[:300],
-                "hint": "Vision could not extract coordinates. Try mouse_click with an estimated position."}
+                "hint": "Vision could not locate it. Re-check with look() or ask_user."}
 
     @agent.tool
     async def press_key(ctx: RunContext[Deps], key: str, times: int = 1) -> dict:
-        """Press a keyboard key (optionally multiple times). Essential for:
-        - Autocomplete navigation: ArrowDown (open/move down list), Enter (select), Escape (close)
+        """Press a keyboard key (optionally multiple times). Useful for:
         - Form navigation: Tab (next field), Shift+Tab (prev field)
+        - Closing overlays: Escape
         - Text editing: Control+a (select all), Backspace, Delete
-        Standard autocomplete protocol: fill() the search text, then press ArrowDown
-        to open the suggestion list, ArrowDown again to move to an option, Enter to select.
+        NOTE: you do NOT need keyboard protocols for dropdowns/autocompletes —
+        select_option(ref, value) runs them internally.
         key examples: 'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab', 'Control+a'"""
         return await _bro(ctx.deps.session.press_key, key, times)
 
@@ -2049,6 +2296,9 @@ def build_agent(model, max_tokens=None):
     @agent.tool
     async def fill(ctx: RunContext[Deps], ref: str, value: str) -> dict:
         """Type `value` into the input/textbox with the given ref. Records a test step.
+        Number inputs are typed key-by-key automatically (MUI quirk) — just call fill.
+        For a dropdown/autocomplete where you want an OPTION selected, call
+        select_option(ref, value) instead — it types, waits, and picks the option.
         FALLBACK: if a ref is broken (e.g. MUI colon IDs like :r3:, :r5:), pass a direct CSS
         selector instead — e.g. 'input[type="email"]' or 'input[type="password"]' or
         'input[name="username"]'. Direct selectors are detected automatically and bypass
@@ -2113,9 +2363,58 @@ def build_agent(model, max_tokens=None):
 
     @agent.tool
     async def select_option(ctx: RunContext[Deps], ref: str, value: str) -> dict:
-        """Select `value` in the <select>/combobox with the given ref. Records a test step.
-        FALLBACK: accepts direct CSS selectors (e.g. 'select[name="role"]') when refs are broken."""
-        return await _bro(ctx.deps.session.act, "select", ref, value)
+        """Select `value` in ANY dropdown — native <select>, MUI/Radix/AntD combobox, portal
+        autocomplete, or fully custom div-dropdown. ONE call does everything internally:
+        type-to-search, wait for async options, option click, keyboard fallback, vision
+        fallback. Records the test steps for whichever path worked, and saves the selected
+        label to the input registry automatically.
+        ref: the field/trigger ref from observe() (direct CSS selectors also accepted).
+        value: what you want selected — exact option text, or a search term; the closest
+        option is matched (decorated labels like 'NAME(phone)LEGAL NAME' are handled).
+        If the result has blocked:true, read options_seen — retry once with an exact text
+        from there, otherwise ask_user. Do NOT improvise other tools for dropdowns."""
+        res = await _bro(ctx.deps.session.select_from_dropdown, ref, value)
+
+        # Vision tier (last resort): locate the option on screen, snap to DOM, click.
+        if not res.get("ok") and res.get("blocked"):
+            try:
+                shot = await _bro(ctx.deps.session.screenshot)
+                dims = await _bro(ctx.deps.session.viewport_size)
+                q = (f"Screenshot is {dims.get('width', 1280)}x{dims.get('height', 720)} pixels. "
+                     f"Find the dropdown option matching \"{value}\" in the open dropdown/list. "
+                     f"Reply ONLY with valid JSON: {{\"x\": <number>, \"y\": <number>}}. "
+                     f"If no such option is visible: {{\"x\": null, \"y\": null}}.")
+                raw = await _call_vision_oracle(ctx.deps.config, shot, q)
+                m = re.search(r'\{[^}]+\}', raw or "")
+                if m:
+                    c = json.loads(m.group())
+                    if c.get("x") is not None:
+                        clicked = await _bro(ctx.deps.session.mouse_click_coords,
+                                             float(c["x"]), float(c["y"]))
+                        if clicked.get("ok"):
+                            await _bro(ctx.deps.session._record_option_click, value, "vision")
+                            res = {"ok": True, "selected": value, "via": "vision",
+                                   "url": clicked.get("url", ""),
+                                   "verify": "selected via vision — confirm the field shows the intended value"}
+            except Exception:
+                pass
+
+        # Auto-record the final selected label so future sessions reuse it (the
+        # displayed label often differs from the typed search term).
+        if res.get("ok") and res.get("selected"):
+            try:
+                el = ctx.deps.session.by_ref.get(ref, {})
+                field_name = el.get("name") or el.get("placeholder") or ref
+                proj_id = (ctx.deps.project or {}).get("id") or ""
+                _ireg.record(
+                    ats_root=ctx.deps.ats_root, project_id=proj_id or None,
+                    url=res.get("url", ""), field_name=str(field_name),
+                    value=str(res["selected"]), field_type="autocomplete",
+                    note=(f"selected after typing '{value}'" if res["selected"] != value else ""),
+                )
+            except Exception:
+                pass
+        return res
 
     @agent.tool
     async def add_checkpoint(ctx: RunContext[Deps], name: str, assert_type: str, value: str) -> dict:

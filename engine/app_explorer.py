@@ -34,6 +34,7 @@ import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project_store
 from dom_inspector import snapshot_page, _normalize_url, DESTRUCTIVE_KEYWORDS
+from normalizer import escape_css_id
 
 SCHEMA_VERSION = 1
 
@@ -54,9 +55,21 @@ def _slug(s, fallback="el"):
     return out[:50] or fallback
 
 
+# Zero-width characters (zwsp/zwnj/zwj/word-joiner/BOM) — div-soup apps use these as
+# placeholder "names"; they break refs, locators, and Windows cp1252 console output.
+_ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\u2060\ufeff]")
+
+
+def _clean(s):
+    return _ZERO_WIDTH.sub("", s or "").strip()
+
+
 def _label(el):
-    return (el.get("aria_label") or el.get("text") or el.get("placeholder")
-            or el.get("name") or el.get("id") or "").strip()
+    for k in ("aria_label", "text", "label_text", "context_label", "placeholder", "name", "id"):
+        v = _clean(el.get(k))
+        if v:
+            return v
+    return ""
 
 
 def _aria_role(el):
@@ -73,15 +86,28 @@ def element_to_model(el):
     """Map a dom_inspector element dict → an app-model element with self-healing
     locator strategies (primary + fallbacks + fingerprint) in smart_locator form."""
     tag = el.get("tag", "")
-    name = (el.get("aria_label") or el.get("text") or "").strip()
+    synthetic = bool(el.get("synthetic"))
+    # Placeholder ranks above the context label: the browser computes the accessible
+    # name from the placeholder, so role+name locators stay valid for it.
+    name = _clean(el.get("aria_label") or el.get("text") or el.get("label_text")
+                  or el.get("placeholder"))
+    # Nameless-control rescue: a nearby sibling label ("Shipping Address" beside a bare
+    # combobox div) names the element for the agent — but it is NOT the accessible
+    # name, so role+name/text locators would not match. Flag it for strategy choice.
+    context_named = False
+    if not name:
+        ctx = _clean(el.get("context_label"))
+        if ctx:
+            name, context_named = ctx, True
     # Use only the first line and collapse whitespace: many controls carry a
     # count badge on a second line (e.g. a tab "New" with "100" below), which
     # makes the accessible name "New\n100" — that both breaks code generation
     # and produces a brittle locator (the count changes). Keep the label.
     name = re.split(r'\n', name)[0].strip()
     name = re.sub(r'\s+', ' ', name)
-    placeholder = (el.get("placeholder") or "").strip()
+    placeholder = _clean(el.get("placeholder"))
     el_id = (el.get("id") or "").strip()
+    id_css = escape_css_id(el_id) if el_id and not re.search(r"\d{3,}", el_id) else ""
     test_id = (el.get("test_id") or "").strip()
     role = _aria_role(el)
     label = _label(el)
@@ -89,34 +115,52 @@ def element_to_model(el):
     fallbacks = []
     if test_id:                                       # the most STABLE handle an app exposes
         primary = {"by": "test_id", "value": test_id}
-    elif role and name:
+    elif synthetic and name:
+        # Role-less clickable div: get_by_role would NOT match it (no ARIA semantics),
+        # so target it by its visible text instead.
+        primary = {"by": "text", "value": name[:80]}
+    elif role and name and not context_named:
         primary = {"by": "role", "role": role, "name": name[:80]}
     elif placeholder:
         primary = {"by": "placeholder", "value": placeholder}
-    elif el_id and not re.search(r"\d{3,}", el_id):   # skip dynamic-looking ids
-        primary = {"by": "css", "value": f"#{el_id}"}
-    elif name:
+    elif el_id and id_css:
+        primary = {"by": "css", "value": id_css}
+    elif context_named and role:
+        # Context-named element: ground it the way a human would — "the <role>
+        # near the 'Shipping Address' label" — via Playwright's layout selector.
+        # A bare get_by_role would silently grab the FIRST such role on the page.
+        attr_base = f'[role="{el.get("role")}"]' if el.get("role") else (tag or "*")
+        safe_label = name[:40].replace('"', "")
+        primary = {"by": "css", "value": f'{attr_base}:near(:text("{safe_label}"), 150)'}
+    elif name and not context_named:
         primary = {"by": "text", "value": name[:80]}
     else:
         primary = {"by": "css", "value": tag or "*"}
 
     if test_id and primary.get("by") != "test_id":
         fallbacks.append({"by": "test_id", "value": test_id})
-    if role and name and primary.get("by") != "role":   # role+name survives a test-id rename
-        fallbacks.append({"by": "role", "role": role, "name": name[:80]})
-    if name and primary.get("by") != "text":
+    if role and name and primary.get("by") != "role" and not synthetic and not context_named:
+        fallbacks.append({"by": "role", "role": role, "name": name[:80]})  # survives a test-id rename
+    if name and primary.get("by") != "text" and not context_named:
         fallbacks.append({"by": "text", "value": name[:80]})
     if placeholder and primary.get("by") != "placeholder":
         fallbacks.append({"by": "placeholder", "value": placeholder})
-    if el_id and not re.search(r"\d{3,}", el_id) and primary.get("value") != f"#{el_id}":
-        fallbacks.append({"by": "css", "value": f"#{el_id}"})
+    if id_css and primary.get("value") != id_css:
+        fallbacks.append({"by": "css", "value": id_css})
+    if context_named and role and primary.get("by") != "role":
+        fallbacks.append({"by": "role", "role": role})   # bare role — last resort, may be ambiguous
+    if synthetic and name and tag:
+        fallbacks.append({"by": "css", "value": f'{tag}:has-text("{name[:60]}")'})
 
     fingerprint = {"tag": tag, "role": role, "name": name[:80], "text": (el.get("text") or "")[:80]}
 
     return {
         "ref": _slug(label, tag or "el"),
         "tag": tag,
-        "role": role,
+        "role": role or ("button" if synthetic else ""),
+        "synthetic_role": synthetic,
+        "context_named": context_named,
+        "rect": el.get("rect") or {},
         "name": name[:120],
         "placeholder": placeholder,
         "input_type": (el.get("type") or ""),
@@ -140,6 +184,24 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
     const sels = ['button','a[href]','a','input:not([type=hidden])','select','textarea',
         '[role=button]','[role=link]','[role=tab]','[role=checkbox]','[role=radio]',
         '[role=combobox]','[role=menuitem]','[role=option]','[role=switch]','[onclick]','[contenteditable=true]'];
+    const clean = (t) => (t || '').replace(/[\u200b\u200c\u200d\u2060\ufeff]/g, '').trim();
+    // Nearby-label rescue for nameless controls (div-soup forms): the visible label
+    // ("Shipping Address") is often a SIBLING text node, not an associated <label>.
+    const nearLabel = (el) => {
+        let cur = el;
+        for (let d = 0; d < 3 && cur; d++) {
+            let sib = cur.previousElementSibling, hops = 0;
+            while (sib && hops < 3) {
+                if (!sib.querySelector('input,select,textarea,button,[role]')) {
+                    const t = clean(sib.innerText || sib.textContent);
+                    if (t && t.length <= 60) return t.split('\n')[0];
+                }
+                sib = sib.previousElementSibling; hops++;
+            }
+            cur = cur.parentElement;
+        }
+        return '';
+    };
     const seen = new Set(); const out = [];
     for (const sel of sels) {
         let nodes; try { nodes = document.querySelectorAll(sel); } catch (e) { continue; }
@@ -152,17 +214,51 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
             else if (parseFloat(s.opacity || '1') === 0) reason = 'opacity:0';
             else if (r.width === 0 || r.height === 0) reason = 'zero-size';
             else if (el.getAttribute('aria-hidden') === 'true') reason = 'aria-hidden';
+            const aria_label = clean(el.getAttribute('aria-label'));
+            const text = clean(el.innerText || el.textContent).slice(0, 150);
+            const placeholder = clean(el.getAttribute('placeholder'));
+            const label_text = (el.labels && el.labels[0]) ? clean(el.labels[0].textContent).slice(0, 80) : '';
             out.push({
                 tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
-                text: (el.innerText || el.textContent || '').trim().slice(0, 150),
-                aria_label: el.getAttribute('aria-label') || '', placeholder: el.getAttribute('placeholder') || '',
+                text: text, aria_label: aria_label, placeholder: placeholder,
                 name: el.getAttribute('name') || '', type: el.getAttribute('type') || '', id: el.id || '',
                 test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
                 value: el.value || '', checked: !!el.checked, disabled: !!el.disabled,
                 required: !!el.required || el.getAttribute('aria-required') === 'true',
                 visible: reason === '', hidden_reason: reason,
+                label_text: label_text,
+                context_label: (aria_label || text || placeholder || label_text) ? '' : nearLabel(el),
+                rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
             });
         }
+    }
+    // Pass 2: role-less clickable elements (cursor:pointer) the semantic selectors
+    // missed — div-buttons, custom dropdown triggers, clickable rows. Take only
+    // BOUNDARY elements (parent is not also pointer) so a pointer container's
+    // whole subtree doesn't flood in; cap to keep the percept token-light.
+    let synth = 0;
+    for (const el of document.querySelectorAll('div,span,li,td,p')) {
+        if (synth >= 40) break;
+        if (seen.has(el)) continue;
+        const s = window.getComputedStyle(el);
+        if (s.cursor !== 'pointer') continue;
+        const p = el.parentElement;
+        if (p && (seen.has(p) || window.getComputedStyle(p).cursor === 'pointer')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0 || r.height > 120) continue;
+        if (el.querySelector('button,a[href],input,select,textarea,[role]')) continue;
+        const text = clean(el.innerText || el.textContent);
+        if (!text || text.length > 80) continue;
+        seen.add(el); synth++;
+        out.push({
+            tag: el.tagName.toLowerCase(), role: '', text: text.slice(0, 150),
+            aria_label: el.getAttribute('aria-label') || '', placeholder: '',
+            name: '', type: '', id: el.id || '',
+            test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
+            value: '', checked: false, disabled: false, required: false,
+            visible: true, hidden_reason: '', synthetic: true, label_text: '',
+            rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
+        });
     }
     // Broken images — a common breakage signal users overlook.
     for (const img of document.querySelectorAll('img')) {

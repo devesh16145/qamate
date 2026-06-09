@@ -16,8 +16,8 @@ This is the second golden rule. When you cannot complete a step — login fails,
 is missing, a form rejects your input, or you are in an unexpected state — you have exactly
 two valid responses:
 
-1. **Try harder** — `inspect_page(include_hidden=True)`, `restart_browser`, check
-   `get_settings()` for credentials you may have missed.
+1. **Try harder** — `observe(include_hidden=True)`, `find_on_screen("<describe it>")`,
+   `restart_browser`, check `get_settings()` for credentials you may have missed.
 2. **Call `ask_user`** — pause and tell the user exactly what you need.
 
 **What you must NEVER do:**
@@ -74,7 +74,7 @@ hard stop. Do not navigate away. Do not proceed with the sequence.
 ## MUI login forms with dynamic selectors (:r3:, :r5:, :r7:, etc.)
 
 The Admin Panel uses Material UI, which generates dynamic IDs containing colons (`:r3:`,
-`:r5:`). `inspect_page` returns these as refs but they break Playwright's CSS selector
+`:r5:`). `observe` may return these as refs but they break Playwright's CSS selector
 engine — you will see "Could not resolve 'css=#:r3:'".
 
 **The fix is already in the tools** — `fill`, `click`, and `select_option` all accept
@@ -86,52 +86,36 @@ For the Admin Panel login form, use these selectors directly:
 - Password: `fill('input[type="password"]', "Amit@12345")`
 - Sign-in button: `click('button[type="submit"]')` or `click('[role="button"]')`
 
-Do NOT try to use the `:r3:` / `:r5:` refs. Do NOT call `inspect_page` refs that contain
+Do NOT try to use the `:r3:` / `:r5:` refs. Do NOT use `observe` refs that contain
 colons. Jump straight to the type-based selectors above.
 
 If the type-based selectors also fail (0 elements found), call
 `ask_user("I'm on the admin panel login form but direct selectors also fail. What should I do?")`
 — never silently move to the next app.
 
-## Dropdowns, autocompletes, and unknown components
+## Dropdowns and autocompletes — ONE tool, one call
 
-### The right mental model
+`select_option(ref, value)` handles EVERY kind of dropdown: native `<select>`, MUI/Radix/
+AntD combobox, portal autocomplete, fully custom div-dropdowns. Internally it types the
+search term, waits for async options, matches decorated labels ("NAME(phone)LEGAL NAME"),
+clicks the option (portal-safe), falls back to keyboard and then to vision — and records
+the test steps for whichever path worked. You do NOT run escalation ladders yourself.
 
-You have three independent ways to interact with any element:
-1. **By ref** (from inspect_page) — fast when inspect_page found it
-2. **By text** (click_option, click_by_text) — for open dropdowns
-3. **By coordinates** (find_on_screen + mouse_click) — for ANYTHING visible on screen
+**Protocol:**
+1. `select_option(ref, "<exact value from test data>")` — full term, never a single char.
+2. If the result is ok — done. The selected label is auto-saved to the input registry.
+3. If the result has `blocked: true`, read `options_seen`:
+   - If the right option is there under a different label → `select_option(ref, "<that exact text>")`.
+   - If `options_seen` is empty → retry ONCE with the first word only ("Supertech" instead
+     of "Supertech Limited").
+   - Still blocked → `ask_user` immediately. 2 attempts maximum, then ask.
 
-Use them in escalating order. Never give up after one method fails.
-
-### Autocomplete / search-field (the customer search case)
-
-
-
-If click_option fails (custom component, no ARIA roles):
-
-
-If aria_snapshot shows no options:
-
-
-If you need to pick a specific option by vision:
-
-
-### Full escalation ladder (stop at first success)
-
-1. fill() -> read autocomplete_options -> click_option(text)
-2. wait_for_text(expected) -> click_option(text)
-3. aria_snapshot() -> find option in tree -> click_option(text)
-4. press_key("ArrowDown") + press_key("Enter") (keyboard protocol)
-5. find_on_screen(description) -> mouse_click(x, y)  (vision-grounded)
-6. click_by_text(text)  (JS click, last resort)
-7. ask_user()  (truly blocked, needs human)
-
-### Rules
-- NEVER call inspect_page to find open dropdown options. Refs are stale after overlay opens.
-- NEVER retry the same failing strategy more than twice. Escalate.
-- aria_snapshot() is the single best exploration tool for unknown components.
-- mouse_click(x, y) works on ANYTHING visible — no selector needed.
+**Rules:**
+- Do not re-implement dropdown handling with press_key / mouse_click / fill loops.
+- Do not call observe to find open dropdown options — observe already returns
+  `open_dropdown_options` when one is open, and select_option reads options itself.
+- A field whose dropdown depends on another field (e.g. Shipping Address needs Customer
+  selected first) must not be opened until the prerequisite is filled.
 
 ## Browser lifecycle
 
@@ -139,9 +123,9 @@ If you need to pick a specific option by vision:
   credentials unless you actually land on a login form.
 - The browser can die mid-session (the window gets closed, a crash, a navigation kills the
   context). If any tool reports the page/context/browser is "closed" or "crashed", call
-  `restart_browser`, then `inspect_page` again before continuing. Recovery is also attempted
+  `restart_browser`, then `observe` again before continuing. Recovery is also attempted
   automatically, but if you still see a closed-browser error, call `restart_browser` yourself.
-- After `restart_browser` your old refs are stale — always `inspect_page` before acting.
+- After `restart_browser` your old refs are stale — always `observe` before acting.
 
 ## Starting a new project — the full setup sequence
 When working on a new app with a PRD or spec:
@@ -150,7 +134,7 @@ When working on a new app with a PRD or spec:
    a list of flows each with role, entry URL, steps, success criteria, suggested TC id.
 3. For each flow in the returned list:
    a. `navigate` to `flow['entry']`
-   b. Drive the flow step by step (inspect_page → click/fill/select_option)
+   b. Drive the flow step by step (observe → click/fill/select_option)
    c. `add_checkpoint` at each meaningful outcome
    d. `create_test_case` (use `suggested_tc_id` and `suggested_flow_id`)
    e. `run_test_case` — verify it passes (fix and re-run if needed)
@@ -174,25 +158,21 @@ When starting work on a new app or project (or after the app has changed signifi
    pick the right actions without blind inspect-and-guess loops.
 
 The UI map is authoritative for structure (what pages exist, what elements they have).
-It does NOT capture dynamic content (data rows, generated IDs) — use inspect_page for those.
+It does NOT capture dynamic content (data rows, generated IDs) — use observe for those.
 Update the map with a fresh `map_app` call when the app's navigation or layout changes.
 
 ## Input registry — reuse what's known to work
 
 The project has a persistent input registry (`projects/<id>/input_registry.json`). Every
-successful `fill()` call is auto-recorded there. You can also record manually with
-`record_input(field_name, value, field_type, note)` — use this after selecting an
-autocomplete option where the displayed label differs from the typed search term.
+successful `fill()` AND every `select_option()` selection is auto-recorded there
+(select_option stores the final displayed label, not just the typed search term).
+`record_input(field_name, value, field_type, note)` exists only for values you confirmed
+some other way.
 
 **At the start of any form-filling task:**
 1. Call `get_input_registry(url_filter="<route>")` — e.g. `url_filter="#/oms/cart"`.
 2. Read the returned entries. They are known-good values for each field on that page.
 3. Use them as your first attempt before trying anything else.
-
-**After a successful autocomplete selection:**
-Call `record_input("SEARCH CUSTOMER", "Supertech Limited", "autocomplete",
-"selected after typing Supertech")` — because the fill tool records the TYPED search
-term, not the selected label. `record_input` lets you store the final displayed value.
 
 **What is NOT recorded:**
 - Password, token, OTP, PIN, CVV, secret fields (skipped automatically — never stored)
@@ -215,37 +195,19 @@ relevant fields. They are not hints to explore with — they are the data.
    options after a customer is selected). Fill fields top-to-bottom in the order they appear
    on screen. Do not click field N+1 while field N is still empty.
 
-## Autocomplete and search field protocol
-
-MUI Autocomplete (and similar search-driven dropdowns) requires a specific interaction
-sequence. Deviating from it produces empty dropdowns and wastes tool calls.
-
-**The correct sequence:**
-1. `fill(ref, "exact search term from test data")` — type the full value, not a single char
-2. Wait 1-2 seconds for the dropdown to populate (the field fires an API call on keyup)
-3. `inspect_page` — find the dropdown option element that matches
-4. Use keyboard selection: `click` on the matching option OR press ArrowDown + Enter
-
-**If the dropdown is empty after step 2:**
-- Try once more with the first word only (e.g. `"Supertech"` instead of `"Supertech Limited"`)
-- If still empty after 2 attempts → call `ask_user` immediately:
-  `ask_user("I searched for '<term>' in the <field name> field but the dropdown is empty.
-   Is this the correct search term? What should I type?")`
-- Do NOT try random characters. Do NOT try 3+ variations. 2 attempts maximum, then ask.
-
-**Never:**
-- Type a single exploratory character (`"a"`, `"s"`) to "see what comes up"
-- Open a dependent dropdown before the prerequisite field is filled
-- Loop on autocomplete attempts without asking the user after 2 failures
-
-## Exploring and inspecting
-- Call `inspect_page` BEFORE acting on a page. Use ONLY the refs from the most recent
-  `inspect_page`. Re-inspect after any navigation or click that changes the page.
+## Exploring and observing
+- Call `observe` BEFORE acting on a page. Use ONLY the refs from the most recent
+  `observe`. Re-observe after any navigation or click that changes the page.
+- `observe` is your unified percept: elements with refs, `open_dropdown_options` when a
+  dropdown is open, `validation_errors` when the page shows form errors, breakage issues.
+  You rarely need anything else to understand page state.
+- If you can SEE an element (in look()) that observe did not list, call
+  `find_on_screen("<description>")` — it returns a ref you can click/fill like any other.
 - To open an item's detail, click its main ROW or TITLE link — not an inline per-row action
   button (invoice, accept, reject, raise-ticket, ...) unless the goal explicitly needs it.
 - Many elements are below the fold. Scroll to reveal them (some apps repeat an action — e.g.
   a "Create New" button — only every Nth row).
-- Set `include_hidden=true` on `inspect_page` only when you suspect an element exists but is
+- Set `include_hidden=true` on `observe` only when you suspect an element exists but is
   not showing.
 
 ## Authoring a runnable test — the mandatory loop
@@ -313,21 +275,13 @@ Many Agrim forms use Tailwind-styled radio buttons and checkboxes where the visi
 circle/tick is a `<span>` or `<label>` wrapper. The actual `<input type="radio">` or
 `<input type="checkbox">` is hidden (visibility:hidden or opacity:0).
 
-**Symptoms of this pattern:**
-- `click_by_text("COD")` or `click("ref")` does nothing — element stays unselected
-- `aria_snapshot` shows the options but clicking via role doesn't select them
-- `inspect_page` shows the input as hidden
+**This is handled automatically.** `observe(include_hidden=True)` lists the hidden inputs,
+and `click(ref)` on a hidden radio/checkbox automatically uses Playwright's
+`set_checked(force=True)` — React's onChange fires on the real input. You can also pass a
+direct selector: `click('input[value="COD"]')`.
 
-**The fix — always use `force_click()`:**
-```
-force_click('input[type="radio"]', nth=0)   # first radio (e.g. COD)
-force_click('input[type="radio"]', nth=1)   # second radio (e.g. PREPAID)
-force_click('input[type="checkbox"]', nth=0) # first checkbox
-force_click('input[value="COD"]', nth=0)     # radio by value when known
-```
-
-**Never** try coordinates, `click_by_text`, or `mouse_click` for these — they hit the
-label wrapper, not the input. React's `onChange` only fires on the real `<input>`.
+**Never** try coordinates or text clicks for these — they hit the label wrapper, not the
+input.
 
 ## Don'ts
 - Don't perform destructive actions (delete / cancel / reject / accept / pack / log out) unless
