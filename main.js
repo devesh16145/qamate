@@ -875,8 +875,14 @@ function runEngine(event, args, progressChannel, extraEnv) {
 
 // Projects (project_store.py CLI emits a single JSON status line)
 ipcMain.handle('list-projects', async (e) => runEngine(e, [PROJECT_STORE, 'list'], null));
-ipcMain.handle('create-project', async (e, { name, baseUrl, environment }) =>
-  runEngine(e, [PROJECT_STORE, 'create', name, baseUrl, environment || 'dev'], null));
+ipcMain.handle('create-project', async (e, { name, baseUrl, environment, apps }) => {
+  // Multi-app projects (e.g. storefront + admin panel) go through create-json.
+  if (Array.isArray(apps) && apps.length) {
+    const spec = JSON.stringify({ name, baseUrl: baseUrl || '', environment: environment || 'dev', apps });
+    return runEngine(e, [PROJECT_STORE, 'create-json', spec], null);
+  }
+  return runEngine(e, [PROJECT_STORE, 'create', name, baseUrl, environment || 'dev'], null);
+});
 ipcMain.handle('set-active-project', async (e, { projectId }) =>
   runEngine(e, [PROJECT_STORE, 'set-active', projectId], null));
 ipcMain.handle('delete-project', async (e, { projectId }) =>

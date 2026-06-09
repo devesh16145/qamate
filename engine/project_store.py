@@ -262,14 +262,18 @@ def get_project(ats_root, project_id):
 
 
 def create_project(ats_root, name, base_url, environment="dev", **extra):
-    """Create a new project and make it active. Returns the project dict."""
+    """Create a new project and make it active. Returns the project dict.
+    extra['apps'] = [{label, url, email?, password?}] for multi-surface projects
+    (e.g. storefront + admin panel); the first app is the primary base URL."""
     pid = _unique_id(ats_root, slugify(name))
-    base = _normalize_url(base_url)
+    apps = _sanitize_apps(extra.get("apps"))
+    base = _normalize_url(base_url) or (apps[0]["url"] if apps else "")
     proj = {
         "schema_version": SCHEMA_VERSION,
         "id": pid,
         "name": name or pid,
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "apps": apps,
         "environments": {environment: base},
         "default_environment": environment,
         "auth": {
@@ -339,10 +343,51 @@ def get_active_project(ats_root):
 
 # ── Resolution helpers (used by conftest / runner / explorer) ─────────────────
 
+def _sanitize_apps(apps):
+    """Normalize an apps list: [{label, url, credentials{email,password}}].
+    Entries without a URL are dropped; URLs are normalized."""
+    out = []
+    for a in apps or []:
+        if not isinstance(a, dict):
+            continue
+        url = _normalize_url(a.get("url"))
+        if not url:
+            continue
+        cred = a.get("credentials") or {}
+        out.append({
+            "label": (a.get("label") or "").strip() or f"App {len(out) + 1}",
+            "url": url,
+            "credentials": {"email": (cred.get("email") or a.get("email") or "").strip(),
+                            "password": cred.get("password") or a.get("password") or ""},
+        })
+    return out
+
+
+def project_apps(project):
+    """The list of apps (base URLs) a project targets. A project may have several
+    surfaces (e.g. a storefront AND an admin panel). Projects created before the
+    apps field get a single synthesized entry from their environment URL."""
+    if not project:
+        return []
+    apps = _sanitize_apps(project.get("apps"))
+    if apps:
+        return apps
+    url = resolve_base_url(project)
+    if not url:
+        return []
+    cred = ((project.get("auth") or {}).get("credentials")) or {}
+    return [{"label": project.get("name") or "App", "url": url,
+             "credentials": {"email": cred.get("email", ""), "password": cred.get("password", "")}}]
+
+
 def resolve_base_url(project, environment=None):
-    """The base URL for a project's environment (falls back to default env)."""
+    """The PRIMARY base URL for a project: the first app when apps are defined,
+    else the environment URL (falls back to default env)."""
     if not project:
         return ""
+    apps = _sanitize_apps(project.get("apps"))
+    if apps:
+        return apps[0]["url"]
     envs = project.get("environments", {}) or {}
     env = environment or project.get("default_environment")
     url = envs.get(env) or (next(iter(envs.values()), "") if envs else "")
@@ -380,6 +425,15 @@ def main(argv):
             return 1
         env = argv[4] if len(argv) > 4 else "dev"
         _emit({"status": "success", "project": create_project(ats_root, argv[2], argv[3], env)})
+    elif cmd == "create-json":
+        # project_store.py create-json '{"name":..,"baseUrl":..,"environment":..,"apps":[{label,url,email,password}]}'
+        if len(argv) < 3:
+            _emit({"status": "error", "message": "usage: create-json <json>"})
+            return 1
+        spec = json.loads(argv[2])
+        _emit({"status": "success", "project": create_project(
+            ats_root, spec.get("name"), spec.get("baseUrl") or "",
+            spec.get("environment") or "dev", apps=spec.get("apps") or [])})
     elif cmd == "update":
         # project_store.py update <id> <json-patch>
         if len(argv) < 4:

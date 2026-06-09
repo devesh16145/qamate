@@ -3353,6 +3353,21 @@ def build_agent(model, max_tokens=None):
                 "did not provide, prefer the input registry; otherwise use a sensible value — "
                 "it is recorded as an assumption and reported for review. Skips still go "
                 "through skip_step. Blocked steps still mean: try harder or ask_user.")
+        try:
+            apps = project_store.project_apps(ctx.deps.project) if ctx.deps.project else []
+            if apps:
+                lines = []
+                for a in apps:
+                    cred = a.get("credentials") or {}
+                    lines.append(f"- {a['label']}: {a['url']}"
+                                 + (f"  (login: {cred['email']} / {cred['password']})"
+                                    if cred.get("email") else ""))
+                blocks.append(
+                    "PROJECT APPS — every base URL this project tests (a project can span "
+                    "several surfaces, e.g. a storefront AND an admin panel). Navigate between "
+                    "them as the task requires:\n" + "\n".join(lines))
+        except Exception:
+            pass
         p = ctx.deps.memory_path
         try:
             if p and os.path.isfile(p):
@@ -3408,10 +3423,16 @@ def build_model(config, provider_name=None):
 
 def _resolve_credentials(project, config, platform_name="seller", index=0):
     """Where the agent's login comes from, in priority order:
-      1. the project's own settings (project.auth.credentials), then
-      2. config.json platforms.<platform>.users[index]  (the legacy 'system settings').
+      1. the project's PRIMARY app credentials (project.apps[0]),
+      2. the project's own settings (project.auth.credentials), then
+      3. config.json platforms.<platform>.users[index]  (the legacy 'system settings').
     Returns (email, password) or (None, None). The agent never types these — the
     session logs in once with them and reuses the saved storage_state thereafter."""
+    apps = project_store.project_apps(project) if project else []
+    if apps:
+        c0 = apps[0].get("credentials") or {}
+        if c0.get("email") and c0.get("password"):
+            return c0["email"], c0["password"]
     cred = ((project or {}).get("auth") or {}).get("credentials") or {}
     if cred.get("email") and cred.get("password"):
         return cred["email"], cred["password"]
@@ -3604,6 +3625,9 @@ class AgentRuntime:
             pass
         tracker.add_values(settings_values(self.config), "settings")
         tracker.add_values(registry_values(self.ats_root, project_id), "input-registry")
+        for _app in (project_store.project_apps(project) if project else []):
+            _c = _app.get("credentials") or {}
+            tracker.add_values([_app.get("url"), _c.get("email"), _c.get("password")], "settings")
         self.deps = Deps(session=self.session, ats_root=self.ats_root, project=project,
                          config=self.config, context_dir=ctx_dir, memory_path=mem_path, vision=vision,
                          user_input_q=self._user_input_q, mode=mode, provenance=tracker)

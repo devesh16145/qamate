@@ -1626,14 +1626,19 @@ const nowTs = () => {
    ────────────────────────────────────────────────────────────── */
 function NewProjectModal({ onClose, onCreated, toast }) {
   const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
   const [envName, setEnvName] = useState('dev');
+  const [apps, setApps] = useState([{ label: '', url: '', email: '', password: '' }]);
   const [busy, setBusy] = useState(false);
   const iStyle = { width: '100%', fontSize: 12.5, padding: '6px 9px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' };
+  const patchApp = (i, field, v) => setApps(prev => prev.map((a, j) => j === i ? { ...a, [field]: v } : a));
   const create = async () => {
-    if (!name.trim() || !url.trim()) { toast('Name and app URL are required'); return; }
+    const valid = apps.filter(a => a.url.trim());
+    if (!name.trim() || !valid.length) { toast('Project name and at least one app URL are required'); return; }
     setBusy(true);
-    const r = await window.ats.createProject({ name: name.trim(), baseUrl: url.trim(), environment: envName.trim() || 'dev' });
+    const r = await window.ats.createProject({
+      name: name.trim(), baseUrl: valid[0].url.trim(), environment: envName.trim() || 'dev',
+      apps: valid.map((a, i) => ({ label: a.label.trim() || `App ${i + 1}`, url: a.url.trim(), email: a.email.trim(), password: a.password })),
+    });
     setBusy(false);
     if (!r || r.status !== 'success') { toast((r && r.message) || 'Could not create project'); return; }
     toast(`Project "${name.trim()}" created — fresh suite, now active`);
@@ -1641,28 +1646,48 @@ function NewProjectModal({ onClose, onCreated, toast }) {
   };
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ width: 420, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 14px 40px rgba(0,0,0,0.35)', padding: 16 }}>
+      <div style={{ width: 480, maxHeight: '86vh', overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 14px 40px rgba(0,0,0,0.35)', padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <b style={{ fontSize: 13.5 }}>New project</b>
           <span style={{ flex: 1 }}></span>
           <button className="editor-action" onClick={onClose}><I.X size={13} /></button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 12 }}>
-          A project is one web app under test. It starts with an <b>empty test suite</b> and its
-          <b> own settings</b> — nothing is shared with the built-in ATS suite. The agent, test
-          tree, and runs all scope to the active project.
+          A project is one product under test — it can span <b>several apps</b> (e.g. a storefront
+          AND its admin panel). It starts with an <b>empty test suite</b> and its <b>own settings</b>;
+          nothing is shared with the built-in ATS suite. The first app is the primary one the agent
+          opens at session start.
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Project name
-            <input style={iStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Acme Storefront" autoFocus /></label>
-          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>App URL (the environment's base URL)
-            <input style={iStyle} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://staging.acme.com/" /></label>
-          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Environment name
+        <div style={{ display: 'flex', gap: 9, marginBottom: 10 }}>
+          <label style={{ flex: 2, fontSize: 11, color: 'var(--text-2)' }}>Project name
+            <input style={iStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Acme Commerce" autoFocus /></label>
+          <label style={{ flex: 1, fontSize: 11, color: 'var(--text-2)' }}>Environment
             <input style={iStyle} value={envName} onChange={e => setEnvName(e.target.value)} placeholder="dev" /></label>
         </div>
-        <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 10, lineHeight: 1.5 }}>
-          Login: after creating, use the agent's session capture (or Capture Login) to store
-          authentication for this project — credentials are kept in the project, not in config.json.
+        {apps.map((a, i) => (
+          <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-2)' }}>App {i + 1}{i === 0 ? ' (primary)' : ''}</span>
+              <input style={{ ...iStyle, width: 'auto', flex: 1, fontSize: 11.5, padding: '3px 8px' }} value={a.label}
+                onChange={e => patchApp(i, 'label', e.target.value)} placeholder={i === 0 ? 'Label (e.g. Storefront)' : 'Label (e.g. Admin Panel)'} />
+              {apps.length > 1 && (
+                <button className="editor-action" title="Remove this app" onClick={() => setApps(prev => prev.filter((_, j) => j !== i))}><I.X size={12} /></button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input style={iStyle} value={a.url} onChange={e => patchApp(i, 'url', e.target.value)} placeholder="https://staging.acme.com/" />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...iStyle, flex: 1 }} value={a.email} onChange={e => patchApp(i, 'email', e.target.value)} placeholder="Login email (optional)" />
+                <input style={{ ...iStyle, flex: 1 }} type="password" value={a.password} onChange={e => patchApp(i, 'password', e.target.value)} placeholder="Password (optional)" />
+              </div>
+            </div>
+          </div>
+        ))}
+        <button className="editor-action" onClick={() => setApps(prev => [...prev, { label: '', url: '', email: '', password: '' }])}
+          style={{ marginBottom: 4 }}>+ Add another app (admin panel, API console, …)</button>
+        <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 8, lineHeight: 1.5 }}>
+          The agent sees every app's URL and login, and can move between them in one flow.
+          Credentials live in the project (projects/&lt;id&gt;/project.json), not in config.json.
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
           <button className="editor-action" onClick={onClose}>Cancel</button>
