@@ -43,6 +43,7 @@ import project_store
 
 from pydantic_ai.messages import (
     ModelMessagesTypeAdapter, UserPromptPart, TextPart, ToolCallPart, ToolReturnPart,
+    ThinkingPart,
 )
 
 SESSIONS_DIRNAME = "agent_sessions"
@@ -284,6 +285,11 @@ def bubbles_from_messages(messages, include_user=True, attachment_names=None, ts
                     b["attachments"] = list(attachment_names)
                     attachment_names = None  # only the first user bubble carries them
                 bubbles.append(b)
+            elif isinstance(part, ThinkingPart):
+                # Reasoning models (MiMo) — keep a truncated trace so reloaded
+                # sessions still show the collapsible Thinking blocks.
+                if (part.content or "").strip():
+                    bubbles.append({"role": "thinking", "text": part.content[:4000], "ts": ts})
             elif isinstance(part, TextPart):
                 if (part.content or "").strip():
                     bubbles.append({"role": "assistant", "text": part.content, "ts": ts})
@@ -296,8 +302,9 @@ def bubbles_from_messages(messages, include_user=True, attachment_names=None, ts
                         pass
                 bubbles.append({"role": "tool", "tool": part.tool_name, "args": args, "ts": ts})
             elif isinstance(part, ToolReturnPart):
+                # 1500 keeps most results parseable JSON for the UI's structured cards.
                 bubbles.append({"role": "tool_result", "tool": part.tool_name,
-                                "text": _short(part.content), "ts": ts})
+                                "text": _short(part.content, 1500), "ts": ts})
     return bubbles
 
 

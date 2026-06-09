@@ -36,10 +36,10 @@
     try { return Object.entries(a).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', '); }
     catch (e) { return String(a); }
   };
-  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '', usage: null, mode: 'auto' }; }
+  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '', usage: null, mode: 'auto', plan: [] }; }
   function finalizeStreaming(prev) {
     const last = prev[prev.length - 1];
-    if (last && last.role === 'assistant' && last.streaming) return [...prev.slice(0, -1), { ...last, streaming: false }];
+    if (last && (last.role === 'assistant' || last.role === 'thinking') && last.streaming) return [...prev.slice(0, -1), { ...last, streaming: false }];
     return prev;
   }
   function bubbleFromTranscript(b, id) {
@@ -119,6 +119,112 @@
     );
   }
 
+  /* ── Thinking block: the model's reasoning, collapsible (Cursor-style) ─────── */
+  function ThinkingBlock({ m }) {
+    const [open, setOpen] = useState(false);
+    const live = !!m.streaming;
+    const tail = (m.text || '').slice(-150).replace(/\s+/g, ' ').trim();
+    return (
+      <div style={{ alignSelf: 'stretch', paddingLeft: 36, minWidth: 0 }}>
+        <button onClick={() => setOpen(o => !o)}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, maxWidth: '100%', fontSize: 10.5, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
+          <span style={{ fontSize: 8, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+          <span style={{ fontWeight: 600, flexShrink: 0 }}>{live ? 'Thinking' : 'Thought process'}</span>
+          {live && <span className="live-dot" style={{ flexShrink: 0 }}></span>}
+          {!open && tail && <span style={{ fontStyle: 'italic', opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{tail}</span>}
+        </button>
+        {open && (
+          <div style={{ marginTop: 3, borderLeft: '2px solid var(--border)', paddingLeft: 10, fontSize: 11.5, lineHeight: 1.55, color: 'var(--text-3)', fontStyle: 'italic', whiteSpace: 'pre-wrap', maxHeight: 280, overflowY: 'auto' }}>{m.text}</div>
+        )}
+      </div>
+    );
+  }
+
+  /* ── Plan checklist: the agent's live to-do list (set_plan/update_plan) ────── */
+  const PLAN_GLYPH = {
+    pending: ['○', 'var(--text-3)'], active: ['▶', 'var(--accent)'],
+    done: ['✓', 'var(--pass, #16a34a)'], failed: ['✕', 'var(--fail, #dc2626)'],
+    skipped: ['⊘', 'var(--text-3)'],
+  };
+  function PlanCard({ plan }) {
+    const [open, setOpen] = useState(true);
+    if (!plan || !plan.length) return null;
+    const done = plan.filter(p => p.status === 'done').length;
+    const active = plan.find(p => p.status === 'active');
+    return (
+      <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '7px 12px', boxShadow: '0 2px 10px rgba(0,0,0,0.10)' }}>
+        <button onClick={() => setOpen(o => !o)}
+          style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: 11, minWidth: 0 }}>
+          <span style={{ fontSize: 8, color: 'var(--accent)', flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+          <b style={{ color: 'var(--text-2)', flexShrink: 0 }}>Plan</b>
+          <span style={{ color: 'var(--text-3)', fontFamily: 'var(--mono)', flexShrink: 0 }}>{done}/{plan.length}</span>
+          <span style={{ flex: 1, height: 3, background: 'var(--accent-bg)', borderRadius: 2, overflow: 'hidden', minWidth: 30 }}>
+            <span style={{ display: 'block', height: '100%', width: `${Math.round(100 * done / plan.length)}%`, background: 'var(--pass, #16a34a)', transition: 'width 0.3s' }}></span>
+          </span>
+          {!open && active && <span style={{ color: 'var(--accent)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>▶ {active.step}</span>}
+        </button>
+        {open && (
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {plan.map((p, i) => {
+              const [glyph, color] = PLAN_GLYPH[p.status] || PLAN_GLYPH.pending;
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 7, fontSize: 11.5, color: p.status === 'done' ? 'var(--text-3)' : 'var(--text)', textDecoration: p.status === 'skipped' ? 'line-through' : 'none' }}>
+                  <span style={{ color, fontWeight: 700, width: 13, textAlign: 'center', flexShrink: 0, fontFamily: 'var(--mono)' }}>{glyph}</span>
+                  <span style={{ fontWeight: p.status === 'active' ? 600 : 400, minWidth: 0 }}>{p.step}</span>
+                  {p.note && <span style={{ color: 'var(--text-3)', fontSize: 10.5, fontStyle: 'italic' }}>— {p.note}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ── JSON syntax highlighting + table rendering for tool cards ──────────────── */
+  function JsonView({ value, maxHeight = 180 }) {
+    let obj = value;
+    if (typeof value === 'string') { try { obj = JSON.parse(value); } catch (e) { obj = null; } }
+    if (obj === null || typeof obj !== 'object') return null;
+    const text = JSON.stringify(obj, null, 2);
+    if (!text || text.length > 20000) return null;
+    const re = /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+    const nodes = []; let last = 0, m, k = 0;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) nodes.push(text.slice(last, m.index));
+      if (m[1] != null && m[2] != null) { nodes.push(<span key={k++} style={{ color: 'var(--accent)' }}>{m[1]}</span>); nodes.push(m[2]); }
+      else if (m[1] != null) nodes.push(<span key={k++} style={{ color: 'var(--pass, #16a34a)' }}>{m[1]}</span>);
+      else if (m[3] != null) nodes.push(<span key={k++} style={{ color: '#b07cd8' }}>{m[3]}</span>);
+      else nodes.push(<span key={k++} style={{ color: '#5b9dd9' }}>{m[4]}</span>);
+      last = re.lastIndex;
+    }
+    if (last < text.length) nodes.push(text.slice(last));
+    return (
+      <pre style={{ margin: '3px 0 0', padding: '6px 8px', background: 'var(--editor, var(--bg-2, var(--bg)))', border: '1px solid var(--accent-bg)', borderRadius: 6, fontSize: 10.5, fontFamily: 'var(--mono)', lineHeight: 1.5, maxHeight, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{nodes}</pre>
+    );
+  }
+
+  /* Render an array of flat objects as a table (element lists, run results). */
+  function MiniTable({ rows }) {
+    if (!Array.isArray(rows) || rows.length < 2 || rows.length > 40) return null;
+    if (!rows.every(r => r && typeof r === 'object' && !Array.isArray(r))) return null;
+    const cols = [...new Set(rows.flatMap(r => Object.keys(r)))].slice(0, 7);
+    if (cols.length < 2) return null;
+    const cell = (v) => v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+    return (
+      <div style={{ marginTop: 3, maxHeight: 200, overflow: 'auto', border: '1px solid var(--accent-bg)', borderRadius: 6 }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 10.5, fontFamily: 'var(--mono)' }}>
+          <thead><tr>{cols.map(c => <th key={c} style={{ position: 'sticky', top: 0, background: 'var(--bg-2, var(--bg))', textAlign: 'left', padding: '3px 8px', borderBottom: '1px solid var(--border)', color: 'var(--text-2)', fontWeight: 600 }}>{c}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>{cols.map(c => <td key={c} style={{ padding: '2px 8px', borderBottom: '1px solid var(--accent-bg)', color: 'var(--text)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cell(r[c])}>{cell(r[c])}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   /* ── Tool activity batch (collapsible) ───────────────────────────────────── */
   function ToolBatch({ items }) {
     const [open, setOpen] = useState(false);
@@ -145,14 +251,36 @@
         </button>
         {open && (
           <div style={{ marginTop: 4, borderLeft: '1px solid var(--border)', paddingLeft: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {pairs.map(({ call, result }, pi) => (
-              <div key={pi}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)' }}>
-                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{call.tool}</span>
-                  <span style={{ color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320 }}>{argStr(call.args).slice(0, 100)}</span>
-                </div>
-                {result && <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 2, marginTop: 1 }}>↳ {String(result.text).slice(0, 140)}</div>}
-              </div>
+            {pairs.map(({ call, result }, pi) => <ToolPair key={pi} call={call} result={result} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* One tool call+result; click to expand structured detail (JSON / table). */
+  function ToolPair({ call, result }) {
+    const [detail, setDetail] = useState(false);
+    let parsed = null;
+    if (result && typeof result.text === 'string') {
+      try { parsed = JSON.parse(result.text); } catch (e) { parsed = null; }
+    }
+    const tableRows = parsed && !Array.isArray(parsed)
+      ? Object.values(parsed).find(v => Array.isArray(v) && v.length > 1 && v.every(x => x && typeof x === 'object' && !Array.isArray(x)))
+      : (Array.isArray(parsed) ? parsed : null);
+    return (
+      <div>
+        <div onClick={() => setDetail(d => !d)} title="Click for full arguments / result"
+          style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', cursor: 'pointer' }}>
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{call.tool}</span>
+          <span style={{ color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320 }}>{argStr(call.args).slice(0, 100)}</span>
+        </div>
+        {!detail && result && <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 2, marginTop: 1 }}>↳ {String(result.text).slice(0, 140)}</div>}
+        {detail && (
+          <div style={{ paddingLeft: 2 }}>
+            {call.args && Object.keys(call.args || {}).length > 0 && <JsonView value={call.args} maxHeight={140} />}
+            {tableRows ? <MiniTable rows={tableRows} /> : (parsed ? <JsonView value={parsed} /> : (
+              result && <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>↳ {String(result.text)}</div>
             ))}
           </div>
         )}
@@ -193,7 +321,8 @@
       msgs = [...msgs, { id: nextId(), role: 'system',
         text: `Connected to ${msg.provider} (${msg.model})${msg.project ? ' · ' + msg.project : ''}${authTxt}. Browser open${msg.url ? ' at ' + msg.url : ''}.${msg.resumed ? ' Resumed from saved memory.' : ''}` }];
       return set({ status: 'ready', info, messages: msgs, usage: msg.tokens || rt.usage,
-                   mode: msg.mode || rt.mode || 'auto' });
+                   mode: msg.mode || rt.mode || 'auto',
+                   plan: Array.isArray(msg.plan) && msg.plan.length ? msg.plan : (rt.plan || []) });
     }
     if (ev === 'mode_changed') return set({
       mode: msg.mode,
@@ -208,9 +337,17 @@
       const last = messages[messages.length - 1];
       if (last && last.role === 'assistant' && last.streaming)
         return set({ messages: [...messages.slice(0, -1), { ...last, text: (last.text || '') + delta }] });
-      return set({ messages: [...messages, { id: nextId(), role: 'assistant', text: delta, streaming: true }] });
+      return set({ messages: [...finalizeStreaming(messages), { id: nextId(), role: 'assistant', text: delta, streaming: true }] });
     }
-    if (ev === 'thinking') return set({ status: 'busy' });
+    if (ev === 'thinking') {
+      const delta = msg.delta || '';
+      if (!delta) return set({ status: 'busy' });
+      const last = messages[messages.length - 1];
+      if (last && last.role === 'thinking' && last.streaming)
+        return set({ status: 'busy', messages: [...messages.slice(0, -1), { ...last, text: (last.text || '') + delta }] });
+      return set({ status: 'busy', messages: [...finalizeStreaming(messages), { id: nextId(), role: 'thinking', text: delta, streaming: true }] });
+    }
+    if (ev === 'plan') return set({ plan: Array.isArray(msg.steps) ? msg.steps : [] });
     if (ev === 'tool_call') return set({ status: 'busy', messages: [...finalizeStreaming(messages), { id: nextId(), role: 'tool', tool: msg.tool, args: msg.args }] });
     if (ev === 'tool_result') {
       const t = typeof msg.summary === 'string' ? msg.summary : JSON.stringify(msg.summary || '');
@@ -487,6 +624,8 @@
         </div>
       );
 
+      if (m.role === 'thinking') return <ThinkingBlock key={m.id} m={m} />;
+
       if (m.role === 'assistant') return (
         <div key={m.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
           <MimoAvatar />
@@ -599,6 +738,7 @@
           onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
           onDrop={onDrop}
           style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
+          <PlanCard plan={rt.plan || []} />
           {messages.length === 0 && !connected && (
             <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, fontSize: 12.5, lineHeight: 1.6 }}>
               {canResume ? 'This session is paused. Resume it to continue from where you left off — its memory is restored.'

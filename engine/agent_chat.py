@@ -2037,6 +2037,7 @@ class Deps:
     _ask_state: dict = field(default_factory=dict)  # {"waiting": True} while ask_user is blocked
     mode: str = "auto"        # "auto" (free) | "guided" (tools pause on unproven values/skips)
     provenance: Optional["ProvenanceTracker"] = None  # legitimate value sources this session
+    plan: list = field(default_factory=list)  # live checklist [{step, status, note?}] -> 'plan' events
 
 
 # ── System prompt ──────────────────────────────────────────────────────────
@@ -2052,6 +2053,9 @@ _SYSTEM = (
     "interactive element with a stable 'ref', plus any open dropdown options and visible "
     "validation errors. Use ONLY refs from the MOST RECENT observe. Re-observe after any "
     "navigation or click that changes the page.\n"
+    "- For any multi-step task (3+ actions), call set_plan FIRST with the step list, then "
+    "update_plan as you work (active -> done/failed/skipped). The user watches this checklist "
+    "live — keep it honest and current.\n"
     "- Drive the flow the user asked for, one action at a time (navigate / click / fill / select_option). "
     "These tools handle quirks internally (hidden inputs, number fields, portal dropdowns, "
     "keyboard fallbacks) — express WHAT you want, not HOW to click it. For ANY dropdown or "
@@ -3272,6 +3276,48 @@ def build_agent(model, max_tokens=None):
                 "note": "Recorded as an explicit skip — it will appear in the final report. "
                         "Mention it when you summarize."}
 
+    _PLAN_STATUSES = ("pending", "active", "done", "failed", "skipped")
+
+    @agent.tool
+    async def set_plan(ctx: RunContext[Deps], steps: list) -> dict:
+        """Publish your work plan as a LIVE CHECKLIST the user watches while you work.
+        Call this FIRST for any multi-step task (3+ actions): pass the step descriptions
+        in order (short, outcome-focused — 'Select customer Supertech', not 'call fill').
+        Replaces any previous plan. Then keep it honest with update_plan as you progress.
+        A visible, ticking plan is how the user trusts what you are doing."""
+        plan = [{"step": str(s).strip()[:160], "status": "pending"}
+                for s in (steps or [])[:30] if str(s).strip()]
+        if not plan:
+            return {"ok": False, "error": "steps must be a non-empty list of step descriptions"}
+        ctx.deps.plan[:] = plan
+        emit({"event": "plan", "steps": list(plan)})
+        return {"ok": True, "steps": len(plan),
+                "note": "Plan is now visible. Call update_plan(step_number, 'active') when you "
+                        "start a step and 'done'/'failed'/'skipped' when it finishes."}
+
+    @agent.tool
+    async def update_plan(ctx: RunContext[Deps], step_number: int, status: str,
+                          note: str = "") -> dict:
+        """Update one checklist step (1-based step_number) to: 'active' (working on it now),
+        'done', 'failed', 'skipped', or back to 'pending'. Optional short note shown next to
+        the step (e.g. the value used, or why it failed). Update IMMEDIATELY as you work —
+        a stale checklist is worse than none."""
+        plan = ctx.deps.plan
+        if not plan:
+            return {"ok": False, "error": "no plan set — call set_plan first"}
+        i = int(step_number) - 1
+        if not (0 <= i < len(plan)):
+            return {"ok": False, "error": f"step_number must be 1..{len(plan)}"}
+        status = str(status).strip().lower()
+        if status not in _PLAN_STATUSES:
+            return {"ok": False, "error": f"status must be one of {_PLAN_STATUSES}"}
+        plan[i]["status"] = status
+        if note:
+            plan[i]["note"] = str(note)[:160]
+        emit({"event": "plan", "steps": list(plan)})
+        return {"ok": True,
+                "plan": [f"{j + 1}. [{p['status']}] {p['step']}" for j, p in enumerate(plan)]}
+
     @agent.instructions
     async def _project_memory_and_context(ctx: RunContext[Deps]) -> str:
         """Injected fresh each turn (instructions are regenerated per run and not stored in
@@ -3387,12 +3433,17 @@ async def _stream_handler(ctx, stream):
                 emit({"event": "tool_call", "tool": part.tool_name, "args": args})
             elif kind == "FunctionToolResultEvent":
                 part = ev.part
+                # 1500 keeps most results parseable JSON for the UI's structured
+                # cards (tables/highlighting); parse failures degrade to plain text.
                 emit({"event": "tool_result", "tool": getattr(part, "tool_name", ""),
-                      "summary": _short(getattr(part, "content", ""))})
+                      "summary": _short(getattr(part, "content", ""), 1500)})
             elif kind == "PartStartEvent":
                 part = ev.part
-                if getattr(part, "part_kind", "") == "text" and getattr(part, "content", ""):
+                pk = getattr(part, "part_kind", "")
+                if pk == "text" and getattr(part, "content", ""):
                     emit({"event": "text", "delta": part.content})
+                elif pk == "thinking" and getattr(part, "content", ""):
+                    emit({"event": "thinking", "delta": part.content})
             elif kind == "PartDeltaEvent":
                 delta = ev.delta
                 dk = getattr(delta, "part_delta_kind", "")
@@ -3557,6 +3608,13 @@ class AgentRuntime:
         except Exception:
             pass
         transcript = agent_sessions.load_transcript(self.ats_root, project_id, self.session_id) if resumed else []
+        if resumed:
+            try:
+                meta0 = agent_sessions.read_session(self.ats_root, project_id, self.session_id) or {}
+                if isinstance(meta0.get("plan"), list):
+                    self.deps.plan[:] = meta0["plan"]
+            except Exception:
+                pass
         authed = info.get("authed", "none")
         self.ready_info = {"url": info.get("url", ""), "title": info.get("title", ""),
                            "provider": pname, "model": model_name,
@@ -3564,7 +3622,7 @@ class AgentRuntime:
                            "project": (project or {}).get("name") or project_id or None,
                            "project_id": project_id, "session_id": self.session_id}
         emit({"event": "ready", **self.ready_info, "resumed": resumed, "mode": mode,
-              "transcript": transcript, "tokens": self.session_tokens})
+              "plan": list(self.deps.plan), "transcript": transcript, "tokens": self.session_tokens})
 
     async def chat(self, cmd):
         if not self.agent:
@@ -3691,6 +3749,8 @@ class AgentRuntime:
             agent_sessions.append_bubbles(self.ats_root, self.project_id, self.session_id, bubbles)
             agent_sessions.save_messages(self.ats_root, self.project_id, self.session_id, self.history)
             patch = {"message_count": len(self.history), "status": "idle", "tokens": dict(self.session_tokens)}
+            if self.deps is not None:
+                patch["plan"] = list(self.deps.plan)   # restore the checklist on resume
             meta = agent_sessions.read_session(self.ats_root, self.project_id, self.session_id) or {}
             title = (meta.get("title") or "").strip()
             if message and (not title or title == "New session"):
