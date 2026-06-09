@@ -4234,6 +4234,13 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
                 <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey('MIMO_API_KEY')}>Save</button>
               </div>
             </div>
+            <div className="field">
+              <label>MiMo Ultraspeed key (separate plan) {secretStatus.MIMO_API_KEY2 && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="password" value={keyDraft.MIMO_API_KEY2 || ''} onChange={e => setKeyDraft(d => ({ ...d, MIMO_API_KEY2: e.target.value }))} placeholder={secretStatus.MIMO_API_KEY2 ? '•••••••• (stored)' : 'from MIMO_API_KEY2 env or paste here'} />
+                <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey('MIMO_API_KEY2')}>Save</button>
+              </div>
+            </div>
             <div className="field"><label>Claude model</label><input value={config.llm?.providers?.anthropic?.model || ''} onChange={e => updateLlmModel('anthropic', e.target.value)} placeholder="claude-opus-4-8" /></div>
             <div className="field">
               <label>Claude API key {secretStatus.ATS_ANTHROPIC_KEY && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>

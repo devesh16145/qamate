@@ -312,9 +312,12 @@ function _writeSecret(key, value) {
   fs.writeFileSync(SECRETS_PATH, JSON.stringify(enc));
 }
 function _llmEnv() {
+  // Inject ALL stored secrets whose names are env-var shaped. The old ATS_
+  // prefix filter silently dropped MIMO_API_KEY / MIMO_API_KEY2 saved via
+  // Settings (they only worked when present in the OS user environment).
   const s = _readSecrets();
   const env = {};
-  for (const k of Object.keys(s)) if (k.startsWith('ATS_')) env[k] = s[k];
+  for (const k of Object.keys(s)) if (/^[A-Z][A-Z0-9_]*$/.test(k)) env[k] = s[k];
   return env;
 }
 
