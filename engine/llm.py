@@ -47,6 +47,9 @@ DEFAULT_LLM_CONFIG = {
         # Xiaomi MiMo — OpenAI-compatible (api.xiaomimimo.com/v1, Bearer auth).
         # Current default for explorer/synthesis testing.
         "mimo": {"model": "mimo-v2.5-pro", "base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 4096},
+        # Xiaomi MiMo Ultraspeed — reasoning model (o1-style), faster inference.
+        # Uses max_completion_tokens + no temperature. Same MIMO_API_KEY.
+        "mimo-ultraspeed": {"model": "mimo-v2.5-pro-ultraspeed", "base_url": "https://api.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 8192},
         "anthropic": {"model": "claude-opus-4-8", "api_key_env": "ATS_ANTHROPIC_KEY", "max_tokens": 4096},
         "openai": {"model": "gpt-4o", "api_key_env": "ATS_OPENAI_KEY", "max_tokens": 4096},
         "ollama": {"model": "llama3.1", "base_url": "http://localhost:11434", "max_tokens": 4096},
@@ -131,6 +134,23 @@ class OpenAIProvider(BaseProvider):
         return resp["choices"][0]["message"]["content"]
 
 
+class MimoProvider(BaseProvider):
+    """Xiaomi MiMo — reasoning model (o1-style), covers both v2.5-pro and ultraspeed.
+    - Uses max_completion_tokens (not max_tokens)
+    - Omits temperature (not supported by reasoning models)
+    - Returns final answer only; thinking tokens stay server-side in non-streaming mode"""
+    def complete(self, system, user, max_tokens=None, temperature=0.2):
+        payload = {
+            "model": self.cfg.get("model", "mimo-v2.5-pro"),
+            "max_completion_tokens": max_tokens or self.cfg.get("max_tokens", 8192),
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        }
+        base = self.cfg.get("base_url", "https://api.xiaomimimo.com/v1").rstrip("/")
+        headers = {"Authorization": f"Bearer {self._key()}"}
+        resp = _http_post_json(f"{base}/chat/completions", headers, payload)
+        return resp["choices"][0]["message"]["content"]
+
+
 class OllamaProvider(BaseProvider):
     """Local models — no key required."""
     def complete(self, system, user, max_tokens=None, temperature=0.2):
@@ -148,7 +168,8 @@ class OllamaProvider(BaseProvider):
 _PROVIDERS = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
-    "mimo": OpenAIProvider,   # Xiaomi MiMo speaks the OpenAI chat-completions API
+    "mimo": MimoProvider,               # Xiaomi MiMo v2.5-pro (reasoning)
+    "mimo-ultraspeed": MimoProvider,    # Xiaomi MiMo v2.5-pro-ultraspeed (faster reasoning)
     "ollama": OllamaProvider,
     "mock": MockProvider,
 }

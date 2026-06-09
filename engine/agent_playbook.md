@@ -307,6 +307,28 @@ data. Close that gap:
   test_cases.json, test_data.json, and the test file). Use it to clean up stubs or a bad test —
   confirm with the user before deleting anything you did not just create.
 
+## Tailwind hidden inputs — radio buttons and checkboxes
+
+Many Agrim forms use Tailwind-styled radio buttons and checkboxes where the visible
+circle/tick is a `<span>` or `<label>` wrapper. The actual `<input type="radio">` or
+`<input type="checkbox">` is hidden (visibility:hidden or opacity:0).
+
+**Symptoms of this pattern:**
+- `click_by_text("COD")` or `click("ref")` does nothing — element stays unselected
+- `aria_snapshot` shows the options but clicking via role doesn't select them
+- `inspect_page` shows the input as hidden
+
+**The fix — always use `force_click()`:**
+```
+force_click('input[type="radio"]', nth=0)   # first radio (e.g. COD)
+force_click('input[type="radio"]', nth=1)   # second radio (e.g. PREPAID)
+force_click('input[type="checkbox"]', nth=0) # first checkbox
+force_click('input[value="COD"]', nth=0)     # radio by value when known
+```
+
+**Never** try coordinates, `click_by_text`, or `mouse_click` for these — they hit the
+label wrapper, not the input. React's `onChange` only fires on the real `<input>`.
+
 ## Don'ts
 - Don't perform destructive actions (delete / cancel / reject / accept / pack / log out) unless
   the user's goal explicitly requires it.

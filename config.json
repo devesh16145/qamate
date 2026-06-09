@@ -55,6 +55,16 @@
       ]
     }
   },
+  "browser_backend": "native",
+  "_browser_backend_comment": "Browser layer: 'native' (Python Playwright, default) or 'mcp' (Playwright MCP server, experimental). Toggle via the BACKEND button in the UI. Requires app restart to take effect.",
+  "browser": {
+    "viewport": {
+      "width": 795,
+      "height": 689
+    },
+    "device_scale_factor": 1.2,
+    "_comment": "Match the developer's real Chrome settings so fixed/floating elements render correctly. Get values by running: window.innerWidth, window.innerHeight, window.devicePixelRatio in Chrome DevTools console."
+  },
   "execution": {
     "default_mode": "headed",
     "parallel_workers": 2,
@@ -95,11 +105,34 @@
   "llm": {
     "default_provider": "mimo",
     "providers": {
-      "mimo": { "model": "mimo-v2.5-pro", "base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 4096 },
-      "anthropic": { "model": "claude-opus-4-8", "api_key_env": "ATS_ANTHROPIC_KEY", "max_tokens": 4096 },
-      "openai": { "model": "gpt-4o", "api_key_env": "ATS_OPENAI_KEY", "max_tokens": 4096 },
-      "ollama": { "model": "llama3.1", "base_url": "http://localhost:11434", "max_tokens": 4096 },
-      "mock": {}
+      "mimo": {
+        "model": "mimo-v2.5-pro",
+        "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+        "api_key_env": "MIMO_API_KEY",
+        "max_tokens": 4096
+      },
+      "anthropic": {
+        "model": "claude-opus-4-8",
+        "api_key_env": "ATS_ANTHROPIC_KEY",
+        "max_tokens": 4096
+      },
+      "openai": {
+        "model": "gpt-4o",
+        "api_key_env": "ATS_OPENAI_KEY",
+        "max_tokens": 4096
+      },
+      "ollama": {
+        "model": "llama3.1",
+        "base_url": "http://localhost:11434",
+        "max_tokens": 4096
+      },
+      "mock": {},
+      "mimo-ultraspeed": {
+        "model": "mimo-v2.5-pro-ultraspeed",
+        "base_url": "https://api.xiaomimimo.com/v1",
+        "api_key_env": "MIMO_API_KEY",
+        "max_tokens": 8192
+      }
     },
     "_comment": "Pluggable LLM for the explorer (browser-use agent), PRD extraction + test synthesis. Default = Xiaomi MiMo (OpenAI-compatible, key from MIMO_API_KEY) for testing; generalises to any provider. API keys are NEVER stored here — only the env-var name each provider reads."
   },
