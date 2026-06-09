@@ -479,10 +479,22 @@ def _lint_recording(steps, assertions):
     return warns
 
 
-def _delete_test_case(ats_root, flow_id, tc_id):
+def _tests_root_for(ats_root, project):
+    """The tests root for the current target: a project's OWN suite when it has one
+    (projects/<id>/tests exists), else the legacy shared <ats_root>/tests suite.
+    Pre-suite projects (the original 'test' agent project) keep authoring into the
+    legacy suite — behavior unchanged until a project is explicitly given a suite."""
+    pid = (project or {}).get("id") if isinstance(project, dict) else None
+    try:
+        return project_store.resolve_tests_root(ats_root, pid)
+    except Exception:
+        return os.path.join(ats_root, "tests")
+
+
+def _delete_test_case(ats_root, flow_id, tc_id, tests_dir=None):
     """Remove a test case from a flow: its test_cases.json entry, its test_data.json key, and the
     @pytest.mark.tc/def block in test_<flow>.py. Mirrors main.js's delete-test handler."""
-    flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
+    flow_dir = os.path.join(tests_dir or os.path.join(ats_root, "tests"), "flows", flow_id)
     if not os.path.isdir(flow_dir):
         return {"ok": False, "error": f"flow '{flow_id}' not found"}
     removed, found = [], False
@@ -1893,7 +1905,7 @@ class BrowserSession:
             "expectedResult": expected, "steps": self.steps,
             "assertions": self.assertions, "criteria": [],
         }
-        res = generate_from_review(payload, ats_root)
+        res = generate_from_review(payload, ats_root, tests_dir=_tests_root_for(ats_root, project))
         res = res if isinstance(res, dict) else {"status": "success", "result": str(res)}
         res.update({"recorded_steps": len(self.steps), "checkpoints": len(self.assertions)})
         warns = _lint_recording(self.steps, self.assertions)
@@ -2525,7 +2537,7 @@ def build_agent(model, max_tokens=None):
         - test_steps: list of {step, action, expected} dicts matching the spec table.
         Writes to tests/flows/<flow_id>/<flow_id>_user_stories.json."""
         ats_root = ctx.deps.ats_root
-        flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
+        flow_dir = os.path.join(_tests_root_for(ats_root, ctx.deps.project), "flows", flow_id)
         if not os.path.isdir(flow_dir):
             return {"status": "error", "message": f"flow '{flow_id}' not found"}
         stories_path = os.path.join(flow_dir, f"{flow_id}_user_stories.json")
@@ -2559,8 +2571,9 @@ def build_agent(model, max_tokens=None):
         modal/overlay, an empty state, an error toast), then fix the flow and re-run. Returns
         {passed, flaky?, summary, tail, error_detail?}."""
         ats_root = ctx.deps.ats_root
-        flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
-        if not os.path.isdir(os.path.join(ats_root, "tests")) or not os.path.isdir(flow_dir):
+        tests_root = _tests_root_for(ats_root, ctx.deps.project)
+        flow_dir = os.path.join(tests_root, "flows", flow_id)
+        if not os.path.isdir(tests_root) or not os.path.isdir(flow_dir):
             return {"ok": False, "error": f"flow '{flow_id}' not found under tests/flows"}
         underscored = tc_id.replace("-", "_")
         base_env = os.environ.copy()
@@ -2658,7 +2671,8 @@ def build_agent(model, max_tokens=None):
         """Read the GENERATED test code (the test_<flow>.py function) for a test case so you can
         diagnose why run_test_case failed. Read-only. To fix: clear_recording, re-drive the
         corrected flow, and create_test_case again (same tc_id overwrites)."""
-        path = os.path.join(ctx.deps.ats_root, "tests", "flows", flow_id, f"test_{flow_id}.py")
+        path = os.path.join(_tests_root_for(ctx.deps.ats_root, ctx.deps.project),
+                            "flows", flow_id, f"test_{flow_id}.py")
         if not os.path.isfile(path):
             return {"ok": False, "error": f"test file for flow '{flow_id}' not found"}
         try:
@@ -2693,7 +2707,8 @@ def build_agent(model, max_tokens=None):
         """Delete a test case from a flow — removes it from test_cases.json, test_data.json AND the
         test_<flow>.py function. Use it to clean up a stub or a test you replaced. Confirm with the
         user before deleting anything you did not just create yourself."""
-        return _delete_test_case(ctx.deps.ats_root, flow_id, tc_id)
+        return _delete_test_case(ctx.deps.ats_root, flow_id, tc_id,
+                                 tests_dir=_tests_root_for(ctx.deps.ats_root, ctx.deps.project))
 
     # ── ATS app features: use the tool itself AS A USER (read/change settings,
     # browse the suite, read reports). File-backed — no browser involved. ──
@@ -2746,7 +2761,7 @@ def build_agent(model, max_tokens=None):
     async def list_test_flows(ctx: RunContext[Deps]) -> dict:
         """List the test flows and their test case IDs (tests/flows/*/test_cases.json) —
         the suite shown in the app's left panel."""
-        flows_dir = os.path.join(ctx.deps.ats_root, "tests", "flows")
+        flows_dir = os.path.join(_tests_root_for(ctx.deps.ats_root, ctx.deps.project), "flows")
         out = []
         try:
             names = sorted(os.listdir(flows_dir))
@@ -2764,7 +2779,8 @@ def build_agent(model, max_tokens=None):
     @agent.tool
     async def read_test_cases(ctx: RunContext[Deps], flow_id: str) -> dict:
         """Read the test cases in a flow (id, description, checkpoints, expected_result)."""
-        tcf = os.path.join(ctx.deps.ats_root, "tests", "flows", flow_id, "test_cases.json")
+        tcf = os.path.join(_tests_root_for(ctx.deps.ats_root, ctx.deps.project),
+                           "flows", flow_id, "test_cases.json")
         tcs = _read_json_file(tcf)
         if tcs is None:
             return {"ok": False, "error": f"flow '{flow_id}' not found"}

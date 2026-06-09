@@ -73,7 +73,7 @@ function sendToRenderer(channel, data) {
 // IPC: Get test flows from test_cases.json files
 // ──────────────────────────────────────
 ipcMain.handle('get-test-flows', async () => {
-  const flowsDir = path.join(__dirname, 'tests', 'flows');
+  const flowsDir = _flowsDir();
   const flows = [];
 
   if (!fs.existsSync(flowsDir)) return flows;
@@ -204,6 +204,7 @@ ipcMain.handle('run-tests', async (event, options) => {
     mode: options.mode,
     execMode: options.execMode || 'sequential',
     parallel: options.parallel,
+    project_id: _activeProjectId(),   // scope the run to the active project's suite
     zoom: options.zoom || '',
     userIndex: options.userIndex ?? 0,
     sellerUserIndex: options.sellerUserIndex ?? options.userIndex ?? 0,
@@ -284,6 +285,32 @@ ipcMain.handle('open-trace', async (event, tracePath) => {
 // synthesize (L3). Mirrors the analyze-coverage spawn+stream pattern.
 // ════════════════════════════════════════════════════════════════
 const PROJECT_STORE = path.join(__dirname, 'engine', 'project_store.py');
+
+// ── App-level project scoping ────────────────────────────────────────────────
+// The ACTIVE project (projects/_index.json) scopes the whole app: each project
+// owns its own tests (projects/<id>/tests) so a new project starts fresh.
+// No active project = the legacy built-in Agrim suite (<ats_root>/tests).
+// Path convention mirrored in engine/project_store.py tests_root() — keep in sync.
+function _activeProjectId() {
+  try {
+    const idx = JSON.parse(fs.readFileSync(path.join(__dirname, 'projects', '_index.json'), 'utf8'));
+    const id = idx && idx.active;
+    if (id && fs.existsSync(path.join(__dirname, 'projects', id, 'project.json'))) return id;
+  } catch (e) { /* no projects yet */ }
+  return null;
+}
+function _testsRoot() {
+  // A project owns a suite only when projects/<id>/tests EXISTS (created by
+  // project creation or explicit activation) — pre-suite projects (the original
+  // 'test' agent project) keep showing the legacy built-in suite unchanged.
+  const pid = _activeProjectId();
+  if (pid) {
+    const own = path.join(__dirname, 'projects', pid, 'tests');
+    if (fs.existsSync(own)) return own;
+  }
+  return path.join(__dirname, 'tests');
+}
+function _flowsDir() { return path.join(_testsRoot(), 'flows'); }
 const AGENT_RECORDER = path.join(__dirname, 'engine', 'agent_recorder.py');
 const SECRETS_PATH = path.join(app.getPath('userData'), 'ats_secrets.json');
 
@@ -1243,7 +1270,7 @@ ipcMain.handle('analyze-coverage', async (event, { flowId, tcId, headed, stopTer
 
 ipcMain.handle('get-user-stories', async (event, { flowId }) => {
   try {
-    const usFile = path.join(__dirname, 'tests', 'flows', flowId, `${flowId}_user_stories.json`);
+    const usFile = path.join(_flowsDir(),flowId, `${flowId}_user_stories.json`);
     if (fs.existsSync(usFile)) {
       return JSON.parse(fs.readFileSync(usFile, 'utf8'));
     }
@@ -1254,7 +1281,7 @@ ipcMain.handle('get-user-stories', async (event, { flowId }) => {
 });
 ipcMain.handle('save-user-stories', async (event, { flowId, data }) => {
   try {
-    const usFile = path.join(__dirname, 'tests', 'flows', flowId, `${flowId}_user_stories.json`);
+    const usFile = path.join(_flowsDir(),flowId, `${flowId}_user_stories.json`);
     fs.writeFileSync(usFile, JSON.stringify(data, null, 2), 'utf8');
     return { success: true };
   } catch (e) {
@@ -1263,7 +1290,7 @@ ipcMain.handle('save-user-stories', async (event, { flowId, data }) => {
 });
 ipcMain.handle('get-tc-meta', async (event, { flowId, tcId }) => {
   try {
-    const tcFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_cases.json');
+    const tcFile = path.join(_flowsDir(),flowId, 'test_cases.json');
     if (fs.existsSync(tcFile)) {
       const tcs = JSON.parse(fs.readFileSync(tcFile, 'utf8'));
       const tc = tcs.find(t => t.tc_id === tcId);
@@ -1276,7 +1303,7 @@ ipcMain.handle('get-tc-meta', async (event, { flowId, tcId }) => {
 });
 ipcMain.handle('save-tc-meta', async (event, { flowId, tcId, heading, description }) => {
   try {
-    const tcFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_cases.json');
+    const tcFile = path.join(_flowsDir(),flowId, 'test_cases.json');
     if (fs.existsSync(tcFile)) {
       const tcs = JSON.parse(fs.readFileSync(tcFile, 'utf8'));
       const tc = tcs.find(t => t.tc_id === tcId);
@@ -1295,7 +1322,7 @@ ipcMain.handle('save-tc-meta', async (event, { flowId, tcId, heading, descriptio
 // IPC: Delete test case — removes from test_cases.json, test_data.json, and Python file
 ipcMain.handle('delete-test', async (event, { flowId, tcId }) => {
   try {
-    const flowDir = path.join(__dirname, 'tests', 'flows', flowId);
+    const flowDir = path.join(_flowsDir(),flowId);
     const tcFile = path.join(flowDir, 'test_cases.json');
     const dataFile = path.join(flowDir, 'test_data.json');
 
@@ -1341,7 +1368,7 @@ ipcMain.handle('delete-test', async (event, { flowId, tcId }) => {
 });
 ipcMain.handle('get-tc-data', async (event, { flowId, tcId }) => {
   try {
-    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
     if (fs.existsSync(dataFile)) {
       const data = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
       const tcData = data[tcId] || {};
@@ -1363,7 +1390,7 @@ ipcMain.handle('get-tc-data', async (event, { flowId, tcId }) => {
 
 ipcMain.handle('save-tc-data', async (event, { flowId, tcId, data, variant }) => {
   try {
-    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
     let allData = {};
     if (fs.existsSync(dataFile)) {
       allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
@@ -1392,7 +1419,7 @@ ipcMain.handle('save-tc-data', async (event, { flowId, tcId, data, variant }) =>
 
 ipcMain.handle('add-tc-variant', async (event, { flowId, tcId, variantName, copyFrom }) => {
   try {
-    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
     let allData = {};
     if (fs.existsSync(dataFile)) {
       allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
@@ -1418,7 +1445,7 @@ ipcMain.handle('add-tc-variant', async (event, { flowId, tcId, variantName, copy
 
 ipcMain.handle('delete-tc-variant', async (event, { flowId, tcId, variantName }) => {
   try {
-    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
     if (!fs.existsSync(dataFile)) return { success: false, error: 'File not found' };
     const allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
     const tcData = allData[tcId];
@@ -1439,7 +1466,7 @@ ipcMain.handle('delete-tc-variant', async (event, { flowId, tcId, variantName })
 
 ipcMain.handle('rename-tc-variant', async (event, { flowId, tcId, oldName, newName }) => {
   try {
-    const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+    const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
     if (!fs.existsSync(dataFile)) return { success: false, error: 'File not found' };
     const allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
     const tcData = allData[tcId];
@@ -1461,7 +1488,7 @@ ipcMain.handle('get-bulk-tc-data', async (event, items) => {
   const result = {};
   for (const { flowId, tcId } of items) {
     try {
-      const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+      const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
       if (fs.existsSync(dataFile)) {
         const data = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
         result[tcId] = data[tcId] || {};
@@ -1484,7 +1511,7 @@ ipcMain.handle('save-bulk-tc-data', async (event, items) => {
   }
   try {
     for (const [flowId, updates] of Object.entries(byFlow)) {
-      const dataFile = path.join(__dirname, 'tests', 'flows', flowId, 'test_data.json');
+      const dataFile = path.join(_flowsDir(),flowId, 'test_data.json');
       let allData = {};
       if (fs.existsSync(dataFile)) {
         allData = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));

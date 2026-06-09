@@ -627,7 +627,7 @@ def _generate_assertion_code(assertion):
 
 # ── Generate test code from reviewed steps ──
 
-def generate_from_review(payload, ats_root):
+def generate_from_review(payload, ats_root, tests_dir=None):
     """
     Generate test code from reviewed steps with assertions.
     payload = {
@@ -636,6 +636,8 @@ def generate_from_review(payload, ats_root):
         "assertions": [...],
         "criteria": [...],
     }
+    tests_dir: optional absolute tests root (projects/<id>/tests for project-
+    scoped suites); defaults to the legacy <ats_root>/tests.
     """
     tc_id = payload["tc_id"]
     description = payload.get("description", "")
@@ -646,7 +648,7 @@ def generate_from_review(payload, ats_root):
     assertions = payload.get("assertions", [])
     criteria = payload.get("criteria", [])
 
-    flow_dir = os.path.join(ats_root, "tests", "flows", flow_id)
+    flow_dir = os.path.join(tests_dir or os.path.join(ats_root, "tests"), "flows", flow_id)
     os.makedirs(flow_dir, exist_ok=True)
     # Every flow must be a Python package (like the hand-written flows) so pytest imports
     # it consistently when collecting the whole tests/ tree, not just when pointed at the

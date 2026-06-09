@@ -70,6 +70,7 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
         "mode": mode,
         "parallel": parallel,
         "tc_ids": tc_ids,
+        "project_id": project_id or None,
         "status": "Running",
     }
     meta_path = os.path.join(results_dir, "run_metadata.json")
@@ -83,7 +84,10 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     underscored_ids = [tc_id.replace("-", "_") for tc_id in tc_ids]
     filter_expr = " or ".join(underscored_ids)
 
-    tests_dir = os.path.join(ats_root, "tests")
+    # Project mode: a project with its OWN suite (projects/<id>/tests) runs that;
+    # otherwise the legacy shared suite — existing runs are unchanged.
+    import project_store as _ps
+    tests_dir = _ps.resolve_tests_root(ats_root, project_id)
     junit_path = os.path.join(results_dir, "junit_results.xml")
 
     cmd = [

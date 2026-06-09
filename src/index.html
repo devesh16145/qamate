@@ -1620,6 +1620,60 @@ const nowTs = () => {
 };
 
 /* ──────────────────────────────────────────────────────────────
+   New Project modal — a project gets its OWN settings (URL/env/auth in
+   projects/<id>/project.json) and its OWN empty test suite. Nothing is
+   inherited from the built-in Agrim suite.
+   ────────────────────────────────────────────────────────────── */
+function NewProjectModal({ onClose, onCreated, toast }) {
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [envName, setEnvName] = useState('dev');
+  const [busy, setBusy] = useState(false);
+  const iStyle = { width: '100%', fontSize: 12.5, padding: '6px 9px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' };
+  const create = async () => {
+    if (!name.trim() || !url.trim()) { toast('Name and app URL are required'); return; }
+    setBusy(true);
+    const r = await window.ats.createProject({ name: name.trim(), baseUrl: url.trim(), environment: envName.trim() || 'dev' });
+    setBusy(false);
+    if (!r || r.status !== 'success') { toast((r && r.message) || 'Could not create project'); return; }
+    toast(`Project "${name.trim()}" created — fresh suite, now active`);
+    onCreated(r.project);
+  };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ width: 420, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 14px 40px rgba(0,0,0,0.35)', padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <b style={{ fontSize: 13.5 }}>New project</b>
+          <span style={{ flex: 1 }}></span>
+          <button className="editor-action" onClick={onClose}><I.X size={13} /></button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 12 }}>
+          A project is one web app under test. It starts with an <b>empty test suite</b> and its
+          <b> own settings</b> — nothing is shared with the built-in ATS suite. The agent, test
+          tree, and runs all scope to the active project.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Project name
+            <input style={iStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Acme Storefront" autoFocus /></label>
+          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>App URL (the environment's base URL)
+            <input style={iStyle} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://staging.acme.com/" /></label>
+          <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Environment name
+            <input style={iStyle} value={envName} onChange={e => setEnvName(e.target.value)} placeholder="dev" /></label>
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 10, lineHeight: 1.5 }}>
+          Login: after creating, use the agent's session capture (or Capture Login) to store
+          authentication for this project — credentials are kept in the project, not in config.json.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+          <button className="editor-action" onClick={onClose}>Cancel</button>
+          <button className="editor-action primary" onClick={create} disabled={busy}>{busy ? 'Creating…' : 'Create project'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
    Title Bar
    ────────────────────────────────────────────────────────────── */
 function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, leftTool, setLeftTool, setLeftCollapsed, leftCollapsed, rightCollapsed, setRightCollapsed, agentDocked, setAgentDocked, historyDocked, setHistoryDocked, setActiveTab, openResultsTab, openTab, tabs, toast }) {
@@ -1629,16 +1683,43 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
   const envRef = useRef(null);
   const menuRef = useRef(null);
   const overflowRef = useRef(null);
+  // App-level project: the active project scopes the whole app (its own test
+  // suite under projects/<id>/tests); null = the built-in legacy suite.
+  const [projOpen, setProjOpen] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [activeProj, setActiveProj] = useState(null);
+  const [newProjOpen, setNewProjOpen] = useState(false);
+  const projRef = useRef(null);
+
+  useEffect(() => {
+    window.ats.listProjects().then(r => {
+      setProjects((r && r.projects) || []);
+      setActiveProj((r && r.active) || null);
+    }).catch(() => {});
+  }, []);
+
+  const switchProject = async (pid) => {
+    setProjOpen(false);
+    if ((pid || null) === (activeProj || null)) return;
+    const r = await window.ats.setActiveProject({ projectId: pid || '-' });
+    if (r && r.status === 'error') { toast(r.message || 'Could not switch project'); return; }
+    window.location.reload();   // every panel re-reads the scoped suite
+  };
 
   useEffect(() => {
     const h = (e) => {
       if (envRef.current && !envRef.current.contains(e.target)) setEnvOpen(false);
       if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
       if (overflowRef.current && !overflowRef.current.contains(e.target)) setOverflowOpen(false);
+      if (projRef.current && !projRef.current.contains(e.target)) setProjOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
+  const activeProjObj = projects.find(p => p.id === activeProj) || null;
+  const projLabel = activeProjObj ? (activeProjObj.name || activeProjObj.id) : 'ATS';
+  const projHasSuite = (p) => !!(p && p._has_suite);
 
   // Is the Live Log / Results tab currently open?
   const hasLogTab = tabs && tabs.some(t => t.kind === 'log');
@@ -1667,22 +1748,48 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         )}
       </div>
 
-      <button className="proj-switch" title="Switch project">
-        <div className="swatch">A</div>
-        <div className="name">ATS</div>
-        <div ref={envRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, paddingLeft: 8, marginLeft: 4, borderLeft: '1px solid var(--border)', color: 'var(--text-3)', fontSize: 12, fontWeight: 500 }}
-             onClick={(e) => { e.stopPropagation(); setEnvOpen(o => !o); }}>
-          <span>{env}</span>
-          <I.ChevronDown size={11} className="caret" />
-        </div>
-        {envOpen && (
-          <div className="dd-menu" style={{ minWidth: 140, top: 'calc(100% + 4px)', left: 'auto', right: 0 }}>
-            {[['dev', 'dev'], ['staging', 'staging'], ['prod', 'prod']].map(([v, l]) => (
-              <button key={v} onClick={(e) => { e.stopPropagation(); setEnv(v); setEnvOpen(false); }}>{l}</button>
+      <div ref={projRef} style={{ position: 'relative' }}>
+        <button className="proj-switch" title={activeProjObj ? `Project: ${projLabel} — its own settings and test suite` : 'Built-in ATS suite — click to switch project'}
+          onClick={() => setProjOpen(o => !o)}>
+          <div className="swatch">{(projLabel[0] || 'A').toUpperCase()}</div>
+          <div className="name">{projLabel}</div>
+          <I.ChevronDown size={11} className="caret" style={{ marginLeft: 2, color: 'var(--text-3)' }} />
+          <div ref={envRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, paddingLeft: 8, marginLeft: 4, borderLeft: '1px solid var(--border)', color: 'var(--text-3)', fontSize: 12, fontWeight: 500 }}
+               onClick={(e) => { e.stopPropagation(); setEnvOpen(o => !o); }}>
+            <span>{env}</span>
+            <I.ChevronDown size={11} className="caret" />
+          </div>
+          {envOpen && (
+            <div className="dd-menu" style={{ minWidth: 140, top: 'calc(100% + 4px)', left: 'auto', right: 0 }}>
+              {[['dev', 'dev'], ['staging', 'staging'], ['prod', 'prod']].map(([v, l]) => (
+                <button key={v} onClick={(e) => { e.stopPropagation(); setEnv(v); setEnvOpen(false); }}>{l}</button>
+              ))}
+            </div>
+          )}
+        </button>
+        {projOpen && (
+          <div className="dd-menu" style={{ minWidth: 230, top: 'calc(100% + 4px)' }}>
+            <button onClick={() => switchProject(null)}>
+              <span style={{ fontWeight: !activeProj ? 700 : 400 }}>ATS (built-in suite)</span>
+              {!activeProj && <span className="sub">active</span>}
+            </button>
+            {projects.length > 0 && <div className="div"></div>}
+            {projects.map(p => (
+              <button key={p.id} onClick={() => switchProject(p.id)}
+                title={(p.environments ? Object.values(p.environments)[0] : '') + (projHasSuite(p) ? '' : ' — no own suite yet; shows the built-in suite')}>
+                <span style={{ fontWeight: p.id === activeProj ? 700 : 400 }}>{p.name || p.id}</span>
+                <span className="sub">{p.id === activeProj ? 'active' : (projHasSuite(p) ? 'own suite' : 'built-in')}</span>
+              </button>
             ))}
+            <div className="div"></div>
+            <button onClick={() => { setProjOpen(false); setNewProjOpen(true); }}>+ New project…</button>
           </div>
         )}
-      </button>
+        {newProjOpen && (
+          <NewProjectModal toast={toast} onClose={() => setNewProjOpen(false)}
+            onCreated={() => { setNewProjOpen(false); window.location.reload(); }} />
+        )}
+      </div>
 
       <div className="tb-spacer" />
 
