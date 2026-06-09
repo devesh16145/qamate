@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Agrim ATS — History</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { height: 100%; margin: 0; background: var(--bg, #fff); color: var(--text-1, #1a1a1a); font-family: var(--font, Inter, sans-serif); }
+    .hw-root   { display: flex; flex-direction: column; height: 100%; }
+    .hw-head   { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border, #e2e2e2); background: var(--surface-1, #f7f7f7); flex-shrink: 0; }
+    .hw-title  { font-weight: 700; font-size: 13px; flex: 1; }
+    .hw-list   { flex: 1; overflow-y: auto; }
+    .hw-row    { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--border, #eee); width: 100%; text-align: left; background: none; color: inherit; }
+    .hw-row:hover { background: var(--hover, #f0f4ff); }
+    .hw-dot    { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-3, #aaa); }
+    .hw-dot.pass { background: var(--pass, #22c55e); }
+    .hw-dot.fail { background: var(--fail, #ef4444); }
+    .hw-info   { flex: 1; min-width: 0; }
+    .hw-when   { font-size: 11.5px; font-family: var(--mono, monospace); color: var(--text-2, #666); }
+    .hw-tcs    { font-size: 11px; color: var(--text-3, #aaa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hw-stats  { font-size: 11.5px; font-family: var(--mono, monospace); display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+    .hw-stats .p { color: var(--pass, #22c55e); font-weight: 600; }
+    .hw-stats .f { color: var(--fail, #ef4444); font-weight: 600; }
+    .hw-stats .d { color: var(--text-3, #aaa); }
+    .hw-empty  { padding: 32px 16px; text-align: center; color: var(--text-3, #aaa); font-size: 12px; }
+    .rv-cta    { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border-radius: 4px; font-size: 11.5px; cursor: pointer; border: 1px solid var(--border, #ddd); background: var(--surface-2, #fff); color: var(--text-1, #222); }
+    .rv-cta:hover { background: var(--hover, #f0f4ff); }
+    .ic        { display: inline-flex; align-items: center; justify-content: center; padding: 3px; border-radius: 3px; background: none; border: none; cursor: pointer; color: var(--text-2, #666); }
+    .ic:hover  { background: var(--hover, #eee); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="vendor/react.development.js"></script>
+  <script src="vendor/react-dom.development.js"></script>
+  <script src="vendor/babel.min.js"></script>
+  <script src="vendor/icons.js"></script>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const I = window.I;
+
+    function fmtDur(s) { return s >= 60 ? `${(s/60).toFixed(1)}m` : `${s.toFixed(1)}s`; }
+
+    function HistoryWindow() {
+      const [history, setHistory] = useState([]);
+
+      useEffect(() => {
+        async function load() {
+          try {
+            const raw = await window.ats.getHistory();
+            const mapped = (raw || []).map(h => ({
+              id: h.id,
+              when: h.when || h.id || '',
+              status: (h.passed > 0 && h.failed === 0) ? 'pass' : (h.failed > 0 ? 'fail' : 'skip'),
+              passed: h.passed || 0,
+              failed: h.failed || 0,
+              duration: h.duration || 0,
+              tcs: (h.results || []).map(r => r.tc_id).filter(Boolean),
+            }));
+            setHistory(mapped.length ? mapped : []);
+          } catch (e) { console.error(e); }
+        }
+        load();
+        // Refresh every 10s so new runs appear
+        const t = setInterval(load, 10000);
+        return () => clearInterval(t);
+      }, []);
+
+      const dock     = () => { try { window.ats.historyDock(); } catch(e) {} };
+      const openRun  = (id) => { try { window.ats.openRunInMain(id); } catch(e) {} };
+
+      return (
+        <div className="hw-root">
+          <div className="hw-head">
+            <I.History size={14} style={{ color: 'var(--accent, #2563eb)' }} />
+            <span className="hw-title">Run History</span>
+            <span style={{ fontSize: 11, color: 'var(--text-3, #aaa)' }}>{history.length} runs</span>
+            <button className="rv-cta" onClick={dock} title="Dock into the main IDE right panel">
+              <I.PanelRight size={12} /> Dock
+            </button>
+          </div>
+          <div className="hw-list">
+            {history.length === 0 ? (
+              <div className="hw-empty">No test runs yet.<br/>Run some tests to see history here.</div>
+            ) : history.map(h => (
+              <button className="hw-row" key={h.id} onClick={() => openRun(h.id)} title={`Open run ${h.id}`}>
+                <span className={`hw-dot ${h.status}`}></span>
+                <div className="hw-info">
+                  <div className="hw-when">{h.when.slice(0, 19).replace('T', ' ')}</div>
+                  <div className="hw-tcs">{h.tcs[0]}{h.tcs.length > 1 ? ` +${h.tcs.length - 1} more` : ''}</div>
+                </div>
+                <div className="hw-stats">
+                  <span className="p">{h.passed}✓</span>
+                  {h.failed > 0 && <span className="f">{h.failed}✗</span>}
+                  <span className="d">{fmtDur(h.duration)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<HistoryWindow />);
+  </script>
+</body>
+</html>

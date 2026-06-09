@@ -65,7 +65,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project_store
 import agent_sessions
 import input_registry as _ireg
-from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link
+from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link, _slug
 from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
 import llm as _llm
 from smart_locator import smart_locator, SelfHealError, to_locator
@@ -528,6 +528,52 @@ def _delete_test_case(ats_root, flow_id, tc_id):
     return {"ok": True, "tc_id": tc_id, "flow": flow_id, "removed": removed}
 
 
+# ARIA roles we treat as interactive during inspect hybrid augmentation.
+_ARIA_INTERACTIVE_ROLES = {
+    "button", "link", "textbox", "combobox", "checkbox", "radio",
+    "spinbutton", "slider", "searchbox", "switch", "listbox", "option",
+    "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "treeitem",
+}
+
+
+def _parse_aria_snapshot(snap: str) -> list:
+    """Parse Playwright aria_snapshot() YAML output into flat {role, name} dicts.
+    Only returns elements whose role is in _ARIA_INTERACTIVE_ROLES."""
+    elements = []
+    for line in snap.splitlines():
+        s = line.strip()
+        m = re.match(r'^-\s+(\w[\w-]*)\s+"([^"]*)"', s)
+        if m:
+            role, name = m.group(1), m.group(2)
+            if name and role in _ARIA_INTERACTIVE_ROLES:
+                elements.append({"role": role, "name": name})
+    return elements
+
+
+def _aria_el_to_model(role: str, name: str, idx: int) -> dict:
+    """Build a minimal element model from an aria snapshot element.
+    Primary locator is get_by_role(role, name=name) — stable across DOM reshuffles."""
+    ref = _slug(name, role) if name else f"{role}-{idx}"
+    return {
+        "ref": ref,
+        "tag": "",
+        "role": role,
+        "name": name,
+        "placeholder": "",
+        "input_type": "",
+        "required": False,
+        "disabled": False,
+        "visible": True,
+        "hidden_reason": "",
+        "broken": False,
+        "primary": {"by": "role", "role": role, "name": name},
+        "fallbacks": [{"by": "text", "value": name}],
+        "fingerprint": {"tag": "", "role": role, "name": name, "text": name},
+        "test_id": "",
+        "source": "aria",
+    }
+
+
 class BrowserSession:
     """Holds the persistent page the agent drives, the ref->element map from the
     last inspect, the recorded steps/checkpoints for test authoring, and any
@@ -545,11 +591,13 @@ class BrowserSession:
         self.input_counter = 0
         self.issues = []        # breakage: console errors / JS exceptions / failed requests
         self._auth_failures = []  # 401/403 responses since last navigate (reset each navigate)
+        self._api_errors = []   # 400-499 non-auth responses since last navigate (reset each navigate)
         self._start_args = None  # remembered so restart() can relaunch after a crash/close
 
     # -- lifecycle -----------------------------------------------------------
     def start(self, start_url="", storage_state=None, headless=True, credentials=None,
-              save_state_path=None, record_first_step=True, extra_init_states=None):
+              save_state_path=None, record_first_step=True, extra_init_states=None,
+              browser_config=None):
         """Launch the browser, reuse a saved login if present, and — if we still
         land on a login form — log in ONCE from configured credentials and persist
         a fresh storage_state for next time (so the agent never has to log in by
@@ -563,12 +611,30 @@ class BrowserSession:
         self._start_args = dict(start_url=start_url, storage_state=storage_state,
                                 headless=headless, credentials=credentials,
                                 save_state_path=save_state_path,
-                                extra_init_states=extra_init_states)
+                                extra_init_states=extra_init_states,
+                                browser_config=browser_config)
         from playwright.sync_api import sync_playwright
         self.pw = sync_playwright().start()
         self.browser = self.pw.chromium.launch(
             headless=headless, channel="chrome", args=["--disable-gpu", "--no-sandbox"])
-        ctx_args = {"viewport": {"width": 1280, "height": 720}}
+        # Match the user's real Chrome so fixed/floating elements render correctly.
+        # Headed: no_viewport=True lets Playwright use the actual OS window size (same as conftest.py).
+        # Headless: use explicit viewport+DPR from config.json "browser" section (no real window exists).
+        _bcfg = browser_config or {}
+        _dpr = float(_bcfg.get("device_scale_factor", 1.0))
+        ctx_args = {}
+        if not headless:
+            # no_viewport lets Playwright use the actual OS window size (same as conftest.py).
+            # device_scale_factor is incompatible with no_viewport — the real window handles DPR.
+            ctx_args["no_viewport"] = True
+        else:
+            _vp = _bcfg.get("viewport", {})
+            ctx_args["viewport"] = {
+                "width": int(_vp.get("width", 1280)),
+                "height": int(_vp.get("height", 720)),
+            }
+            if _dpr != 1.0:
+                ctx_args["device_scale_factor"] = _dpr
         if storage_state:
             ctx_args["storage_state"] = storage_state
         self.context = self.browser.new_context(**ctx_args)
@@ -609,14 +675,17 @@ class BrowserSession:
         self.page.on("pageerror", lambda e: self._issue("js_exception", e))
         self.page.on("requestfailed", lambda r: self._issue(
             "request_failed", f"{getattr(r, 'method', '')} {getattr(r, 'url', '')}"))
-        # Track 401/403 responses — used by navigate() to surface auth failures clearly.
+        # Track 4xx responses. 401/403 -> auth signal; 400/4xx -> api_errors surfaced in action results.
         def _on_response(resp):
             try:
-                if resp.status in (401, 403):
-                    u = getattr(resp, "url", "")
-                    # Ignore favicon / analytics noise; focus on same-origin API calls.
-                    if not u.endswith((".ico", ".png", ".gif", ".woff", ".woff2")):
-                        self._auth_failures.append(f"{resp.status} {u[:120]}")
+                s = resp.status
+                u = getattr(resp, "url", "")
+                if u.endswith((".ico", ".png", ".gif", ".woff", ".woff2", ".css", ".js")):
+                    return
+                if s in (401, 403):
+                    self._auth_failures.append(f"{s} {u[:120]}")
+                elif 400 <= s < 500:
+                    self._api_errors.append({"status": s, "url": u[:120]})
             except Exception:
                 pass
         self.page.on("response", _on_response)
@@ -879,7 +948,11 @@ class BrowserSession:
         Searches the entire document including portal elements."""
         try:
             # Tier 1: role=option (MUI, Radix, standard)
-            loc = self.page.get_by_role("option", name=text, exact=exact)
+            # Use filter(has_text=) first to handle decorated option text like
+            # "VENDOR NAME(phone)FULL LEGAL NAME" when searching "VENDOR NAME"
+            loc = self.page.get_by_role("option").filter(has_text=text)
+            if loc.count() == 0 and exact:
+                loc = self.page.get_by_role("option", name=text, exact=True)
             if loc.count() > 0:
                 loc.first.click()
                 self._settle()
@@ -988,13 +1061,139 @@ class BrowserSession:
             return {"ok": False, "error": str(e)[:200]}
 
     def mouse_click_coords(self, x: float, y: float) -> dict:
-        """Click at pixel coordinates. Works on any element regardless of ARIA roles."""
+        """Click at pixel coordinates. Snaps to nearest interactive DOM element for precision.
+        Vision gives approximate coords (±15px); elementFromPoint snaps to the real element."""
+        before_api = len(self._api_errors)
         try:
-            self.page.mouse.click(x, y)
+            snapped = False
+            try:
+                handle = self.page.evaluate_handle(
+                    """([x, y]) => {
+                        const el = document.elementFromPoint(x, y);
+                        if (!el) return null;
+                        return el.closest('button, [role="button"], a, [data-testid], input, select, [tabindex]') || el;
+                    }""",
+                    [x, y]
+                )
+                el_handle = handle.as_element()
+                if el_handle:
+                    el_handle.click()
+                    snapped = True
+            except Exception:
+                pass
+            if not snapped:
+                self.page.mouse.click(x, y)
             self._settle()
-            result = {"ok": True, "x": x, "y": y, "url": self._url()}
+            result = {"ok": True, "x": x, "y": y, "url": self._url(), "dom_snapped": snapped}
             if self.overlay_opened():
                 result["overlay_opened"] = True
+            new_api = self._api_errors[before_api:]
+            if new_api:
+                result["api_errors"] = new_api
+                dom_errors = self._scan_dom_errors()
+                if dom_errors:
+                    result["page_validation_errors"] = dom_errors
+                else:
+                    result["hint"] = "API error(s) detected — call scan_page_errors() to read any validation messages the page is showing."
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
+
+    def _scan_dom_errors(self) -> list:
+        """Scan visible validation errors from the DOM: aria-invalid fields, MUI helper text,
+        role=alert elements. Returns a list of {type, text} dicts."""
+        try:
+            return self.page.evaluate("""() => {
+                const seen = new Set(), errors = [];
+                const add = (type, text) => {
+                    const t = (text || '').trim();
+                    if (t && t.length < 400 && !seen.has(t)) { seen.add(t); errors.push({type, text: t}); }
+                };
+                document.querySelectorAll('[aria-invalid="true"]').forEach(el => {
+                    const did = el.getAttribute('aria-describedby');
+                    const msg = did ? ((document.getElementById(did) || {}).textContent || '') : '';
+                    const label = el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('id') || 'field';
+                    add('field_error', label + (msg ? ': ' + msg : ': invalid'));
+                });
+                document.querySelectorAll('.MuiFormHelperText-root.Mui-error').forEach(el => {
+                    if (el.offsetParent) add('field_error', el.textContent);
+                });
+                document.querySelectorAll('[role="alert"]').forEach(el => {
+                    if (el.offsetParent) add('alert', el.textContent);
+                });
+                document.querySelectorAll('.error-message, [class*="errorText"], [class*="error-text"], [class*="ErrorMessage"]').forEach(el => {
+                    if (el.offsetParent) add('ui_error', el.textContent);
+                });
+                return errors;
+            }""") or []
+        except Exception:
+            return []
+
+    def scan_page_errors_dom(self) -> dict:
+        """Public tool entry: scan the page for visible validation/API error messages."""
+        errors = self._scan_dom_errors()
+        return {"ok": True, "count": len(errors), "errors": errors,
+                "hint": ("No visible validation errors found in the DOM. "
+                         "The error may be in a toast that has already dismissed, or only in the network response body."
+                         if not errors else None)}
+
+    @staticmethod
+    def _is_hidden_input_error(err: str) -> bool:
+        """True when a click failed because the element is hidden or pointer-intercepted
+        — the signal that we should retry with set_checked / force=True."""
+        e = err.lower()
+        return any(k in e for k in (
+            "element is not visible", "is not visible", "intercepts pointer",
+            "hidden", "not actionable", "covered by another element",
+        ))
+
+    def _smart_click(self, locator, loc_str: str, input_type: str = "") -> str:
+        """Click with automatic fallback for Tailwind hidden radio/checkbox inputs.
+        Returns the rawLine string actually used (click vs set_checked vs force).
+        Raises on final failure so callers can surface the error."""
+        try:
+            locator.click()
+            return f"{loc_str}.click()"
+        except Exception as e:
+            if not self._is_hidden_input_error(str(e)):
+                raise
+        # Element is hidden or pointer-intercepted — use the right Playwright API.
+        # set_checked is Playwright's dedicated radio/checkbox method; it's more
+        # reliable than force=True and handles label-interception correctly.
+        itype = input_type.lower()
+        if itype in ("radio", "checkbox") or "radio" in loc_str or "checkbox" in loc_str:
+            locator.set_checked(True, force=True)
+            return f"{loc_str}.set_checked(True, force=True)"
+        locator.click(force=True)
+        return f"{loc_str}.click(force=True)"
+
+    def force_click_hidden(self, selector: str, nth: int = 0) -> dict:
+        """Click a hidden input (Tailwind radio/checkbox) with force=True, bypassing
+        Playwright's visibility check. The actual <input> is hidden; the styled wrapper
+        is what's visible. React's onChange only fires on the real input."""
+        try:
+            loc = self.page.locator(selector)
+            n = loc.count()
+            if n == 0:
+                return {"ok": False, "error": f"selector '{selector}' matched 0 elements"}
+            target = loc.nth(nth) if nth < n else loc.first
+            before = len(self.issues)
+            before_api = len(self._api_errors)
+            # Use set_checked for radio/checkbox (Playwright's dedicated API),
+            # force click for everything else.
+            itype = selector.lower()
+            if "radio" in itype or "checkbox" in itype:
+                target.set_checked(True, force=True)
+            else:
+                target.click(force=True)
+            self._settle()
+            result = {"ok": True, "selector": selector, "nth": nth, "url": self._url()}
+            new_api = self._api_errors[before_api:]
+            if new_api:
+                result["api_errors"] = new_api
+                dom_errors = self._scan_dom_errors()
+                if dom_errors:
+                    result["page_validation_errors"] = dom_errors
             return result
         except Exception as e:
             return {"ok": False, "error": str(e)[:200]}
@@ -1065,6 +1264,7 @@ class BrowserSession:
         if not self._ensure_alive():
             return {"ok": False, "error": "browser is closed and could not be restarted; call restart_browser"}
         self._auth_failures = []   # reset per-navigate counter
+        self._api_errors = []
         before = len(self.issues)
         try:
             self._goto(url)
@@ -1107,19 +1307,28 @@ class BrowserSession:
     def inspect(self, limit=40, include_hidden=False):
         if not self._ensure_alive():
             return {"ok": False, "error": "browser is closed and could not be restarted; call restart_browser"}
+
+        # --- Native snapshot (rich locators: test_id, fingerprint, hidden elements) ---
+        raw = []
+        native_err = None
         try:
             raw = _comprehensive_snapshot(self.page)
         except Exception as e:
             if _is_closed_error(e) and self._ensure_alive():
-                raw = _comprehensive_snapshot(self.page)
+                try:
+                    raw = _comprehensive_snapshot(self.page)
+                except Exception as e2:
+                    native_err = str(e2)[:160]
             else:
-                return {"ok": False, "error": f"inspect failed: {str(e)[:160]}"}
+                native_err = str(e)[:160]
+
         models, seen = [], {}
-        for el in raw:
+        for el in (raw or []):
             if not isinstance(el, dict):
                 continue
             if "_error" in el:
-                return {"ok": False, "error": el["_error"]}
+                native_err = el["_error"]
+                break
             if not _label(el):
                 continue
             m = element_to_model(el)
@@ -1130,6 +1339,28 @@ class BrowserSession:
             else:
                 seen[ref] = 0
             models.append(m)
+
+        # --- Aria snapshot augmentation (adds fixed-footer buttons, hidden inputs, etc. native misses) ---
+        try:
+            snap = self.page.locator("body").aria_snapshot()
+            native_names_lower = {m["name"].lower() for m in models if m.get("name")}
+            for i, ae in enumerate(_parse_aria_snapshot(snap)):
+                if ae["name"].lower() not in native_names_lower:
+                    am = _aria_el_to_model(ae["role"], ae["name"], i)
+                    ref = am["ref"]
+                    if ref in seen:
+                        seen[ref] += 1
+                        am = dict(am, ref=f"{ref}-{seen[ref]}")
+                    else:
+                        seen[ref] = 0
+                    models.append(am)
+                    native_names_lower.add(ae["name"].lower())
+        except Exception:
+            pass  # aria augmentation optional — native-only result is still valid
+
+        if not models:
+            return {"ok": False, "error": native_err or "no interactive elements found on the page"}
+
         self.by_ref = {m["ref"]: m for m in models}
 
         compact, hidden_total = [], 0
@@ -1220,6 +1451,7 @@ class BrowserSession:
             return {"ok": False, "error": f"could not resolve '{ref}': {str(e)[:140]}"}
 
         before = len(self.issues)
+        before_api = len(self._api_errors)
         name = el.get("name") or ref
         self.step_id += 1
         try:
@@ -1238,9 +1470,9 @@ class BrowserSession:
                                    "type": "select", "target": loc_str,
                                    "targetDescription": f'Select "{val}" in {name}',
                                    "value": val, "varName": ""})
-            else:  # click
-                live.click()
-                self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.click()',
+            else:  # click — auto-fallback for Tailwind hidden radio/checkbox inputs
+                used_raw = self._smart_click(live, loc_str, el.get("input_type", ""))
+                self.steps.append({"id": self.step_id, "rawLine": used_raw,
                                    "type": "click", "target": loc_str,
                                    "targetDescription": f'Click {name}', "value": "", "varName": ""})
         except Exception as e:
@@ -1249,6 +1481,14 @@ class BrowserSession:
         self._settle()
         result = {"ok": True, "url": self._url(), "title": self._title(),
                   "new_issues": self.issues[before:]}
+        new_api = self._api_errors[before_api:]
+        if new_api:
+            result["api_errors"] = new_api
+            dom_errors = self._scan_dom_errors()
+            if dom_errors:
+                result["page_validation_errors"] = dom_errors
+            else:
+                result["hint"] = "API error(s) detected — call scan_page_errors() to read any validation messages the page is showing."
         if warning:
             result["warning"] = warning
         if kind == "click" and self.overlay_opened():
@@ -1257,6 +1497,13 @@ class BrowserSession:
             # After typing into a field, wait for autocomplete options (API response may be async).
             # If any appear, include them directly so the agent doesn't need another round-trip.
             opts = self.get_options()["options"]
+            if not opts:
+                # SPA autocomplete may fire an API call that returns after networkidle — retry once
+                try:
+                    self.page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+                opts = self.get_options()["options"]
             if opts:
                 result["autocomplete_options"] = opts
                 result["hint"] = "Call click_option(text) with one of these values to select it."
@@ -1268,6 +1515,7 @@ class BrowserSession:
         if not self._ensure_alive():
             return {"ok": False, "error": "browser is closed; call restart_browser"}
         before = len(self.issues)
+        before_api = len(self._api_errors)
         self.step_id += 1
         try:
             loc = self.page.locator(ref)
@@ -1292,9 +1540,9 @@ class BrowserSession:
                                    "type": "select", "target": loc_str,
                                    "targetDescription": f'Select "{val}" in {ref}',
                                    "value": val, "varName": ""})
-            else:  # click
-                target.click()
-                self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.click()',
+            else:  # click — auto-fallback for Tailwind hidden radio/checkbox inputs
+                used_raw = self._smart_click(target, loc_str, ref)
+                self.steps.append({"id": self.step_id, "rawLine": used_raw,
                                    "type": "click", "target": loc_str,
                                    "targetDescription": f'Click {ref}', "value": "", "varName": ""})
         except Exception as e:
@@ -1303,6 +1551,14 @@ class BrowserSession:
         self._settle()
         result = {"ok": True, "url": self._url(), "title": self._title(),
                   "new_issues": self.issues[before:]}
+        new_api = self._api_errors[before_api:]
+        if new_api:
+            result["api_errors"] = new_api
+            dom_errors = self._scan_dom_errors()
+            if dom_errors:
+                result["page_validation_errors"] = dom_errors
+            else:
+                result["hint"] = "API error(s) detected — call scan_page_errors() to read any validation messages the page is showing."
         if n > 1:
             result["warning"] = f"Selector '{ref}' matched {n} elements — acted on the first one."
         if kind == "click" and self.overlay_opened():
@@ -1696,10 +1952,43 @@ def build_agent(model, max_tokens=None):
         """Click at pixel coordinates (x, y) on the page. Use this when:
         - look() or find_on_screen() told you where something is visually
         - click_option / click_by_text failed on a fully custom component
-        This bypasses ALL selector/role/ref lookups — it clicks exactly where a
-        human would click, making it reliable for ANY visible element.
+        Internally snaps to the nearest interactive DOM element via elementFromPoint —
+        vision gives the neighborhood, DOM gives the exact target. More reliable than
+        raw coordinates for small buttons (delete icons, row actions, chips).
         Get coordinates from find_on_screen() or estimate from a look() description."""
         return await _bro(ctx.deps.session.mouse_click_coords, x, y)
+
+    @agent.tool
+    async def scan_page_errors(ctx: RunContext[Deps]) -> dict:
+        """Scan the live DOM for visible validation errors, field errors, and alerts.
+        Call this IMMEDIATELY after any action that triggers a 400/4xx API response,
+        or whenever the page might be showing a validation message. Finds:
+        - aria-invalid fields + their error descriptions
+        - MUI FormHelperText error messages
+        - role=alert elements (snackbars, inline alerts)
+        - Generic error-class text elements
+        Returns {count, errors: [{type, text}]}. Much more reliable than vision for
+        small red text under form fields."""
+        return await _bro(ctx.deps.session.scan_page_errors_dom)
+
+    @agent.tool
+    async def force_click(ctx: RunContext[Deps], selector: str, nth: int = 0) -> dict:
+        """Click a hidden input using force=True, bypassing Playwright's visibility check.
+        USE FOR: Tailwind-styled radio buttons and checkboxes where the real <input> is
+        hidden behind a styled wrapper. Regular click() and click_by_text() hit the
+        visible label/wrapper but React's onChange only fires on the actual input.
+
+        selector: CSS selector for the hidden input, e.g.:
+          'input[type="radio"]'    — radio buttons (nth=0 for first, nth=1 for second...)
+          'input[type="checkbox"]' — checkboxes
+          'input[value="COD"]'     — radio by value
+        nth: index when selector matches multiple elements (0-based, default 0)
+
+        Example — select COD payment method:
+          force_click('input[type="radio"]', nth=0)
+        Example — select PREPAID:
+          force_click('input[type="radio"]', nth=1)"""
+        return await _bro(ctx.deps.session.force_click_hidden, selector, nth)
 
     @agent.tool
     async def find_on_screen(ctx: RunContext[Deps], description: str) -> dict:
@@ -2774,10 +3063,20 @@ class AgentRuntime:
                     except Exception as _e:
                         log(f"[agent] could not load admin storage state: {_e}")
 
-        self.session = BrowserSession()
+        _backend = (self.config.get("browser_backend") or "native").lower()
+        if _backend == "mcp":
+            from mcp_browser import MCPBrowserSession
+            self.session = MCPBrowserSession()
+            log("[agent] browser backend: Playwright MCP server (experimental)")
+        else:
+            self.session = BrowserSession()
         try:
-            info = await _bro(self.session.start, start_url, load_state, headless, creds, ss,
-                              True, extra_init_states)
+            if _backend == "mcp":
+                info = await _bro(self.session.start, start_url, load_state, headless,
+                                  creds, ss, True, extra_init_states)
+            else:
+                info = await _bro(self.session.start, start_url, load_state, headless, creds, ss,
+                                  True, extra_init_states, self.config.get("browser") or {})
         except Exception as e:
             emit({"event": "error", "message": f"browser failed to start: {e}"})
             return

@@ -124,7 +124,7 @@ def record_scenario(ats_root, project_id, goal, tc_id, flow_id, start_path="",
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless, channel="chrome", args=["--disable-gpu", "--no-sandbox"])
-        ctx_args = {"viewport": {"width": 1280, "height": 720}}
+        ctx_args = {"no_viewport": True} if not headless else {"viewport": {"width": 1280, "height": 720}}
         if storage_state:
             ctx_args["storage_state"] = storage_state
         context = browser.new_context(**ctx_args)

@@ -1208,6 +1208,22 @@ function App() {
   const [env, setEnv] = useState('dev');
   const [zoom, setZoom] = useState('100');
   const [headless, setHeadless] = useState(false);
+  const [browserBackend, setBrowserBackendState] = useState('native');
+
+  // Sync browserBackend with config on mount
+  React.useEffect(() => {
+    window.ats.getConfig().then(cfg => {
+      if (cfg && cfg.browser_backend) setBrowserBackendState(cfg.browser_backend);
+    }).catch(() => {});
+  }, []);
+
+  const toggleBrowserBackend = () => {
+    const next = browserBackend === 'native' ? 'mcp' : 'native';
+    window.ats.updateSetting('browser_backend', next).then(() => {
+      setBrowserBackendState(next);
+      toast(`Browser backend switched to ${next.toUpperCase()} — restart agent to apply`, 'info');
+    }).catch(e => toast(`Failed to switch backend: ${e}`, 'error'));
+  };
 
   // Right tool window: collapsible sections
   const [sectionsOpen, setSectionsOpen] = useState(new Set(['last', 'failures', 'trend', 'history']));
@@ -1513,6 +1529,7 @@ function App() {
               admin={admin} setAdmin={setAdmin}
               execMode={execMode} setExecMode={setExecMode}
               headless={headless} setHeadless={setHeadless}
+              browserBackend={browserBackend} toggleBrowserBackend={toggleBrowserBackend}
               expandedTcs={expandedTcs}
               toggleExpandTc={toggleExpandTc}
               checkedVersions={checkedVersions}
@@ -1808,6 +1825,7 @@ function RunBar(props) {
     running, onRun, onStop, runProgress, checkedCount,
     seller, setSeller, admin, setAdmin, execMode, setExecMode,
     zoom, setZoom, headless, setHeadless,
+    browserBackend, toggleBrowserBackend,
     leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed,
   } = props;
   const sellerObj = USERS.find(u => u.id === seller) || USERS[0];
@@ -1863,6 +1881,18 @@ function RunBar(props) {
       <button className="chip" onClick={() => setHeadless(h => !h)} title={headless ? 'Headless · click for headed' : 'Headed · click for headless'}>
         {headless ? <I.EyeOff size={12} className="ic-sm" /> : <I.Eye size={12} className="ic-sm" />}
         <span>{headless ? 'Headless' : 'Headed'}</span>
+      </button>
+
+      <button
+        className="chip"
+        onClick={toggleBrowserBackend}
+        title={browserBackend === 'mcp'
+          ? 'Browser: Playwright MCP server (experimental) · click to switch to native'
+          : 'Browser: Native Python Playwright · click to switch to MCP (experimental)'}
+        style={browserBackend === 'mcp' ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {}}
+      >
+        <I.Layers size={12} className="ic-sm" />
+        <span>{browserBackend === 'mcp' ? 'MCP' : 'NATIVE'}</span>
       </button>
 
       <div style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 4px' }}></div>
@@ -4187,7 +4217,8 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
             <div className="field">
               <label>Default provider</label>
               <select value={config.llm?.default_provider || 'mimo'} onChange={e => updateLlm('default_provider', e.target.value)}>
-                <option value="mimo">Xiaomi MiMo</option>
+                <option value="mimo">Xiaomi MiMo (v2.5-pro)</option>
+                <option value="mimo-ultraspeed">Xiaomi MiMo Ultraspeed (reasoning)</option>
                 <option value="anthropic">Claude (Anthropic)</option>
                 <option value="openai">OpenAI</option>
                 <option value="ollama">Local (Ollama)</option>
@@ -4195,6 +4226,7 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
               </select>
             </div>
             <div className="field"><label>MiMo model</label><input value={config.llm?.providers?.mimo?.model || ''} onChange={e => updateLlmModel('mimo', e.target.value)} placeholder="mimo-v2.5-pro" /></div>
+            <div className="field"><label>MiMo Ultraspeed model</label><input value={config.llm?.providers?.['mimo-ultraspeed']?.model || ''} onChange={e => updateLlmModel('mimo-ultraspeed', e.target.value)} placeholder="mimo-v2.5-pro-ultraspeed" /></div>
             <div className="field">
               <label>MiMo API key {secretStatus.MIMO_API_KEY && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
               <div style={{ display: 'flex', gap: 6 }}>

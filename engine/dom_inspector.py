@@ -236,7 +236,8 @@ def replay_and_snapshot(steps, headless=True, stop_before_terminal=False, on_log
             channel="chrome",
             args=["--disable-gpu", "--no-sandbox"],
         )
-        context = browser.new_context(viewport={"width": 1280, "height": 720})
+        ctx_args = {"no_viewport": True} if not headless else {"viewport": {"width": 1280, "height": 720}}
+        context = browser.new_context(**ctx_args)
         page = context.new_page()
         # 10s gives slow SPA elements (Tailwind class chains, async-rendered
         # OTP boxes) a fair chance to mount, while the consecutive-failure

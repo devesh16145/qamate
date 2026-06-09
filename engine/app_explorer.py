@@ -233,7 +233,7 @@ def explore(ats_root, project_id, max_pages=40, max_depth=3, headless=True, on_l
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless, channel="chrome",
                                     args=["--disable-gpu", "--no-sandbox"])
-        ctx_args = {"viewport": {"width": 1280, "height": 720}}
+        ctx_args = {"no_viewport": True} if not headless else {"viewport": {"width": 1280, "height": 720}}
         if storage_state:
             ctx_args["storage_state"] = storage_state
         context = browser.new_context(**ctx_args)
