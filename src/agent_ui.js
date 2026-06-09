@@ -379,6 +379,76 @@
     return 'var(--text-3)';
   }
 
+  /* ── Shared session chrome: ONE status chip, ONE mode chip, ONE setup bar.
+     Used identically in the start composer, the stopped-session bar, and the
+     live header, so controls never change shape or disappear. ─────────────── */
+  const STATUS_LABEL = {
+    idle: 'stopped', starting: 'starting…', ready: 'ready',
+    busy: 'working…', awaiting_input: 'needs your answer', error: 'error',
+  };
+  function StatusChip({ rt }) {
+    const st = (rt && rt.status) || 'idle';
+    const pulse = st === 'busy' || st === 'starting';
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600, color: statusColor(rt, false), border: '1px solid var(--accent-bg)', borderRadius: 20, padding: '2px 9px', userSelect: 'none', whiteSpace: 'nowrap' }}>
+        {pulse ? <span className="live-dot"></span>
+               : <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor(rt, false), flexShrink: 0 }}></span>}
+        {STATUS_LABEL[st] || st}
+      </span>
+    );
+  }
+  function ModeChip({ mode, onToggle, disabled }) {
+    const guided = mode === 'guided';
+    return (
+      <button onClick={onToggle} disabled={disabled}
+        title={guided
+          ? 'GUIDED — the agent pauses for your input on any value you did not provide, and on skips. Click for AUTO.'
+          : 'AUTO — the agent proceeds freely; made-up values are reported as assumptions for review. Click for GUIDED.'}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', background: guided ? 'rgba(245,158,11,0.10)' : 'transparent', color: guided ? '#f59e0b' : 'var(--text-2)', border: '1px solid ' + (guided ? '#f59e0b' : 'var(--border)'), borderRadius: 20, padding: '2px 9px', opacity: disabled ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+        {guided ? <Ic.Pause size={9} /> : <Ic.Play size={9} />}{guided ? 'GUIDED' : 'AUTO'}
+      </button>
+    );
+  }
+  /* Session setup controls — identical everywhere a session can be (re)started. */
+  function SetupBar({ provider, setProvider, headed, setHeaded, toolBudget, setToolBudget, mode, onToggleMode, children }) {
+    return (
+      <React.Fragment>
+        <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider for this session" style={{ fontSize: 11, padding: '3px 6px' }}>
+          <option value="mimo">Xiaomi MiMo</option>
+          <option value="mimo-ultraspeed">MiMo Ultraspeed</option>
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="ollama">Local (Ollama)</option>
+        </select>
+        <ModeChip mode={mode} onToggle={onToggleMode} />
+        <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Show the automation browser window while the agent works">
+          <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+          Watch live
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }} title="Max tool calls per turn before the agent pauses and summarises. 'Never' runs until it finishes.">
+          <Ic.Zap size={11} />
+          <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ fontSize: 11, padding: '3px 6px' }}>
+            <option value={30}>30 steps</option>
+            <option value={50}>50 steps</option>
+            <option value={100}>100 steps</option>
+            <option value={0}>Never pause</option>
+          </select>
+        </label>
+        <span style={{ flex: 1 }}></span>
+        {children}
+      </React.Fragment>
+    );
+  }
+  /* Header action button — one consistent shape for Context/Memory/Browser/Reset/Stop. */
+  function HBtn({ onClick, title, danger, disabled, children }) {
+    return (
+      <button className="rv-cta" onClick={onClick} disabled={disabled} title={title}
+        style={danger ? { color: 'var(--fail, #dc2626)', borderColor: 'rgba(220,38,38,0.4)' } : undefined}>
+        {children}
+      </button>
+    );
+  }
+
   /* ── Session list (left sidebar in window mode; full-width "page 1" when docked) ── */
   function SessionSidebar({ projects, projectId, setProjectId, sessions, activeId, runtimeMap,
                             onSelect, onNew, onRename, onDelete, full, onUndock, onClose }) {
@@ -474,9 +544,12 @@
   /* ── Active session chat (ALWAYS rendered with a real session — no conditional
      hooks; the "no session" case is handled by AgentApp, never here) ────────── */
   function SessionChat({ session, rt, provider, setProvider, headed, setHeaded, toolBudget, setToolBudget,
-                         onStart, onSend, onStop, onReset, onOpenBrowser, onToggleMode, setInput, setAttachments, projectId, toast, onBack }) {
+                         startMode, setStartMode, onStart, onStartAuto, onSend, onStop, onReset, onOpenBrowser,
+                         onToggleMode, setInput, setAttachments, projectId, toast, onBack }) {
     const scrollRef = useRef(null);
     const taRef = useRef(null);
+    const [confirmReset, setConfirmReset] = useState(false);
+    const [autoOpen, setAutoOpen] = useState(false);
     const caretRef = useRef(null);
     const [ctxOpen, setCtxOpen] = useState(false);
     const [ctxDir, setCtxDir] = useState('');
@@ -674,9 +747,16 @@
     return (
       <div className="agent-pane">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--accent-bg)', position: 'relative', flexWrap: 'wrap' }}>
-          {onBack && <button className="rv-cta" onClick={onBack} title="Back to sessions"><Ic.ChevronLeft size={13} /></button>}
+          {onBack && <HBtn onClick={onBack} title="Back to sessions"><Ic.ChevronLeft size={13} /></HBtn>}
           <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }} title={session.title}>{session.title || 'Untitled session'}</b>
-          {info && <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>{info.model}{info.auth ? ' · ' + (info.auth_via || 'auth') : ' · no auth'}</span>}
+          <StatusChip rt={rt} />
+          {connected && <ModeChip mode={rt.mode} onToggle={onToggleMode} disabled={busy} />}
+          {info && (
+            <span title={`Provider: ${info.provider} · Model: ${info.model} · ${info.auth ? 'Authenticated via ' + (info.auth_via || 'saved session') : 'NOT logged in — set credentials in Settings'}`}
+              style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+              {info.model}{info.auth ? '' : ' · no auth'}
+            </span>
+          )}
           {connected && (
             <span title={`Tokens this session${(rt.usage && rt.usage.estimated) ? ' (estimated — the model provider did not report usage)' : ''} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, total ${(rt.usage && rt.usage.total) || 0}`}
               style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'var(--mono)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -684,12 +764,19 @@
             </span>
           )}
           <span style={{ flex: 1 }}></span>
-          {busy && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}><span className="live-dot"></span> {status === 'starting' ? 'starting' : 'working'}…</span>}
-          {awaitingInput && <span style={{ fontSize: 10.5, color: '#f59e0b', fontWeight: 600 }}>⏸ Needs your answer ↓</span>}
-          <button className="rv-cta" onClick={toggleCtx} title="Scoped project folder the agent explores"><Ic.Folder size={12} /> Context</button>
-          <button className="rv-cta" onClick={() => window.ats.agentMemoryOpen({ projectId: ctxPid() })} title="Open the agent's memory file (AGENT_MEMORY.md)"><Ic.FileText size={12} /> Memory</button>
-          {connected && <button className="rv-cta" onClick={onReset} disabled={busy} title="Clear this session's conversation"><Ic.RefreshCw size={12} /></button>}
-          {connected && <button className="rv-cta" onClick={onStop} title="Stop this session + close its browser">Stop</button>}
+          <HBtn onClick={toggleCtx} title="Scoped project folder the agent explores"><Ic.Folder size={12} /> Context</HBtn>
+          <HBtn onClick={() => window.ats.agentMemoryOpen({ projectId: ctxPid() })} title="Open the agent's memory file (AGENT_MEMORY.md)"><Ic.FileText size={12} /> Memory</HBtn>
+          <HBtn onClick={onOpenBrowser} title="Show the agent's browser (or open the app under test)"><Ic.ExternalLink size={12} /> Browser</HBtn>
+          {connected && (confirmReset ? (
+            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ fontSize: 10.5, color: 'var(--fail, #dc2626)' }}>Clear chat?</span>
+              <HBtn danger onClick={() => { setConfirmReset(false); onReset(); }} title="Yes — clear this session's conversation"><Ic.Check size={12} /></HBtn>
+              <HBtn onClick={() => setConfirmReset(false)} title="Cancel"><Ic.X size={12} /></HBtn>
+            </span>
+          ) : (
+            <HBtn onClick={() => setConfirmReset(true)} disabled={busy} title="Clear this session's conversation (asks to confirm)"><Ic.RefreshCw size={12} /></HBtn>
+          ))}
+          {connected && <HBtn danger onClick={onStop} title="Stop this session and close its browser (you can resume later)"><Ic.Pause size={12} /> Stop</HBtn>}
           {ctxOpen && (
             <div style={{ position: 'absolute', top: '100%', right: 12, zIndex: 30, width: 340, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
@@ -759,30 +846,22 @@
 
         {!connected ? (
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--accent-bg)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider" style={{ fontSize: 11, padding: '3px 6px' }}>
-              <option value="mimo">Xiaomi MiMo</option>
-              <option value="mimo-ultraspeed">MiMo Ultraspeed</option>
-              <option value="anthropic">Claude (Anthropic)</option>
-              <option value="openai">OpenAI</option>
-              <option value="ollama">Local (Ollama)</option>
-            </select>
-            <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none' }}>
-              <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
-              Watch live
-            </label>
-            <label style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }} title="Max tool calls per turn before the agent pauses and summarises. 'Never' runs until it finishes.">
-              <Ic.Zap size={11} />
-              <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ fontSize: 11, padding: '3px 6px' }}>
-                <option value={30}>30 steps</option>
-                <option value={50}>50 steps</option>
-                <option value={100}>100 steps</option>
-                <option value={0}>Never pause</option>
-              </select>
-            </label>
-            <span style={{ flex: 1 }}></span>
-            <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
-              <Ic.Play size={13} /> {status === 'starting' ? 'Starting…' : (canResume ? 'Resume' : 'Start session')}
-            </button>
+            {autoOpen && onStartAuto && (
+              <RunAutoModal projectId={projectId} onClose={() => setAutoOpen(false)}
+                onConfirm={(msg) => { setAutoOpen(false); onStartAuto(msg, []); }} />
+            )}
+            <SetupBar provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+              toolBudget={toolBudget} setToolBudget={setToolBudget}
+              mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
+              {onStartAuto && (
+                <button className="rv-cta" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised (starts a new session)">
+                  <Ic.Zap size={12} /> Auto
+                </button>
+              )}
+              <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
+                <Ic.Play size={13} /> {status === 'starting' ? 'Starting…' : (canResume ? 'Resume session' : 'Start session')}
+              </button>
+            </SetupBar>
           </div>
         ) : (
           <div style={{ padding: '8px 16px 10px', borderTop: '1px solid var(--accent-bg)' }}>
@@ -810,21 +889,10 @@
                   ))}
                 </div>
               )}
-              <button className="rv-cta" onClick={onToggleMode}
-                disabled={status !== 'ready' && status !== 'awaiting_input'}
-                title={rt.mode === 'guided'
-                  ? 'GUIDED — the agent pauses for your input on any value you did not provide, and on skips. Click for AUTO.'
-                  : 'AUTO — the agent proceeds freely; made-up values are reported as assumptions. Click for GUIDED.'}
-                style={{ alignSelf: 'flex-end', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px',
-                         color: rt.mode === 'guided' ? '#f59e0b' : 'var(--text-2)',
-                         borderColor: rt.mode === 'guided' ? '#f59e0b' : undefined }}>
-                {rt.mode === 'guided' ? 'GUIDED' : 'AUTO'}
-              </button>
               <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images" style={{ alignSelf: 'flex-end' }}><Ic.Upload size={14} /></button>
-              <button className="rv-cta" onClick={onOpenBrowser} title="Open the app under test in your browser" style={{ alignSelf: 'flex-end' }}><Ic.ExternalLink size={14} /></button>
               <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
                 onBlur={() => setTimeout(() => setAtOpen(false), 120)}
-                placeholder={awaitingInput ? 'Type your answer and press Enter…' : status === 'ready' ? 'Message MIMO… (Enter to send · @ to reference a file · drop files to attach)' : 'MIMO is working…'}
+                placeholder={awaitingInput ? 'The agent is waiting — type your answer and press Enter…' : status === 'ready' ? 'Message the agent… (Enter to send · @ to reference a file · drop files to attach)' : 'The agent is working — it will be ready for your next message shortly…'}
                 disabled={status !== 'ready' && status !== 'awaiting_input'}
                 style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '9px 10px', fontFamily: 'inherit', background: awaitingInput ? 'rgba(245,158,11,0.06)' : 'var(--editor)', color: 'var(--text)', border: awaitingInput ? '1.5px solid #f59e0b' : '1px solid var(--border)', borderRadius: 'var(--radius-lg)', outline: 'none', transition: 'border-color 0.15s, background 0.15s' }} />
               <button className="rv-cta primary" onClick={onSend} disabled={(status !== 'ready' && status !== 'awaiting_input') || (!(rt.input || '').trim() && !attachments.length)} style={{ alignSelf: 'flex-end' }}><Ic.Play size={13} /></button>
@@ -837,7 +905,8 @@
 
   /* ── Root ────────────────────────────────────────────────────────────────── */
   /* ── Chat initiator: compose a first message to start a brand-new session ──── */
-  function StartComposer({ onStart, headed, setHeaded, toolBudget, setToolBudget, onOpenBrowser, projectId }) {
+  function StartComposer({ onStart, provider, setProvider, headed, setHeaded, toolBudget, setToolBudget,
+                           startMode, setStartMode, onOpenBrowser, projectId }) {
     const [text, setText] = useState('');
     const [atts, setAtts] = useState([]);
     const [autoOpen, setAutoOpen] = useState(false);
@@ -867,23 +936,14 @@
         <div className="ses-init-bar">
           <button className="rv-cta sm" onClick={addFiles} title="Attach documents or images"><Ic.Upload size={13} /></button>
           <button className="rv-cta sm" onClick={onOpenBrowser} title="Open the app under test in your browser"><Ic.ExternalLink size={13} /></button>
-          <label className="ses-headed" title="Show the automation browser window while the agent works">
-            <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} /> Watch live
-          </label>
-          <label style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }} title="Max tool calls per turn before the agent pauses. 'Never' runs until done.">
-            <Ic.Zap size={11} />
-            <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ fontSize: 11, padding: '2px 5px' }}>
-              <option value={30}>30 steps</option>
-              <option value={50}>50 steps</option>
-              <option value={100}>100 steps</option>
-              <option value={0}>Never pause</option>
-            </select>
-          </label>
-          <span style={{ flex: 1 }}></span>
-          <button className="rv-cta sm" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised">
-            <Ic.Zap size={12} /> Auto
-          </button>
-          <button className="rv-cta primary sm" onClick={go} disabled={!text.trim() && !atts.length}><Ic.Play size={13} /> Start</button>
+          <SetupBar provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+            toolBudget={toolBudget} setToolBudget={setToolBudget}
+            mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
+            <button className="rv-cta sm" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised">
+              <Ic.Zap size={12} /> Auto
+            </button>
+            <button className="rv-cta primary sm" onClick={go} disabled={!text.trim() && !atts.length}><Ic.Play size={13} /> Start</button>
+          </SetupBar>
         </div>
       </div>
     );
@@ -1074,6 +1134,7 @@
     const [activeId, setActiveId] = useState(null);
     const [runtime, setRuntime] = useState({});
     const [provider, setProvider] = useState('mimo');
+    const [startMode, setStartMode] = useState('auto');   // initial GUIDED/AUTO for new sessions
     const [headed, setHeaded] = useState(false);
     const [toolBudget, setToolBudget] = useState(30);
     const [toasts, setToasts] = useState([]);
@@ -1157,7 +1218,7 @@
       const sid = activeId; if (!sid) return;
       const sess = sessions.find((s) => s.id === sid) || {};
       patchRt(sid, (cur) => ({ status: 'starting', messages: [...cur.messages, { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' }] }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, title: sess.title || '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: sess.title || '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Compose-to-start: create a session, start it, and queue the first message (sent on 'ready').
@@ -1172,7 +1233,7 @@
           ...(text ? [{ id: nextId(), role: 'user', text, attachments: (atts || []).map((a) => a.name) }] : []),
           { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' },
         ] } }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, title: '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Open the app under test (the agent's current page, else the seller URL from config) in the system browser.
@@ -1236,12 +1297,18 @@
       <SessionChat session={activeSession} rt={activeRt}
         provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
         toolBudget={toolBudget} setToolBudget={setToolBudget}
-        onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset} onOpenBrowser={openBrowser} onToggleMode={onToggleMode}
+        startMode={startMode} setStartMode={setStartMode}
+        onStart={onStart} onStartAuto={startWithMessage} onSend={onSend} onStop={onStop} onReset={onReset}
+        onOpenBrowser={openBrowser} onToggleMode={onToggleMode}
         setInput={(v) => patchRt(activeId, { input: v })}
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
         projectId={projectId} toast={toast} onBack={onBack} />
     );
-    const initiator = <StartComposer onStart={startWithMessage} headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} onOpenBrowser={openBrowser} projectId={projectId} />;
+    const initiator = <StartComposer onStart={startWithMessage}
+      provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+      toolBudget={toolBudget} setToolBudget={setToolBudget}
+      startMode={startMode} setStartMode={setStartMode}
+      onOpenBrowser={openBrowser} projectId={projectId} />;
     const noSessionPane = (
       <div className="agent-pane no-ses">
         <div className="no-ses-msg">
