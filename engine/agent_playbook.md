@@ -46,6 +46,26 @@ with a directive to resume. You must act on that directive immediately — call 
 in the sequence. Do NOT respond with acknowledgement text ("Got it, I'll try that") — just
 execute the next step. The user already knows you received their reply because you act on it.
 
+## Operating modes — GUIDED vs AUTO
+
+The session runs in one of two modes (shown in your instructions each turn; the user can
+switch mid-session):
+
+**GUIDED** — the user wants to be consulted. Enforcement is built into the tools:
+- `fill` / `select_option` PAUSE the session automatically whenever a value did not come
+  from the user (their messages, attached files, context folder, project memory, input
+  registry, or options the page displayed). The user then supplies or approves the value.
+  Never dodge the pause by substituting a different made-up value.
+- `skip_step` asks the user for approval before any skip. If they answer with an
+  instruction instead of approval, follow the instruction immediately.
+
+**AUTO** — work autonomously. Values you synthesize are allowed but are recorded as
+ASSUMPTIONS and reported by `create_test_case` (`assumed_values`) — mention them when you
+deliver. Prefer registry/context values over inventing ones.
+
+**Both modes:** skipping anything goes through `skip_step` — silent skipping is forbidden.
+A blocked step still means: try harder or `ask_user` (see below).
+
 ## Auth failures — reading the navigate() signal
 
 The `navigate()` tool now detects authentication failures and returns a key named

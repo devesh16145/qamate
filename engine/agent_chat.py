@@ -67,6 +67,7 @@ import agent_sessions
 import input_registry as _ireg
 from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link, _slug
 from normalizer import disambiguate, infer_hints, match_option
+from provenance import ProvenanceTracker, settings_values, registry_values
 from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
 import llm as _llm
 from smart_locator import smart_locator, SelfHealError, to_locator
@@ -590,6 +591,8 @@ class BrowserSession:
         self.assertions = []    # recorded checkpoints
         self.step_id = 0
         self.input_counter = 0
+        self.assumptions = []   # auto-mode values with no provenance (review queue)
+        self.skips = []         # explicit skip_step events (auditable)
         self.issues = []        # breakage: console errors / JS exceptions / failed requests
         self._auth_failures = []  # 401/403 responses since last navigate (reset each navigate)
         self._api_errors = []   # 400-499 non-auth responses since last navigate (reset each navigate)
@@ -1896,6 +1899,13 @@ class BrowserSession:
         warns = _lint_recording(self.steps, self.assertions)
         if warns:
             res["lint_warnings"] = warns   # nudge the agent to fix weak/dynamic assertions before delivering
+        if self.assumptions:
+            # Review queue: values the agent synthesized without user provenance.
+            res["assumed_values"] = list(self.assumptions)
+            res["assumed_values_note"] = ("These values were NOT provided by the user — "
+                                          "surface them for review when delivering the test.")
+        if self.skips:
+            res["skipped_steps"] = list(self.skips)
         return res
 
 
@@ -2025,6 +2035,8 @@ class Deps:
     vision: bool = False      # model can see images -> run_test_case returns failure screenshots
     user_input_q: Optional[asyncio.Queue] = None  # ask_user tool blocks on this
     _ask_state: dict = field(default_factory=dict)  # {"waiting": True} while ask_user is blocked
+    mode: str = "auto"        # "auto" (free) | "guided" (tools pause on unproven values/skips)
+    provenance: Optional["ProvenanceTracker"] = None  # legitimate value sources this session
 
 
 # ── System prompt ──────────────────────────────────────────────────────────
@@ -2108,6 +2120,49 @@ _SYSTEM = (
     "UNLESS the user's goal explicitly requires it.\n"
     "- Never invent refs. You have conversation memory — the user can correct you mid-flow; adapt."
 )
+
+
+_APPROVAL_WORDS = ("ok", "okay", "yes", "y", "approve", "approved", "go ahead", "use it", "proceed")
+
+
+async def _value_gate(ctx, ref, value, action):
+    """Provenance gate for fill/select_option — returns the FINAL value to use.
+
+    GUIDED mode + unknown value: pause the session (same channel as ask_user) and
+    let the user supply or approve the value. AUTO mode + unknown value: proceed,
+    but record the assumption on the session (review queue surfaced by
+    create_test_case). This is tool-level enforcement: it runs INSIDE the tool
+    before the action, so the model cannot rationalise around it."""
+    deps = ctx.deps
+    tracker = deps.provenance
+    if tracker is None or not str(value or "").strip():
+        return value
+    if tracker.check(value):
+        return value
+    el = deps.session.by_ref.get(ref, {}) if deps.session else {}
+    field_name = str(el.get("name") or el.get("placeholder") or ref)
+    if deps.mode == "guided" and deps.user_input_q is not None:
+        question = (f"GUIDED MODE — value check: I'm about to {action} \"{field_name}\" with "
+                    f"\"{value}\", but that value did not come from you (not in your messages, "
+                    f"attached files, project memory, or the input registry). "
+                    f"Reply with the value to use, or 'ok' to approve this one.")
+        emit({"event": "input_required", "question": question, "kind": "guided_value",
+              "field": field_name, "proposed": str(value)})
+        deps._ask_state["waiting"] = True
+        try:
+            answer = str(await deps.user_input_q.get()).strip()
+        finally:
+            deps._ask_state["waiting"] = False
+        tracker.add_text(answer, "user-reply")
+        if answer.casefold() in _APPROVAL_WORDS:
+            tracker.add_value(value, "user-approved")
+            return value
+        return answer
+    # AUTO mode: proceed, but flag for review (once per distinct value).
+    deps.session.assumptions.append(
+        {"field": field_name, "value": str(value), "action": action})
+    tracker.add_value(value, "assumed")
+    return value
 
 
 def _load_playbook():
@@ -2303,8 +2358,13 @@ def build_agent(model, max_tokens=None):
         selector instead — e.g. 'input[type="email"]' or 'input[type="password"]' or
         'input[name="username"]'. Direct selectors are detected automatically and bypass
         the ref lookup. This is the correct approach for MUI login forms.
-        Successful fills are automatically saved to the project input registry."""
+        Successful fills are automatically saved to the project input registry.
+        In GUIDED mode a value that did not come from the user pauses the session
+        for their input — this happens automatically, don't try to work around it."""
+        value = await _value_gate(ctx, ref, value, "fill")
         result = await _bro(ctx.deps.session.act, "fill", ref, value)
+        if ctx.deps.provenance and result.get("autocomplete_options"):
+            ctx.deps.provenance.add_values(result["autocomplete_options"], "page-option")
         if result.get("ok") and value and value.strip():
             # Auto-record to input registry (skips sensitive fields automatically)
             el = ctx.deps.session.by_ref.get(ref, {})
@@ -2372,7 +2432,10 @@ def build_agent(model, max_tokens=None):
         value: what you want selected — exact option text, or a search term; the closest
         option is matched (decorated labels like 'NAME(phone)LEGAL NAME' are handled).
         If the result has blocked:true, read options_seen — retry once with an exact text
-        from there, otherwise ask_user. Do NOT improvise other tools for dropdowns."""
+        from there, otherwise ask_user. Do NOT improvise other tools for dropdowns.
+        In GUIDED mode a value that did not come from the user pauses the session
+        for their input — this happens automatically, don't try to work around it."""
+        value = await _value_gate(ctx, ref, value, "select in")
         res = await _bro(ctx.deps.session.select_from_dropdown, ref, value)
 
         # Vision tier (last resort): locate the option on screen, snap to DOM, click.
@@ -2398,6 +2461,14 @@ def build_agent(model, max_tokens=None):
                                    "verify": "selected via vision — confirm the field shows the intended value"}
             except Exception:
                 pass
+
+        # Values the page itself displayed are legitimate provenance (the user can
+        # see them) — without this, retrying with an exact options_seen text would
+        # re-trigger the guided gate.
+        if ctx.deps.provenance:
+            ctx.deps.provenance.add_values(res.get("options_seen"), "page-option")
+            if res.get("selected"):
+                ctx.deps.provenance.add_value(res["selected"], "page-option")
 
         # Auto-record the final selected label so future sessions reuse it (the
         # displayed label often differs from the typed search term).
@@ -2609,6 +2680,8 @@ def build_agent(model, max_tokens=None):
         s.assertions = []
         s.step_id = 0
         s.input_counter = 0
+        s.assumptions = []
+        s.skips = []
         return {"ok": True, "message": "recorded steps and checkpoints cleared"}
 
     @agent.tool
@@ -2811,6 +2884,9 @@ def build_agent(model, max_tokens=None):
         if text is None:
             return {"ok": False, "error": f"could not extract text from '{name}' "
                                           "(unsupported type or missing extractor)"}
+        if ctx.deps.provenance:
+            # User-supplied docs are legitimate value provenance (PRDs carry test data).
+            ctx.deps.provenance.add_text(text, "context-file")
         if start_line or end_line:
             lines = text.splitlines()
             s = max(1, int(start_line or 1))
@@ -2864,6 +2940,8 @@ def build_agent(model, max_tokens=None):
         text, truncated = extract_file_text(safe)
         if text is None:
             return {"ok": False, "error": f"could not read '{context_file}' (unsupported format or binary)"}
+        if ctx.deps.provenance:
+            ctx.deps.provenance.add_text(text, "context-file")
         if len(text) > 40_000:
             text = text[:40_000]
             truncated = True
@@ -3154,17 +3232,65 @@ def build_agent(model, max_tokens=None):
             answer = await ctx.deps.user_input_q.get()
         finally:
             ctx.deps._ask_state["waiting"] = False
+        if ctx.deps.provenance:
+            ctx.deps.provenance.add_text(str(answer), "user-reply")
         # Wrap with a directive so the LLM doesn't respond conversationally — it must
         # immediately continue the task sequence from the step that was suspended.
         return (f"<user_reply>{answer}</user_reply>\n"
                 "TASK RESUMES NOW — execute the next pending step immediately. "
                 "Do NOT acknowledge the reply in text. Just act.")
 
+    @agent.tool
+    async def skip_step(ctx: RunContext[Deps], step_description: str, reason: str) -> dict:
+        """Formally skip a planned step or checkpoint you cannot complete. Silent skipping
+        is FORBIDDEN — if you must skip, it goes through this tool so the run report shows
+        it honestly. In GUIDED mode the user must approve the skip first (the session
+        pauses); they may instead tell you how to proceed — then DO that, don't skip.
+        step_description: what you are skipping. reason: why it cannot be done."""
+        deps = ctx.deps
+        if deps.mode == "guided" and deps.user_input_q is not None:
+            question = (f"GUIDED MODE — skip request: the agent wants to SKIP "
+                        f"\"{step_description}\" because: {reason}. "
+                        f"Reply 'ok' to allow the skip, or tell it what to do instead.")
+            emit({"event": "input_required", "question": question, "kind": "guided_skip"})
+            deps._ask_state["waiting"] = True
+            try:
+                answer = str(await deps.user_input_q.get()).strip()
+            finally:
+                deps._ask_state["waiting"] = False
+            if deps.provenance:
+                deps.provenance.add_text(answer, "user-reply")
+            if answer.casefold() not in _APPROVAL_WORDS:
+                return {"ok": False, "skipped": False,
+                        "user_instruction": answer,
+                        "directive": "The user did NOT approve the skip. Follow their "
+                                     "instruction above instead, immediately."}
+        deps.session.skips.append({"step": str(step_description)[:200],
+                                   "reason": str(reason)[:300]})
+        emit({"event": "log", "message": f"SKIPPED: {step_description} - {reason}"})
+        return {"ok": True, "skipped": True,
+                "note": "Recorded as an explicit skip — it will appear in the final report. "
+                        "Mention it when you summarize."}
+
     @agent.instructions
     async def _project_memory_and_context(ctx: RunContext[Deps]) -> str:
         """Injected fresh each turn (instructions are regenerated per run and not stored in
-        history): the memory file's contents + a short listing of available context files."""
+        history): the operating mode, the memory file's contents + a short listing of
+        available context files."""
         blocks = []
+        if ctx.deps.mode == "guided":
+            blocks.append(
+                "OPERATING MODE: GUIDED. The user wants to be consulted. fill/select_option "
+                "automatically pause for the user whenever a value did not come from them — "
+                "let that happen, never substitute a different made-up value to avoid the pause. "
+                "Skipping anything requires skip_step (which asks the user). When in doubt "
+                "between options, prefer ask_user over guessing.")
+        else:
+            blocks.append(
+                "OPERATING MODE: AUTO. Work autonomously. If you must use a value the user "
+                "did not provide, prefer the input registry; otherwise use a sensible value — "
+                "it is recorded as an assumption and reported for review. Skips still go "
+                "through skip_step. Blocked steps still mean: try harder or ask_user.")
         p = ctx.deps.memory_path
         try:
             if p and os.path.isfile(p):
@@ -3397,9 +3523,23 @@ class AgentRuntime:
         vision = (_vis == "on") or (_vis != "off" and _prov_vision)
         ctx_dir = project_store.resolve_context_dir(self.ats_root, project_id, project)
         mem_path = project_store.resolve_memory_path(self.ats_root, project_id)
+        mode = str(cmd.get("agentMode") or "auto").lower()
+        if mode not in ("auto", "guided"):
+            mode = "auto"
+        tracker = ProvenanceTracker()
+        # Seed legitimate sources: project memory (durable app knowledge), settings
+        # credentials/URLs, and past known-good inputs from the registry.
+        try:
+            if mem_path and os.path.isfile(mem_path):
+                tracker.add_text(open(mem_path, "r", encoding="utf-8", errors="replace").read(),
+                                 "project-memory")
+        except Exception:
+            pass
+        tracker.add_values(settings_values(self.config), "settings")
+        tracker.add_values(registry_values(self.ats_root, project_id), "input-registry")
         self.deps = Deps(session=self.session, ats_root=self.ats_root, project=project,
                          config=self.config, context_dir=ctx_dir, memory_path=mem_path, vision=vision,
-                         user_input_q=self._user_input_q)
+                         user_input_q=self._user_input_q, mode=mode, provenance=tracker)
         # Restore the model's conversation memory on resume (this is what lets it "continue
         # from a point"); a fresh session starts empty. Then mark the session running and load
         # the saved transcript so the window can redraw the visible chat.
@@ -3423,7 +3563,7 @@ class AgentRuntime:
                            "auth": authed != "none", "auth_via": authed,
                            "project": (project or {}).get("name") or project_id or None,
                            "project_id": project_id, "session_id": self.session_id}
-        emit({"event": "ready", **self.ready_info, "resumed": resumed,
+        emit({"event": "ready", **self.ready_info, "resumed": resumed, "mode": mode,
               "transcript": transcript, "tokens": self.session_tokens})
 
     async def chat(self, cmd):
@@ -3435,6 +3575,18 @@ class AgentRuntime:
         if not message and not attachments:
             emit({"event": "error", "message": "empty message"})
             return
+        if cmd.get("agentMode") in ("auto", "guided"):
+            self.deps.mode = cmd["agentMode"]
+        if self.deps.provenance:
+            # Everything the user says/attaches is legitimate value provenance.
+            self.deps.provenance.add_text(message, "user-message")
+            for p, _name in _attachment_paths(attachments):
+                try:
+                    t, _tr = extract_file_text(p)
+                    if t:
+                        self.deps.provenance.add_text(t, "attachment")
+                except Exception:
+                    pass
         attachment_names = [name for _p, name in _attachment_paths(attachments)]
         # Inline document text + attach images as multimodal parts. Falls back to a
         # plain string when there are no binary parts (so text-only models are unaffected).
@@ -3644,6 +3796,13 @@ async def main_loop():
                 emit({"event": "log", "message": "Still processing — your message will be sent when ready."})
             else:
                 rt._chat_task = asyncio.create_task(rt.chat(cmd))
+        elif action == "set_mode":
+            m = str(cmd.get("mode") or "").lower()
+            if rt.deps and m in ("auto", "guided"):
+                rt.deps.mode = m
+                emit({"event": "mode_changed", "mode": m})
+            else:
+                emit({"event": "error", "message": f"cannot set mode {m!r} (agent ready? mode valid?)"})
         elif action == "reattach":
             await rt.reattach()
         elif action == "show_browser":

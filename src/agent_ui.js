@@ -36,7 +36,7 @@
     try { return Object.entries(a).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', '); }
     catch (e) { return String(a); }
   };
-  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '', usage: null }; }
+  function emptyRuntime() { return { messages: [], status: 'idle', info: null, attachments: [], lastLog: '', input: '', usage: null, mode: 'auto' }; }
   function finalizeStreaming(prev) {
     const last = prev[prev.length - 1];
     if (last && last.role === 'assistant' && last.streaming) return [...prev.slice(0, -1), { ...last, streaming: false }];
@@ -192,8 +192,16 @@
       const authTxt = msg.auth ? ` · authenticated (${msg.auth_via})` : ' · NOT logged in — set credentials in settings';
       msgs = [...msgs, { id: nextId(), role: 'system',
         text: `Connected to ${msg.provider} (${msg.model})${msg.project ? ' · ' + msg.project : ''}${authTxt}. Browser open${msg.url ? ' at ' + msg.url : ''}.${msg.resumed ? ' Resumed from saved memory.' : ''}` }];
-      return set({ status: 'ready', info, messages: msgs, usage: msg.tokens || rt.usage });
+      return set({ status: 'ready', info, messages: msgs, usage: msg.tokens || rt.usage,
+                   mode: msg.mode || rt.mode || 'auto' });
     }
+    if (ev === 'mode_changed') return set({
+      mode: msg.mode,
+      messages: [...messages, { id: nextId(), role: 'system',
+        text: msg.mode === 'guided'
+          ? 'GUIDED mode — the agent will pause for your input on any value you did not provide, and on skips.'
+          : 'AUTO mode — the agent proceeds freely; values it makes up are reported as assumptions.' }],
+    });
     if (ev === 'usage') return set({ usage: { input: msg.input || 0, output: msg.output || 0, total: msg.total || 0, estimated: !!msg.estimated } });
     if (ev === 'text') {
       const delta = msg.delta || '';
@@ -329,7 +337,7 @@
   /* ── Active session chat (ALWAYS rendered with a real session — no conditional
      hooks; the "no session" case is handled by AgentApp, never here) ────────── */
   function SessionChat({ session, rt, provider, setProvider, headed, setHeaded, toolBudget, setToolBudget,
-                         onStart, onSend, onStop, onReset, onOpenBrowser, setInput, setAttachments, projectId, toast, onBack }) {
+                         onStart, onSend, onStop, onReset, onOpenBrowser, onToggleMode, setInput, setAttachments, projectId, toast, onBack }) {
     const scrollRef = useRef(null);
     const taRef = useRef(null);
     const caretRef = useRef(null);
@@ -658,6 +666,16 @@
                   ))}
                 </div>
               )}
+              <button className="rv-cta" onClick={onToggleMode}
+                disabled={status !== 'ready' && status !== 'awaiting_input'}
+                title={rt.mode === 'guided'
+                  ? 'GUIDED — the agent pauses for your input on any value you did not provide, and on skips. Click for AUTO.'
+                  : 'AUTO — the agent proceeds freely; made-up values are reported as assumptions. Click for GUIDED.'}
+                style={{ alignSelf: 'flex-end', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px',
+                         color: rt.mode === 'guided' ? '#f59e0b' : 'var(--text-2)',
+                         borderColor: rt.mode === 'guided' ? '#f59e0b' : undefined }}>
+                {rt.mode === 'guided' ? 'GUIDED' : 'AUTO'}
+              </button>
               <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images" style={{ alignSelf: 'flex-end' }}><Ic.Upload size={14} /></button>
               <button className="rv-cta" onClick={onOpenBrowser} title="Open the app under test in your browser" style={{ alignSelf: 'flex-end' }}><Ic.ExternalLink size={14} /></button>
               <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
@@ -1049,6 +1067,14 @@
       const res = await window.ats.agentSend({ sessionId: sid, message: text, attachments: atts.map((a) => a.path) });
       if (res && res.status === 'error') patchRt(sid, (c) => ({ status: 'ready', messages: [...c.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
+    const onToggleMode = async () => {
+      const sid = activeId; if (!sid) return;
+      const cur = runtime[sid] || {};
+      const next = (cur.mode === 'guided') ? 'auto' : 'guided';
+      patchRt(sid, { mode: next });   // optimistic; mode_changed confirms
+      const res = await window.ats.agentSetMode({ sessionId: sid, mode: next });
+      if (res && res.status === 'error') { patchRt(sid, { mode: cur.mode || 'auto' }); toast(res.message || 'Could not switch mode'); }
+    };
     const onStop = async () => { const sid = activeId; if (!sid) return; await window.ats.agentStop({ sessionId: sid }); patchRt(sid, { status: 'idle', info: null }); refreshSessions(projectId); };
     const onReset = async () => { const sid = activeId; if (!sid) return; await window.ats.agentReset({ sessionId: sid }); patchRt(sid, { messages: [] }); toast('Conversation cleared'); };
     const onRename = async (sid, title) => { setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s))); await window.ats.agentRenameSession({ projectId, sessionId: sid, title }); };
@@ -1066,7 +1092,7 @@
       <SessionChat session={activeSession} rt={activeRt}
         provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
         toolBudget={toolBudget} setToolBudget={setToolBudget}
-        onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset} onOpenBrowser={openBrowser}
+        onStart={onStart} onSend={onSend} onStop={onStop} onReset={onReset} onOpenBrowser={openBrowser} onToggleMode={onToggleMode}
         setInput={(v) => patchRt(activeId, { input: v })}
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
         projectId={projectId} toast={toast} onBack={onBack} />

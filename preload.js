@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('ats', {
   },
   agentStart: (opts) => ipcRenderer.invoke('agent-start', opts),         // {sessionId, projectId, provider, headed, env, title}
   agentSend: (opts) => ipcRenderer.invoke('agent-send', opts),           // {sessionId, message, attachments}
+  agentSetMode: (opts) => ipcRenderer.invoke('agent-set-mode', opts),    // {sessionId, mode: 'auto'|'guided'}
   agentReset: (opts) => ipcRenderer.invoke('agent-reset', opts),         // {sessionId}
   agentStop: (opts) => ipcRenderer.invoke('agent-stop', opts),           // {sessionId}
   // Session management (sidebar): list/new/rename/delete + transcript redraw

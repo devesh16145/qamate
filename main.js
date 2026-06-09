@@ -505,6 +505,7 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
       headed: !!opts.headed,
       title: opts.title || '',
       start_path: opts.startPath || '',
+      agentMode: (opts.agentMode === 'guided') ? 'guided' : 'auto',
       tool_budget: (opts.toolBudget != null) ? Number(opts.toolBudget) : null,
     });
   } catch (err) { return { status: 'error', message: err.message }; }
@@ -517,6 +518,13 @@ ipcMain.handle('agent-send', async (event, { sessionId, message, attachments } =
   const atts = Array.isArray(attachments) ? attachments.filter(Boolean).map(String) : [];
   return _agentWrite(sessionId, { action: 'chat', message: String(message || ''), attachments: atts })
     ? { status: 'success' } : { status: 'error', message: 'failed to write to agent' };
+});
+
+ipcMain.handle('agent-set-mode', async (event, { sessionId, mode } = {}) => {
+  if (!sessionId || !agentProcs.has(sessionId)) return { status: 'error', message: 'session not running' };
+  const m = (mode === 'guided') ? 'guided' : 'auto';
+  return _agentWrite(sessionId, { action: 'set_mode', mode: m })
+    ? { status: 'success', mode: m } : { status: 'error', message: 'write failed' };
 });
 
 ipcMain.handle('agent-reset', async (event, { sessionId } = {}) => (
