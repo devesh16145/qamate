@@ -272,3 +272,130 @@ def test_record_option_click_escapes_quotes():
     s._record_option_click('Say "hi"', "role-option")
     raw = s.steps[0]["rawLine"]
     compile(raw, "<rawline>", "exec")                  # must be valid Python code
+
+
+# -- compact_elements: grouping, cap, ctx/href exposure -----------------------
+
+from normalizer import compact_elements
+
+
+def _m(ref, role="button", name="", container="", visible=True, **kw):
+    d = {"ref": ref, "role": role, "name": name, "container": container,
+         "visible": visible, "tag": "button"}
+    d.update(kw)
+    return d
+
+
+def test_compact_groups_identical_repeats():
+    models = [_m(f"req-{i}", name="Request Product") for i in range(12)]
+    items, hidden = compact_elements(models, limit=40)
+    assert len(items) == 1 and hidden == 0
+    assert items[0]["repeats"] == 12
+    assert items[0]["ref"] == "req-0"          # act on the first instance's ref
+
+
+def test_compact_grouping_saves_unique_elements_from_the_cap():
+    # 50 repeated card buttons + the search box LAST: without grouping the cap
+    # (40) would crowd the search box out — the exact BENCH-010 failure.
+    models = [_m(f"card-{i}", name="Request Product") for i in range(50)]
+    models.append(_m("search", role="searchbox", name="Search Product Name, SKU, Brand",
+                     input_type="search"))
+    items, _ = compact_elements(models, limit=40)
+    names = [i["name"] for i in items]
+    assert "Search Product Name, SKU, Brand" in names
+    assert items[0]["repeats"] == 50
+
+
+def test_compact_same_name_different_container_not_grouped():
+    # sidebar tab vs card button: SAME name, different region -> both listed
+    # with ctx so the agent can tell the intents apart (BENCH-006).
+    models = [_m("tab-req", name="Request Product", container="left-rail"),
+              _m("card-req", name="Request Product", container="")]
+    items, _ = compact_elements(models, limit=40)
+    assert len(items) == 2
+    assert items[0]["ctx"] == "left-rail" and "ctx" not in items[1]
+
+
+def test_compact_href_and_flags_passthrough():
+    models = [_m("po-link", role="link", name="PO-442", href="#/orders/442"),
+              _m("dis", name="Save", disabled=True),
+              _m("amb", name="Paid", ambiguous=True)]
+    items, _ = compact_elements(models, limit=40)
+    assert items[0]["href"] == "#/orders/442"
+    assert items[1]["disabled"] is True and items[2]["ambiguous"] is True
+
+
+def test_compact_hidden_counted_not_listed_by_default():
+    models = [_m("a", name="A"), _m("b", name="B", visible=False, hidden_reason="display:none")]
+    items, hidden = compact_elements(models, limit=40)
+    assert hidden == 1 and len(items) == 1
+    items2, _ = compact_elements(models, limit=40, include_hidden=True)
+    assert len(items2) == 2 and items2[1]["hidden_reason"] == "display:none"
+
+
+def test_compact_nameless_elements_never_grouped():
+    models = [_m("x1", name=""), _m("x2", name="")]
+    items, _ = compact_elements(models, limit=40)
+    assert len(items) == 2 and all("repeats" not in i for i in items)
+
+
+def test_compact_cap_still_counts_repeats_of_listed_groups():
+    models = ([_m(f"u-{i}", name=f"Unique {i}") for i in range(40)]
+              + [_m("dup", name="Unique 0")])    # repeat of an already-listed entry
+    items, _ = compact_elements(models, limit=40)
+    assert len(items) == 40
+    assert items[0].get("repeats") == 2
+
+
+# -- match_index: identical-locator groups get DOM-order ordinals --------------
+
+def _model(ref, by="role", role="button", name="", value=""):
+    if by == "role":
+        primary = {"by": "role", "role": role, "name": name}
+    else:
+        primary = {"by": "text", "value": value}
+    return {"ref": ref, "role": role, "name": name or value, "visible": True,
+            "tag": "button", "primary": primary, "fallbacks": []}
+
+
+def test_disambiguate_assigns_match_index_to_identical_groups():
+    models = [_model("inc-0", name="Incorrect?"), _model("inc-1", name="Incorrect?"),
+              _model("inc-2", name="Incorrect?"), _model("save", name="Save")]
+    disambiguate(models)
+    assert [m.get("match_index") for m in models[:3]] == [0, 1, 2]
+    assert "match_index" not in models[3]              # unique -> no ordinal
+    assert all(m.get("ambiguous") for m in models[:3])
+
+
+def test_disambiguate_match_index_for_text_primaries():
+    models = [_model("a", by="text", value="Request Product"),
+              _model("b", by="text", value="Request Product")]
+    disambiguate(models)
+    assert models[0]["match_index"] == 0 and models[1]["match_index"] == 1
+
+
+def test_disambiguate_substring_groups_not_index_grouped():
+    # 'Paid' vs 'Unpaid' is the exact=True case, NOT an identical group.
+    models = [_model("p", name="Paid"), _model("u", name="Unpaid")]
+    disambiguate(models)
+    assert "match_index" not in models[0] and "match_index" not in models[1]
+    assert models[0]["primary"].get("exact") is True
+
+
+def test_record_strategy_flags_nth_for_grouped_elements():
+    s = _bare_session()
+    s.page = None                                      # _count -> -1 (uncountable)
+    el = _model("inc-2", name="Incorrect?")
+    el["match_index"] = 2
+    strat, loc_str, warn, nth = s._record_strategy(el)
+    # nth ordinal is returned for act() to refine against the LIVE locator
+    # (geometry ground truth); loc_str stays bare at this stage.
+    assert nth == 2 and ".nth(" not in loc_str and warn is None
+    compile(f"{loc_str}.nth({nth}).click()", "<rawline>", "exec")  # act()-built line is valid code
+
+
+def test_record_strategy_unique_element_unchanged():
+    s = _bare_session()
+    s.page = None
+    strat, loc_str, warn, nth = s._record_strategy(_model("save", name="Save"))
+    assert nth is None and ".nth(" not in loc_str

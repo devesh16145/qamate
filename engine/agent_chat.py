@@ -66,7 +66,7 @@ import project_store
 import agent_sessions
 import input_registry as _ireg
 from app_explorer import _comprehensive_snapshot, element_to_model, _label, _LINKS_JS, _should_skip_link, _slug
-from normalizer import disambiguate, infer_hints, match_option
+from normalizer import disambiguate, infer_hints, match_option, compact_elements
 from provenance import ProvenanceTracker, settings_values, registry_values
 from dom_inspector import DESTRUCTIVE_KEYWORDS, _normalize_url
 import llm as _llm
@@ -1473,25 +1473,9 @@ class BrowserSession:
 
         self.by_ref = {m["ref"]: m for m in models}
 
-        compact, hidden_total = [], 0
-        for m in models:
-            if not m.get("visible", True):
-                hidden_total += 1
-                if not include_hidden:
-                    continue
-            item = {"ref": m["ref"], "role": m.get("role") or m.get("tag"),
-                    "name": (m.get("name") or "")[:60], "type": m.get("input_type") or ""}
-            if not m.get("visible", True):
-                item["hidden_reason"] = m.get("hidden_reason", "")
-            if m.get("disabled"):
-                item["disabled"] = True
-            if m.get("broken"):
-                item["broken"] = True
-            if m.get("ambiguous"):
-                item["ambiguous"] = True
-            compact.append(item)
-            if len(compact) >= limit:
-                break
+        # Token-light list: identical repeats grouped (repeats=N), region context
+        # (ctx) + link hrefs exposed — see normalizer.compact_elements.
+        compact, hidden_total = compact_elements(models, limit, include_hidden)
         result = {"ok": True, "url": self._url(), "title": self._title(),
                   "element_count": len(models), "hidden_count": hidden_total,
                   "elements": compact, "issues": self.issues[-8:]}
@@ -1520,9 +1504,15 @@ class BrowserSession:
 
     def _record_strategy(self, el):
         """Pick the locator to RECORD so the generated test hits exactly the intended element on a
-        COLD run. If the primary matches >1 element it is ambiguous (SmartLocator would silently take
-        .first) — upgrade to the element's test-id when that's unique, else keep it but warn the agent.
-        Returns (strategy, locator_str, warning|None). Never raises (record-time best effort)."""
+        COLD run. Ambiguity handling (the primary matches >1 element):
+          1. the element's own test-id, when unique;
+          2. the element's DOM-order ordinal among its identical-locator group
+             (match_index from normalizer.disambiguate) -> .nth(k). This targets the
+             element the agent's ref actually points at — a bare ambiguous locator
+             resolves the FIRST match live (clicked the sidebar tab instead of the
+             card button) and fails Playwright strict mode at replay;
+          3. otherwise keep the primary and warn.
+        Returns (strategy, locator_str, warning|None, nth|None). Never raises."""
         prim = el.get("primary") or {}
         def _count(strat):
             try:
@@ -1530,18 +1520,40 @@ class BrowserSession:
                 return loc.count() if loc is not None else 0
             except Exception:
                 return -1
+        k = el.get("match_index")
         n = _count(prim)
-        if n < 2:                                    # unique (1), none yet (0), or uncountable (-1) -> keep
-            return prim, _locator_str(prim), None
-        tid = (el.get("test_id") or "").strip()      # ambiguous (>=2) -> try the element's test-id
+        if n < 2 and k is None:                      # unique (1), none yet (0), or uncountable (-1) -> keep
+            return prim, _locator_str(prim), None, None
+        tid = (el.get("test_id") or "").strip()      # ambiguous -> try the element's test-id
         if tid:
             ts = {"by": "test_id", "value": tid}
             if _count(ts) == 1:
-                return ts, _locator_str(ts), None
+                return ts, _locator_str(ts), None, None
+        if k is not None:
+            # nth suffix is appended by act() AFTER refining k against the live
+            # locator (snapshot order is only a guess — see _ordinal_by_rect).
+            return prim, _locator_str(prim), None, k
         warn = (f"This locator matches {n} elements on the page, so the test will act on the FIRST "
                 f"one. If that is not the element you meant, pick a more uniquely identifiable element "
                 f"(distinct text/label, or one exposing a test id).")
-        return prim, _locator_str(prim), warn
+        return prim, _locator_str(prim), warn, None
+
+    def _ordinal_by_rect(self, loc, n, rect, tol=4.0):
+        """True DOM-order ordinal of the group member whose geometry matches the
+        snapshot rect. The snapshot's ordinals are computed from ITS iteration
+        order, which need not equal the live locator's match order (and broke the
+        dropdown ladder when trusted blindly) — geometry is the ground truth.
+        Returns the ordinal, or None when nothing matches (page moved/scrolled)."""
+        if not rect or rect.get("x") is None:
+            return None
+        try:
+            for i in range(min(n, 15)):
+                bb = loc.nth(i).bounding_box()
+                if bb and abs(bb["x"] - rect.get("x", 0)) <= tol and abs(bb["y"] - rect.get("y", 0)) <= tol:
+                    return i
+        except Exception:
+            return None
+        return None
 
     def _auth_signal(self, before_auth):
         """Return the ⚠_AUTH_REQUIRED message when new 401/403s appeared since
@@ -1596,11 +1608,29 @@ class BrowserSession:
             restarted = self._ensure_alive()
             return {"ok": False, "error": ("browser had closed; restarted -- re-inspect the page (refs are stale) and retry"
                                            if restarted else "browser is closed; call restart_browser, then re-inspect")}
-        strat, loc_str, warning = self._record_strategy(el)
+        strat, loc_str, warning, nth = self._record_strategy(el)
         try:
-            live = smart_locator(self.page, strat, fallbacks=el.get("fallbacks"),
-                                 fingerprint=el.get("fingerprint")).resolve()
+            if nth is not None:
+                # Grouped identical locators: act on THIS member, not the first match.
+                # The true ordinal comes from the live element's geometry; the snapshot
+                # ordinal is only the fallback guess. Healing fallbacks would
+                # re-introduce the first-match bug, so resolve direct.
+                loc = to_locator(self.page, strat)
+                n_live = loc.count()
+                if n_live <= 1:
+                    nth = None                      # unique live — plain locator is right
+                    live = loc
+                else:
+                    k_live = self._ordinal_by_rect(loc, n_live, el.get("rect") or {})
+                    nth = k_live if k_live is not None else min(nth, n_live - 1)
+                    live = loc.nth(nth)
+                    loc_str = f"{loc_str}.nth({nth})"
+            else:
+                live = smart_locator(self.page, strat, fallbacks=el.get("fallbacks"),
+                                     fingerprint=el.get("fingerprint")).resolve()
         except SelfHealError as e:
+            return {"ok": False, "error": f"could not resolve '{ref}': {str(e)[:140]}"}
+        except Exception as e:
             return {"ok": False, "error": f"could not resolve '{ref}': {str(e)[:140]}"}
 
         before = len(self.issues)
@@ -1958,6 +1988,38 @@ class BrowserSession:
                 "checkpoints": [a["description"] for a in self.assertions],
                 "issues_found": len(self.issues)}
 
+    @staticmethod
+    def _collect_check(ats_root, tests_root, flow_id, tc_id, timeout=90):
+        """pytest --collect-only on the just-generated test (fast, NO browser). A
+        syntax/import error in a generated file aborts collection for the WHOLE
+        suite, so catch it BEFORE the agent burns a live verify cycle on it
+        (observed: bench smoke attempt 1 was an uncollectable file = a wasted
+        ~2-minute run_test_case). Returns '' when clean, else the error detail."""
+        import subprocess as _sp
+        flow_dir = os.path.join(tests_root, "flows", flow_id)
+        underscored = tc_id.replace("-", "_")
+        cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
+               "--collect-only", "-q", "-p", "no:cacheprovider"]
+        env = dict(os.environ)
+        env["ATS_ROOT"] = ats_root
+        env["PYTHONPATH"] = ats_root
+        kw = {"stdin": _sp.DEVNULL}
+        if sys.platform == "win32":
+            kw["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0x08000000)
+            kw["close_fds"] = True
+        try:
+            p = _sp.run(cmd, cwd=ats_root, env=env, capture_output=True, text=True,
+                        timeout=timeout, **kw)
+        except Exception:
+            return ""   # the checker itself failing must never block delivery
+        if p.returncode == 0:
+            return ""
+        out = (p.stdout or "") + (p.stderr or "")
+        if p.returncode == 5:
+            return (f"collection succeeded but NO test matched '{underscored}' - the generated "
+                    "function name does not match the tc_id")
+        return out[-1200:]
+
     def create_test(self, ats_root, project, tc_id, flow_id, description,
                     preconditions="", expected=""):
         if len(self.steps) <= 1:
@@ -1985,6 +2047,16 @@ class BrowserSession:
                                           "surface them for review when delivering the test.")
         if self.skips:
             res["skipped_steps"] = list(self.skips)
+        if str(res.get("status")) == "success":
+            cerr = self._collect_check(ats_root, _tests_root_for(ats_root, project), flow_id, tc_id)
+            if cerr:
+                res["status"] = "error"
+                res["collect_error"] = cerr
+                res["message"] = ("the generated test fails pytest COLLECTION - it cannot run and "
+                                  "would abort the whole suite. Common causes: a newline or quote "
+                                  "inside an element name leaking into a locator string. Fix the "
+                                  "flow (re-record the bad step) and call create_test_case again "
+                                  "(same tc_id overwrites).")
         return res
 
 
@@ -2344,10 +2416,15 @@ def build_agent(model, max_tokens=None):
         (DOM + accessibility tree merged, including role-less clickable divs) with a stable
         'ref' you pass to click/fill/select_option. Ambiguous names are pre-disambiguated and
         interaction quirks (hidden inputs, number fields) are handled automatically when you
-        act. Also includes: 'open_dropdown_options' if a dropdown is currently open,
-        'validation_errors' if the page shows form errors, and breakage issues (console
-        errors, failed requests). Call this before acting, and again after any navigation or
-        click that changes the page. Set include_hidden=true to also list hidden elements."""
+        act. Reading the list: 'repeats: N' = the SAME control appears on N cards/rows (act
+        on the listed ref for the first one); 'ctx' = the page region (sidebar/nav/left-rail/
+        dialog/...) — when two elements share a name, ctx tells the sidebar TAB from the
+        in-content BUTTON, pick by region; 'href' on links = the navigation target (use it
+        to reach detail pages on SPAs). Also includes: 'open_dropdown_options' if a dropdown
+        is currently open, 'validation_errors' if the page shows form errors, and breakage
+        issues (console errors, failed requests). Call this before acting, and again after
+        any navigation or click that changes the page. include_hidden=true lists hidden
+        elements too."""
         return await _bro(ctx.deps.session.inspect, 40, include_hidden)
 
     @agent.tool
@@ -3828,7 +3905,13 @@ class AgentRuntime:
                 result = await self.agent.run(
                     prompt, deps=self.deps, message_history=self.history,
                     event_stream_handler=_stream_handler,
-                    usage_limits=UsageLimits(tool_calls_limit=self.tool_budget or None))
+                    # request_limit DEFAULTS to 50 — left alone it silently caps every
+                    # long turn at 50 model requests no matter what tool_budget says
+                    # (benchmark runs 1+2 both hit this, not their 80/200 budgets).
+                    # Scale it with the budget; unlimited budget = unlimited requests.
+                    usage_limits=UsageLimits(
+                        tool_calls_limit=self.tool_budget or None,
+                        request_limit=(self.tool_budget + 30) if self.tool_budget else None))
                 self.history = _compact_history(result.all_messages())
                 self._add_usage(result)
                 self._persist_turn(message, attachment_names, result.new_messages())
@@ -3963,8 +4046,8 @@ class AgentRuntime:
                 summary = ""
         except Exception as e:
             log(f"[agent] post-budget summary failed: {e}")
-        note = (f"(Paused after {self.tool_budget} exploration steps — my per-turn budget. I've kept "
-                f"everything I found, so just say \"continue\" to keep going, or tell me what to focus on.)")
+        note = ("(Paused at my per-turn action limit. I've kept everything I found, so just "
+                "say \"continue\" to keep going, or tell me what to focus on.)")
         emit({"event": "turn_complete", "text": (summary + "\n\n" + note) if summary else note})
         return summary
 

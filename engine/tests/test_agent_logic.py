@@ -418,33 +418,33 @@ def _session_with(counts):
 def test_record_strategy_keeps_unique_primary():
     sess = _session_with({("css", "button.add"): 1})
     el = {"primary": {"by": "css", "value": "button.add"}, "test_id": "add-btn", "name": "Add"}
-    strat, _loc, warn = sess._record_strategy(el)
+    strat, _loc, warn, nth = sess._record_strategy(el)
     assert strat == {"by": "css", "value": "button.add"}
-    assert warn is None
+    assert warn is None and nth is None
 
 
 def test_record_strategy_upgrades_ambiguous_primary_to_unique_testid():
     sess = _session_with({("css", "button.add"): 3, ("test_id", "add-btn"): 1})
     el = {"primary": {"by": "css", "value": "button.add"}, "test_id": "add-btn", "name": "Add"}
-    strat, _loc, warn = sess._record_strategy(el)
+    strat, _loc, warn, nth = sess._record_strategy(el)
     assert strat == {"by": "test_id", "value": "add-btn"}   # upgraded for a cold-run-stable hit
-    assert warn is None
+    assert warn is None and nth is None
 
 
 def test_record_strategy_warns_when_ambiguous_and_no_testid():
     sess = _session_with({("css", "button.add"): 4})
     el = {"primary": {"by": "css", "value": "button.add"}, "name": "Add"}
-    strat, _loc, warn = sess._record_strategy(el)
+    strat, _loc, warn, nth = sess._record_strategy(el)
     assert strat == {"by": "css", "value": "button.add"}
-    assert warn and "4 elements" in warn
+    assert warn and "4 elements" in warn and nth is None
 
 
 def test_record_strategy_warns_when_testid_also_ambiguous():
     sess = _session_with({("css", "button.add"): 3, ("test_id", "add-btn"): 2})
     el = {"primary": {"by": "css", "value": "button.add"}, "test_id": "add-btn", "name": "Add"}
-    strat, _loc, warn = sess._record_strategy(el)
+    strat, _loc, warn, nth = sess._record_strategy(el)
     assert strat == {"by": "css", "value": "button.add"}
-    assert warn is not None
+    assert warn is not None and nth is None
 
 
 def test_record_navigate_dedupes_consecutive():
@@ -470,3 +470,36 @@ def test_create_test_guards_empty_flow(tmp_path):
     sess.steps = [{"id": 1, "targetDescription": "Navigate"}]   # <=1 step => nothing real recorded
     res = sess.create_test(str(tmp_path), {"name": "App"}, "TC-X-1", "demo", "desc")
     assert res["status"] == "error"
+
+
+# -- create_test collect-check: uncollectable generated code caught offline ----
+
+def _mk_flow(tmp_path, code):
+    flow = tmp_path / "tests" / "flows" / "demo"
+    flow.mkdir(parents=True)
+    (flow / "__init__.py").write_text("")
+    (flow / "test_demo.py").write_text(code, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_collect_check_clean_file_passes(tmp_path):
+    root = _mk_flow(tmp_path, "def test_TC_DEMO_001():\n    pass\n")
+    err = ac.BrowserSession._collect_check(root, os.path.join(root, "tests"),
+                                           "demo", "TC-DEMO-001")
+    assert err == ""
+
+
+def test_collect_check_syntax_error_reported(tmp_path):
+    # the bench smoke's attempt-1 failure class: a stray quote/newline in a
+    # generated locator -> file does not even collect.
+    root = _mk_flow(tmp_path, 'def test_TC_DEMO_001():\n    x = "broken\n')
+    err = ac.BrowserSession._collect_check(root, os.path.join(root, "tests"),
+                                           "demo", "TC-DEMO-001")
+    assert err != "" and ("error" in err.lower() or "SyntaxError" in err)
+
+
+def test_collect_check_no_match_reported(tmp_path):
+    root = _mk_flow(tmp_path, "def test_TC_OTHER_001():\n    pass\n")
+    err = ac.BrowserSession._collect_check(root, os.path.join(root, "tests"),
+                                           "demo", "TC-DEMO-001")
+    assert "NO test matched" in err

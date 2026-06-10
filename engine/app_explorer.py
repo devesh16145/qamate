@@ -170,6 +170,8 @@ def element_to_model(el):
         "visible": el.get("visible", True),
         "hidden_reason": el.get("hidden_reason", ""),
         "broken": bool(el.get("_broken")),
+        "href": (el.get("href") or "")[:100],
+        "container": el.get("container") or "",
         "primary": primary,
         "fallbacks": fallbacks,
         "fingerprint": fingerprint,
@@ -202,9 +204,38 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
         }
         return '';
     };
+    // Container context: same-name elements in different page regions (a sidebar
+    // tab "Request Product" vs the card button "Request Product") are different
+    // INTENTS — label which region each element lives in. Landmark ancestors
+    // first; geometric zones as the fallback for div-soup apps with no landmarks.
+    const landmark = (el) => {
+        const c = el.closest('[role=dialog],dialog,nav,[role=navigation],aside,[role=tablist],[role=menu],header,footer,table,form');
+        if (!c) return '';
+        const r = (c.getAttribute && c.getAttribute('role')) || '';
+        if (r === 'dialog' || c.tagName === 'DIALOG') return 'dialog';
+        if (r === 'menu') return 'menu';
+        if (r === 'navigation' || c.tagName === 'NAV') return 'nav';
+        if (c.tagName === 'ASIDE') return 'sidebar';
+        if (r === 'tablist') return 'tabs';
+        if (c.tagName === 'HEADER') return 'header';
+        if (c.tagName === 'FOOTER') return 'footer';
+        if (c.tagName === 'TABLE') return 'table';
+        if (c.tagName === 'FORM') return 'form';
+        return '';
+    };
+    const zone = (r) => {
+        const vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
+        const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+        if (cx < vw * 0.18) return 'left-rail';
+        if (cy < vh * 0.12) return 'top-bar';
+        return '';
+    };
     const seen = new Set(); const out = [];
-    for (const sel of sels) {
-        let nodes; try { nodes = document.querySelectorAll(sel); } catch (e) { continue; }
+    // ONE comma-joined query so elements come back in TRUE document order —
+    // per-selector passes bucket by tag ('button' all before '[role=button]'),
+    // which breaks .nth(k) ordinals computed from snapshot order.
+    let nodes; try { nodes = document.querySelectorAll(sels.join(',')); } catch (e) { nodes = []; }
+    {
         for (const el of nodes) {
             if (seen.has(el)) continue; seen.add(el);
             const r = el.getBoundingClientRect(); const s = window.getComputedStyle(el);
@@ -228,6 +259,8 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
                 visible: reason === '', hidden_reason: reason,
                 label_text: label_text,
                 context_label: (aria_label || text || placeholder || label_text) ? '' : nearLabel(el),
+                href: (el.tagName === 'A' ? (el.getAttribute('href') || '') : '').slice(0, 100),
+                container: landmark(el) || zone(r),
                 rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
             });
         }
@@ -257,6 +290,7 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
             test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
             value: '', checked: false, disabled: false, required: false,
             visible: true, hidden_reason: '', synthetic: true, label_text: '',
+            href: '', container: landmark(el) || zone(r),
             rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
         });
     }

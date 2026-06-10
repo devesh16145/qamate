@@ -59,7 +59,79 @@ def disambiguate(models):
             elif any(mine in o for o in others):
                 strat["exact"] = True
                 adjusted += 1
+
+    # Fully-identical PRIMARY locators (12 cards x the same 'Incorrect?' button):
+    # assign each member its DOM-order ordinal so act()/codegen can target THIS
+    # element with .nth(k). Without it, the live click resolves to the FIRST
+    # match (the agent picked the card button's ref but clicked the sidebar tab)
+    # and the recorded bare locator fails Playwright strict mode at replay.
+    groups = {}
+    for m in models:
+        if m.get("source") == "aria":
+            continue   # appended after natives, no rect — ordinal would be meaningless
+        p = m.get("primary") or {}
+        if p.get("by") == "role" and p.get("name"):
+            key = ("role", p.get("role"), _norm(p["name"]), bool(p.get("exact")))
+        elif p.get("by") == "text" and p.get("value"):
+            key = ("text", _norm(p["value"]))
+        else:
+            continue
+        groups.setdefault(key, []).append(m)
+    for members in groups.values():
+        if len(members) > 1:
+            for k, m in enumerate(members):
+                m["match_index"] = k   # snapshot-order GUESS; act() re-derives the
+                                       # true ordinal from the live element's rect
     return adjusted
+
+
+def compact_elements(models, limit=40, include_hidden=False):
+    """Build observe()'s token-light element list from full element models.
+
+    Groups visually identical REPEATS — same role + name + container, e.g. the
+    'Request Product' button on every one of 12 product cards — into ONE entry
+    with repeats=N. Without grouping, repeated card actions flood the element
+    cap and crowd unique controls (the search box) out of the percept entirely
+    (benchmark BENCH-010: observe() missed the catalog search input).
+
+    Adds 'ctx' (page region: sidebar/nav/dialog/left-rail/...) so same-name
+    elements in different regions are distinguishable intents, and 'href' for
+    links so SPA navigation targets are visible without clicking.
+
+    Pure. Returns (items, hidden_total)."""
+    items, hidden_total, groups = [], 0, {}
+    for m in models:
+        visible = m.get("visible", True)
+        if not visible:
+            hidden_total += 1
+            if not include_hidden:
+                continue
+        name = (m.get("name") or "")[:60]
+        key = (m.get("role") or m.get("tag"), _norm(name), m.get("container") or "")
+        if visible and key[1] and key in groups:
+            groups[key]["repeats"] = groups[key].get("repeats", 1) + 1
+            continue
+        if len(items) >= limit:
+            continue   # cap new entries, but keep counting repeats of listed groups
+        item = {"ref": m["ref"], "role": m.get("role") or m.get("tag"), "name": name}
+        if m.get("input_type"):
+            item["type"] = m["input_type"]
+        if m.get("container"):
+            item["ctx"] = m["container"]
+        if m.get("href"):
+            item["href"] = m["href"]
+        if not visible:
+            item["hidden_reason"] = m.get("hidden_reason", "")
+        if m.get("disabled"):
+            item["disabled"] = True
+        if m.get("broken"):
+            item["broken"] = True
+        if m.get("ambiguous"):
+            item["ambiguous"] = True
+        items.append(item)
+        if visible and key[1]:
+            groups[key] = item
+    return items, hidden_total
 
 
 def infer_hints(model):

@@ -1,0 +1,102 @@
+{
+  "_note": "Authoring benchmark for the conversational agent (engine/agent_bench.py). Each task is a fixed prompt the agent must turn into a delivered, passing test case. tc_id/flow_id are DICTATED so scoring and cleanup are deterministic; every flow is prefixed bench_ (the bench only ever deletes flows/bench_*). Difficulty spread: easy = sanity floor (should stay ~100%), medium = real user flows, hard = the known failure modes (scroll-to-find, modals end-to-end, admin MUI autocomplete, vague wording). Run: venv\\Scripts\\python engine\\agent_bench.py",
+  "defaults": {
+    "project": "test",
+    "env": "dev"
+  },
+  "tasks": [
+    {
+      "id": "BENCH-001",
+      "tc_id": "TC-BENCH-001",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "easy",
+      "probe": "baseline navigation + visibility assertion",
+      "prompt": "Create a test that verifies the Catalog page loads correctly: product cards are visible and the search bar is present. Save it as test case TC-BENCH-001 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-002",
+      "tc_id": "TC-BENCH-002",
+      "flow_id": "bench_orders",
+      "app": "seller",
+      "difficulty": "easy",
+      "probe": "second page surface, stats assertion",
+      "prompt": "Create a test that opens the Orders page and verifies it loads with the order stats summary visible at the top. Save it as test case TC-BENCH-002 in flow bench_orders, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-003",
+      "tc_id": "TC-BENCH-003",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "medium",
+      "probe": "data-drift resilience: test data must come from the live page, not a hardcoded guess",
+      "prompt": "Create a test for catalog search: it should pick a product that actually exists (use a name you can see on the catalog page), search for part of that name, and verify matching products appear in the results. Save it as test case TC-BENCH-003 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-004",
+      "tc_id": "TC-BENCH-004",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "medium",
+      "probe": "dropdown ladder on seller app (open, search within, select, assert effect)",
+      "prompt": "Create a test that filters the catalog by Super Category: open the Super Category dropdown, choose one of the available options, and verify the product list updates to the filtered state. Save it as test case TC-BENCH-004 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-005",
+      "tc_id": "TC-BENCH-005",
+      "flow_id": "bench_orders",
+      "app": "seller",
+      "difficulty": "medium",
+      "probe": "multi-step flow: filter then drill into detail, assertion must survive data changes",
+      "prompt": "Create a test that filters the Orders page by one of the status tabs, opens the first order in the filtered list, and verifies the order detail view shows that same status. Save it as test case TC-BENCH-005 in flow bench_orders, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-006",
+      "tc_id": "TC-BENCH-006",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "medium",
+      "probe": "negative path: form must NOT submit when empty",
+      "prompt": "Create a negative test for the Request Product form: open the Request Product modal and try to submit it without filling anything, then verify the form does not submit successfully (validation errors appear or the modal stays open). Save it as test case TC-BENCH-006 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-007",
+      "tc_id": "TC-BENCH-007",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "hard",
+      "probe": "scroll-to-find: the button is below the viewport (~every 10th card)",
+      "prompt": "Somewhere in the catalog list there is a 'Create New Product' card (it appears between product cards as you scroll). Create a test that scrolls until it finds that card, opens the Create New Product modal from it, verifies the modal's form fields are present, and closes the modal without submitting. Save it as test case TC-BENCH-007 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-008",
+      "tc_id": "TC-BENCH-008",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "hard",
+      "probe": "full modal flow end-to-end with submit + success assertion",
+      "prompt": "Create a test for the full Incorrect Product flow: from a product card, open the Incorrect Product modal, select an issue type, add a short comment, submit, and verify the submission succeeds. Save it as test case TC-BENCH-008 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-009",
+      "tc_id": "TC-BENCH-009",
+      "flow_id": "bench_admin",
+      "app": "admin",
+      "difficulty": "hard",
+      "tags": [
+        "admin"
+      ],
+      "probe": "admin panel MUI autocomplete + dependent-field assertion, idempotent (no save)",
+      "prompt": "On the admin panel, create a test that starts creating a new Purchase Order: open the new PO form, select a vendor using the vendor autocomplete, and verify the billing/shipping address fields auto-populate from the vendor profile. Do NOT save the PO - the test must end without creating anything. Save it as test case TC-BENCH-009 in flow bench_admin, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-010",
+      "tc_id": "TC-BENCH-010",
+      "flow_id": "bench_catalog",
+      "app": "seller",
+      "difficulty": "hard",
+      "probe": "adaptability: the prompt uses wrong control names ('product finder box') and demands an empty-state oracle; the agent must observe the real UI and map intent to it",
+      "prompt": "Using the product finder box at the top of the catalog, create a test that looks up the nonsense term 'zzqxv123' and verifies the catalog shows its empty/no-results state instead of product cards. Save it as test case TC-BENCH-010 in flow bench_catalog, verify it passes, then stop."
+    }
+  ]
+}
