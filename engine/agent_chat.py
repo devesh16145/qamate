@@ -3839,6 +3839,9 @@ class AgentRuntime:
                 # pydantic-ai rejects the next prompt), then summarize findings.
                 if messages:
                     self.history = _compact_history(_trim_dangling_tool_calls(messages))
+                # The budget stop has no RunResult — count usage from the NEW messages
+                # of this turn (provider-reported usage rides on each ModelResponse).
+                self._add_usage(msgs=self.history[hist_before:])
                 summary = await self._summarize_after_budget()
                 extra = [{"role": "assistant", "text": summary}] if summary else None
                 self._persist_turn(message, attachment_names, self.history[hist_before:], extra_bubbles=extra)
@@ -3876,32 +3879,40 @@ class AgentRuntime:
         emit({"event": "ready", **self.ready_info, "resumed": True,
               "transcript": transcript, "tokens": self.session_tokens})
 
-    def _add_usage(self, result):
-        """Accumulate this turn's token usage into the session total and emit a live counter
-        ({event:'usage', input, output, total, estimated} — cumulative for the session). If the
-        provider reports no usage (some OpenAI-compatible endpoints omit it), fall back to a rough
-        ~4-chars/token estimate so the counter still moves instead of being stuck at 0."""
-        inp = out = tot = 0
-        try:
-            u = result.usage()
-            inp = int(getattr(u, "input_tokens", 0) or 0)
-            out = int(getattr(u, "output_tokens", 0) or 0)
-            tot = int(getattr(u, "total_tokens", 0) or 0)
-        except Exception:
-            pass
-        estimated = bool(self.session_tokens.get("estimated"))
-        if tot <= 0:
+    def _add_usage(self, result=None, msgs=None):
+        """Accumulate this turn's token usage into the session total and emit a live
+        counter ({event:'usage', input, output, total, estimated} — cumulative).
+        Counts come from each NEW ModelResponse's provider-reported usage, which
+        works for BOTH ways a turn can end: normal completion (result) AND the
+        tool-budget stop (msgs — there is no result object on that path; the old
+        code skipped usage entirely there, which kept the counter at 0 for every
+        budget-limited agentic turn). Falls back to a rough ~4 chars/token estimate
+        when the provider omits usage."""
+        if msgs is None and result is not None:
             try:
-                chars = sum(len(str(getattr(pt, "content", "") or ""))
-                            for m in result.new_messages() for pt in getattr(m, "parts", []))
+                msgs = result.new_messages()
+            except Exception:
+                msgs = []
+        inp = out = 0
+        for m in msgs or []:
+            u = getattr(m, "usage", None)
+            if u is not None:
+                inp += int(getattr(u, "input_tokens", 0) or 0)
+                out += int(getattr(u, "output_tokens", 0) or 0)
+        estimated = bool(self.session_tokens.get("estimated"))
+        if inp + out <= 0:
+            chars = 0
+            try:
+                for m in msgs or []:
+                    for pt in getattr(m, "parts", []):
+                        chars += len(str(getattr(pt, "content", "") or ""))
             except Exception:
                 chars = len(str(getattr(result, "output", "") or ""))
-            out = max(out, max(1, chars // 4))
-            tot = inp + out
+            out = max(1, chars // 4)
             estimated = True
         self.session_tokens["input"] += inp
         self.session_tokens["output"] += out
-        self.session_tokens["total"] += tot
+        self.session_tokens["total"] += inp + out
         self.session_tokens["estimated"] = estimated
         emit({"event": "usage", **self.session_tokens})
 

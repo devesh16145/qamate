@@ -10,9 +10,47 @@ import types
 import pytest
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
+from pydantic_ai.usage import RequestUsage
 
 import agent_chat as ac
 import agent_sessions
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _add_usage — the token counter must move on BOTH turn endings (the budget-stop
+# path used to skip it entirely, keeping the UI counter at 0)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _rt():
+    rt = ac.AgentRuntime.__new__(ac.AgentRuntime)
+    rt.session_tokens = {"input": 0, "output": 0, "total": 0}
+    return rt
+
+
+def test_add_usage_counts_provider_reported_tokens():
+    rt = _rt()
+    msgs = [ModelResponse(parts=[TextPart(content="x")], usage=RequestUsage(input_tokens=100, output_tokens=20)),
+            ModelResponse(parts=[TextPart(content="y")], usage=RequestUsage(input_tokens=50, output_tokens=5))]
+    rt._add_usage(msgs=msgs)
+    assert rt.session_tokens["input"] == 150
+    assert rt.session_tokens["output"] == 25
+    assert rt.session_tokens["total"] == 175
+    assert rt.session_tokens["estimated"] is False
+
+
+def test_add_usage_estimates_when_provider_omits():
+    rt = _rt()
+    rt._add_usage(msgs=[ModelResponse(parts=[TextPart(content="z" * 400)])])
+    assert rt.session_tokens["total"] >= 100      # ~400 chars / 4
+    assert rt.session_tokens["estimated"] is True
+
+
+def test_add_usage_accumulates_across_turns():
+    rt = _rt()
+    m = [ModelResponse(parts=[TextPart(content="a")], usage=RequestUsage(input_tokens=10, output_tokens=1))]
+    rt._add_usage(msgs=m)
+    rt._add_usage(msgs=m)
+    assert rt.session_tokens["total"] == 22
 
 
 # ──────────────────────────────────────────────────────────────────────────────
