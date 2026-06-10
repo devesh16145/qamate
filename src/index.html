@@ -1402,11 +1402,18 @@ function App() {
 
   const runSingle = useCallback((id) => { setChecked(new Set([id])); setTimeout(runSelected, 0); }, [runSelected]);
 
+  // Manual-input gate: a paused test waiting for a human value (OTP from a phone, ...)
+  const [manualReq, setManualReq] = useState(null);
+
   useEffect(() => {
     if (!window.ats || !window.ats.onProgress) return;
     const unsubProgress = window.ats.onProgress((data) => {
         if (!data || !data.event) return;
         switch (data.event) {
+            case 'manual_input_required':
+                setManualReq(data);
+                setLogLines(prev => [...prev, { t: nowTs(), type: 'warn', text: `⏸ ${data.tc || 'Test'} paused — waiting for your input: ${data.prompt || ''}` }]);
+                break;
             case 'log':
                 setLogLines(prev => [...prev, { t: nowTs(), type: 'info', text: data.message || '' }]);
                 break;
@@ -1428,6 +1435,7 @@ function App() {
             case 'run_complete':
                 setLogLines(prev => [...prev, { t: nowTs(), type: 'system', text: '✔ Execution Complete.' }]);
                 setRunning(false);
+                setManualReq(null);
                 break;
         }
     });
@@ -1606,6 +1614,15 @@ function App() {
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       <Modals isOpen={modal.isOpen} type={modal.type} tcId={modal.tcId} flowId={modal.flowId} description={modal.description} reviewData={modal.reviewData} jiraType={modal.jiraType} onClose={() => setModal({ isOpen: false, type: null })} toast={toast} />
 
+      {manualReq && (
+        <ManualInputPrompt req={manualReq}
+          onRespond={async (value, cancel) => {
+            const r = await window.ats.manualInputRespond({ responsePath: manualReq.response_path, value, cancel });
+            if (r && r.status === 'error') { toast(r.message || 'Could not deliver the value'); return; }
+            setLogLines(prev => [...prev, { t: nowTs(), type: cancel ? 'warn' : 'pass', text: cancel ? '⏹ Manual input cancelled — the test will fail.' : '▶ Value delivered — test resuming.' }]);
+            setManualReq(null);
+          }} />
+      )}
       <div className="toast-stack">
         {toasts.map(t => <div className="toast" key={t.id}>{t.msg}</div>)}
       </div>
@@ -2153,6 +2170,37 @@ function LeftToolWindow(props) {
     </aside>
   );
   return <TestExplorer {...props} />;
+}
+
+/* ── Manual-input prompt: a running test is PAUSED waiting for a human value
+   (e.g. the OTP that just arrived on your phone). Amber, impossible to miss. ── */
+function ManualInputPrompt({ req, onRespond }) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = async (cancel) => { if (busy) return; setBusy(true); await onRespond(value.trim(), !!cancel); setBusy(false); };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 430, background: 'var(--bg)', border: '2px solid #f59e0b', borderRadius: 12, boxShadow: '0 16px 48px rgba(0,0,0,0.45)', padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#f59e0b', animation: 'pulse 1.2s infinite' }}></span>
+          <b style={{ fontSize: 13.5, color: '#f59e0b' }}>Test paused — needs your input</b>
+        </div>
+        {req.tc && <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', marginBottom: 8 }}>{req.tc}</div>}
+        <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 12 }}>{req.prompt || 'Enter the value'}</div>
+        <input autoFocus value={value} onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && value.trim()) send(false); }}
+          placeholder="Type the value (e.g. the OTP) and press Enter"
+          style={{ width: '100%', boxSizing: 'border-box', fontSize: 15, letterSpacing: '0.15em', fontFamily: 'var(--mono)', padding: '9px 11px', background: 'rgba(245,158,11,0.06)', border: '1.5px solid #f59e0b', borderRadius: 8, color: 'var(--text)', outline: 'none' }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+          <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>The test fails on timeout if nobody answers.</span>
+          <span style={{ display: 'inline-flex', gap: 8 }}>
+            <button className="editor-action" onClick={() => send(true)} disabled={busy}>Cancel (fail test)</button>
+            <button className="editor-action primary" onClick={() => send(false)} disabled={busy || !value.trim()}>Resume test</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ── Suite management modals: new test case, new folder (flow), clone from

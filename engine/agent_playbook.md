@@ -215,6 +215,28 @@ relevant fields. They are not hints to explore with — they are the data.
    options after a customer is selected). Fill fields top-to-bottom in the order they appear
    on screen. Do not click field N+1 while field N is still empty.
 
+## OTP / one-time codes — the manual-input gate
+
+Some flows (sign-up, phone login) need a code that arrives on the USER'S phone. The code
+you get during authoring is one-time — replaying it in the generated test will always fail.
+The correct protocol:
+
+1. Drive the flow to the OTP screen (fill phone, click Send OTP).
+2. `ask_user("What OTP did you receive on +91-…?")` — the user reads it off their phone.
+3. `fill(<otp field ref>, "<the code>")` — continue the live flow with the real code.
+4. **`mark_step_manual("Enter the OTP sent to +91-…")` immediately after that fill.**
+   This converts the step into a manual-input gate: the GENERATED test pauses there,
+   shows the prompt in the app, and resumes with whatever the human types.
+5. Finish the flow and create_test_case as usual.
+
+Notes:
+- `run_test_case` cannot verify a gated test unattended — it will report
+  `manual_input_gate: true` with a skip. That is EXPECTED; tell the user to run it from
+  the app's RUN button (an amber prompt appears) — do not loop trying to "fix" it.
+- Only use the gate for true one-time values. Stable values (emails, names, quantities)
+  belong in test data, and if dev has a FIXED test OTP (whitelisted test number), prefer
+  typing that as normal test data — fully automatic beats paused.
+
 ## Exploring and observing
 - Call `observe` BEFORE acting on a page. Use ONLY the refs from the most recent
   `observe`. Re-observe after any navigation or click that changes the page.

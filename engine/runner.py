@@ -170,6 +170,37 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
         emit({"event": "run_complete", "summary": {**metadata, "status": "Error", "error": str(e)}})
         return
 
+    # ── Manual-input gate (OTP etc.) ─────────────────────────────────────────
+    # A test's manual_input() fixture writes <results>/manual_input/<id>.request.json
+    # and polls for the matching .response.json. This watcher surfaces requests to
+    # the UI as events; main.js writes the response file when the user answers.
+    # File-based (not stdout) so it also works under pytest-xdist workers.
+    import threading
+    _mi_dir = os.path.join(results_dir, "manual_input")
+    _mi_stop = threading.Event()
+
+    def _watch_manual_input():
+        seen = set()
+        while not _mi_stop.is_set():
+            try:
+                for name in (os.listdir(_mi_dir) if os.path.isdir(_mi_dir) else []):
+                    if not name.endswith(".request.json") or name in seen:
+                        continue
+                    seen.add(name)
+                    try:
+                        with open(os.path.join(_mi_dir, name), "r", encoding="utf-8") as f:
+                            req = json.load(f)
+                        emit({"event": "manual_input_required", **req})
+                        log(f"PAUSED for manual input: {req.get('prompt', '')[:80]}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            _mi_stop.wait(1.0)
+
+    _mi_thread = threading.Thread(target=_watch_manual_input, daemon=True)
+    _mi_thread.start()
+
     # ── Parse pytest output line by line ──
     passed = 0
     failed = 0
@@ -279,6 +310,7 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
             emit({"event": "progress", "passed": passed, "failed": failed, "skipped": skipped, "total": total})
 
     process.wait()
+    _mi_stop.set()
     duration_s = round(time.time() - start_time, 1)
     log(f"Pytest exited with code {process.returncode}")
 

@@ -706,10 +706,19 @@ def generate_from_review(payload, ats_root, tests_dir=None):
     # across runs where backend assigns different DB row ids.
     steps = _rewrite_dynamic_ids(steps)
 
-    # Build data dict from steps
+    # ── Manual-input gate (__MANUAL__ sentinel) ──
+    # A fill whose value is "__MANUAL__:<prompt>" becomes manual_input("<prompt>")
+    # in the generated code: the test PAUSES at that step and asks the human for a
+    # fresh value (an OTP that arrives on a phone can't be replayed from test data).
+    _manual_re = re.compile(r"^__MANUAL__(?::\s*(.*))?$", re.DOTALL)
+    uses_manual_input = any(
+        s.get("type") in ("fill", "type") and _manual_re.match(str(s.get("value") or ""))
+        for s in steps)
+
+    # Build data dict from steps (manual-gated values are NOT test data)
     data_dict = {}
     for step in steps:
-        if step.get("varName") and step.get("value"):
+        if step.get("varName") and step.get("value") and not _manual_re.match(str(step["value"])):
             data_dict[step["varName"]] = step["value"]
 
     # Build step->assertions map
@@ -826,8 +835,20 @@ def generate_from_review(payload, ats_root, tests_dir=None):
             if _pattern.search(raw):
                 raw = _pattern.sub(_replacement + ".first", raw)
 
-        # ── Replace hardcoded values with tc_data references ──
-        if stype in ("fill", "type") and step.get("varName"):
+        # ── Replace hardcoded values: manual-input gate first, then tc_data refs ──
+        _mm = _manual_re.match(str(step.get("value") or "")) if stype in ("fill", "type") else None
+        if _mm:
+            _prompt = (_mm.group(1) or "").strip() or "Enter the required value (e.g. the OTP)"
+            _prompt_lit = json.dumps(_prompt.replace("(", "[").replace(")", "]"))
+            raw = re.sub(r'\.fill\((["\'])(.*?)\1\)',
+                         lambda _x: f'.fill(manual_input({_prompt_lit}))', raw, count=1)
+            raw = re.sub(r'\.type\((["\'])(.*?)\1\)',
+                         lambda _x: f'.type(manual_input({_prompt_lit}))', raw, count=1)
+            # The checkpoint label/comment must not leak the one-time code that was
+            # typed during authoring (it may sit in desc/value via targetDescription).
+            desc = f"PAUSE for manual input: {_prompt}"
+            step = {**step, "value": "(manual input)", "targetDescription": desc}
+        elif stype in ("fill", "type") and step.get("varName"):
             var_name = step["varName"]
             if stype == "fill":
                 raw = re.sub(
@@ -1129,7 +1150,8 @@ def generate_from_review(payload, ats_root, tests_dir=None):
         page_fixture = "seller_page"
 
     func_code = f'\n\n@pytest.mark.tc("{tc_id}")\n'
-    func_code += f'def {func_name}({page_fixture}: Page, tc_data, base_url, admin_url, checkpoints):\n'
+    _extra_fixtures = ", manual_input" if uses_manual_input else ""
+    func_code += f'def {func_name}({page_fixture}: Page, tc_data, base_url, admin_url, checkpoints{_extra_fixtures}):\n'
     docstring = f'    """{description}'
     if preconditions:
         docstring += f'\n\n    Preconditions: {preconditions}'

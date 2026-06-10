@@ -550,6 +550,60 @@ def results_dir():
     return d
 
 
+# ── Manual-input gate: pause the test for a value only a human can supply ────
+# (an OTP that arrives on a phone, a captcha answer, ...). The runner watches
+# <results>/manual_input/ and surfaces the prompt in the app; the user's answer
+# is written to the response file and the test resumes.
+
+def _await_manual_response(resp_path, timeout_s):
+    """Poll for the response file. Returns the dict, or None on timeout."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if os.path.exists(resp_path):
+            try:
+                with open(resp_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass  # written half-way — retry
+        time.sleep(0.5)
+    return None
+
+
+@pytest.fixture
+def manual_input(request, results_dir):
+    """Ask the human for a value mid-test (e.g. the OTP sent to their phone):
+
+        otp = manual_input("Enter the OTP sent to +91-98xxx")
+        page.get_by_role("textbox", name="OTP").fill(otp)
+
+    The run PAUSES with an amber prompt in the app until the value is typed.
+    Generated tests use this automatically when a recorded fill value carries the
+    '__MANUAL__:<prompt>' sentinel. Timeout (ATS_MANUAL_INPUT_TIMEOUT, default
+    180s) fails the test; ATS_NO_MANUAL_INPUT=1 (unattended/CI/agent-verify runs)
+    skips it instead — a human-gated test must never rot a pipeline."""
+    tc_name = request.node.name
+
+    def _ask(prompt, timeout_s=None):
+        if os.environ.get("ATS_NO_MANUAL_INPUT"):
+            pytest.skip(f"requires manual input ({prompt}) — run attended from the app")
+        timeout_s = float(timeout_s or os.environ.get("ATS_MANUAL_INPUT_TIMEOUT") or 180)
+        mi_dir = os.path.join(results_dir, "manual_input")
+        os.makedirs(mi_dir, exist_ok=True)
+        rid = os.urandom(6).hex()
+        resp_path = os.path.join(mi_dir, f"{rid}.response.json")
+        with open(os.path.join(mi_dir, f"{rid}.request.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": rid, "prompt": str(prompt), "tc": tc_name,
+                       "response_path": resp_path}, f)
+        resp = _await_manual_response(resp_path, timeout_s)
+        if resp is None:
+            pytest.fail(f"manual input timed out after {int(timeout_s)}s: {prompt}")
+        if resp.get("cancel"):
+            pytest.fail(f"manual input cancelled by the user: {prompt}")
+        return str(resp.get("value", ""))
+
+    return _ask
+
+
 @pytest.fixture(scope="session")
 def active_project():
     """The Project this run targets, or None for legacy (Agrim platforms) mode."""

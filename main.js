@@ -1325,6 +1325,21 @@ ipcMain.handle('save-tc-meta', async (event, { flowId, tcId, heading, descriptio
     return { success: false, error: e.message };
   }
 });
+// IPC: Answer a paused test's manual_input() request (OTP etc.) — writes the
+// response file the conftest fixture is polling for.
+ipcMain.handle('manual-input-respond', async (event, { responsePath, value, cancel } = {}) => {
+  try {
+    const p = String(responsePath || '');
+    // Containment: only ever write *.response.json inside a manual_input dir under results.
+    if (!/[\\\/]manual_input[\\\/][0-9a-f]+\.response\.json$/.test(p) || !path.resolve(p).startsWith(path.resolve(RESULTS_DIR))) {
+      return { status: 'error', message: 'invalid response path' };
+    }
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(cancel ? { cancel: true } : { value: String(value == null ? '' : value) }));
+    return { status: 'success' };
+  } catch (err) { return { status: 'error', message: err.message }; }
+});
+
 // IPC: Create a new flow folder in the active suite (a flow = a tree folder).
 ipcMain.handle('create-flow', async (event, { flowId } = {}) => {
   try {

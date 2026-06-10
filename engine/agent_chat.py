@@ -1880,6 +1880,24 @@ class BrowserSession:
         return {"ok": True, "ref": ref, "role": m.get("role") or m.get("tag"),
                 "name": (m.get("name") or "")[:80]}
 
+    def mark_step_manual(self, prompt):
+        """Convert the LAST recorded fill step into a manual-input gate: the generated
+        test pauses there and prompts the human for a fresh value (an OTP that arrived
+        on a phone during authoring cannot be replayed from test data)."""
+        for s in reversed(self.steps):
+            if s.get("type") == "fill":
+                p = str(prompt or "Enter the value").strip()[:160]
+                s["value"] = "__MANUAL__:" + p
+                s["varName"] = s.get("varName") or ""
+                s["targetDescription"] = f"PAUSE for manual input: {p}"
+                return {"ok": True, "step_id": s.get("id"),
+                        "note": "Recorded. The generated test will pause at this step and "
+                                "show the prompt; the human types the fresh value (e.g. OTP) "
+                                "and the test resumes."}
+        return {"ok": False,
+                "error": "no fill step recorded yet — fill the OTP/code field first, "
+                         "then call mark_step_manual"}
+
     def add_checkpoint(self, name, assert_type, value):
         after = self.steps[-1]["id"] if self.steps else 0
         self.assertions.append({"type": assert_type, "value": value,
@@ -2504,6 +2522,18 @@ def build_agent(model, max_tokens=None):
         return res
 
     @agent.tool
+    async def mark_step_manual(ctx: RunContext[Deps], prompt: str) -> dict:
+        """Call IMMEDIATELY AFTER filling a field with a ONE-TIME value a human gave you
+        via ask_user (an OTP from their phone, an SMS/email code, a captcha answer).
+        It converts that last fill into a MANUAL-INPUT GATE: when the generated test
+        runs later, it PAUSES at this step, shows `prompt` to the human, and resumes
+        with whatever they type — instead of replaying the now-expired code.
+        prompt example: 'Enter the OTP sent to +91-98xxxxx680'.
+        Typical OTP sign-up flow: fill phone -> click Send OTP -> ask_user for the
+        code -> fill the OTP field -> mark_step_manual -> continue the flow."""
+        return await _bro(ctx.deps.session.mark_step_manual, prompt)
+
+    @agent.tool
     async def add_checkpoint(ctx: RunContext[Deps], name: str, assert_type: str, value: str) -> dict:
         """Record a verification checkpoint after the latest step. assert_type must be
         'url_contains' or 'page_contains_text'; value is the expected substring. Add these at
@@ -2584,6 +2614,9 @@ def build_agent(model, max_tokens=None):
         if proj.get("id"):
             base_env["ATS_PROJECT_ID"] = proj["id"]
         base_env.setdefault("ATS_ENV", os.environ.get("ATS_ENV") or "dev")
+        # The verify loop is unattended — a manual_input() gate (OTP) must skip,
+        # not hang for its timeout. Detected below and reported honestly.
+        base_env["ATS_NO_MANUAL_INPUT"] = "1"
         verify_root = os.path.join(ats_root, "results", "_agent_verify")
         try:
             import shutil
@@ -2607,7 +2640,7 @@ def build_agent(model, max_tokens=None):
             env = dict(base_env)
             env["ATS_RESULTS_DIR"] = rdir   # known dir so we can find the failure screenshot
             cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
-                   "--tb=short", "-q", "-p", "no:cacheprovider", "--tracing=off"]
+                   "--tb=short", "-q", "-ra", "-p", "no:cacheprovider", "--tracing=off"]
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd, cwd=ats_root, env=env,
@@ -2632,6 +2665,13 @@ def build_agent(model, max_tokens=None):
             return {"ok": True, "passed": False, "exit_code": r1["rc"],
                     "error": (f"no test matched '{underscored}' in flow '{flow_id}' — confirm "
                               "create_test_case succeeded and the tc_id/flow_id are right")}
+        if "requires manual input" in r1["text"]:
+            return {"ok": True, "passed": False, "manual_input_gate": True,
+                    "note": ("This test PAUSES for a human value (e.g. an OTP) — it cannot be "
+                             "verified unattended. It skipped cleanly here, which confirms the "
+                             "gate is wired. Tell the user to run it from the app's RUN button "
+                             "and answer the amber prompt; do NOT keep re-running it here and "
+                             "do NOT treat this as a failure to fix.")}
         runs = [r1]
         verify_runs = int(os.environ.get("ATS_VERIFY_RUNS") or 2)
         if r1["passed"] and verify_runs >= 2:

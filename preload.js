@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('ats', {
   runTests: (options) => ipcRenderer.invoke('run-tests', options),
   stopTests: () => ipcRenderer.invoke('stop-tests'),
   onProgress: (callback) => ipcRenderer.on('test-progress', (_, data) => callback(data)),
+  manualInputRespond: (opts) => ipcRenderer.invoke('manual-input-respond', opts), // {responsePath, value} | {responsePath, cancel:true}
   onLog: (callback) => ipcRenderer.on('test-log', (_, data) => callback(data)),
   getHistory: () => ipcRenderer.invoke('get-run-history'),
   openReport: (path) => ipcRenderer.invoke('open-report', path),
