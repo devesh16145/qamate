@@ -65,6 +65,24 @@
     return nodes.length ? nodes : [text];
   }
 
+  /* Lightweight token highlighting for code cards (keys/strings/numbers/bools/comments). */
+  function CodeTokens({ code }) {
+    const re = /("(?:[^"\\]|\\.)*")(\s*:)?|('(?:[^'\\]|\\.)*')|\b(true|false|null|True|False|None)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|((?:\/\/|#)[^\n]*)/g;
+    const nodes = []; let last = 0, m, k = 0;
+    while ((m = re.exec(code)) !== null) {
+      if (m.index > last) nodes.push(code.slice(last, m.index));
+      if (m[1] != null && m[2] != null) { nodes.push(<span key={k++} style={{ color: 'var(--accent)' }}>{m[1]}</span>); nodes.push(m[2]); }
+      else if (m[1] != null) nodes.push(<span key={k++} style={{ color: 'var(--pass, #16a34a)' }}>{m[1]}</span>);
+      else if (m[3] != null) nodes.push(<span key={k++} style={{ color: 'var(--pass, #16a34a)' }}>{m[3]}</span>);
+      else if (m[4] != null) nodes.push(<span key={k++} style={{ color: '#b07cd8' }}>{m[4]}</span>);
+      else if (m[5] != null) nodes.push(<span key={k++} style={{ color: '#5b9dd9' }}>{m[5]}</span>);
+      else nodes.push(<span key={k++} style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>{m[6]}</span>);
+      last = re.lastIndex;
+    }
+    if (last < code.length) nodes.push(code.slice(last));
+    return nodes.length ? nodes : [code];
+  }
+
   function Markdown({ text }) {
     if (!text) return null;
     // Split code fences out first
@@ -77,13 +95,15 @@
     }
     if (last < text.length) segs.push({ t: 'prose', s: text.slice(last) });
     return (
-      <div style={{ lineHeight: 1.65, wordBreak: 'break-word' }}>
+      <div style={{ lineHeight: 1.7, wordBreak: 'break-word' }}>
         {segs.map((seg, si) => {
           if (seg.t === 'code') return (
-            <pre key={si} style={{ background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', margin: '8px 0', fontSize: 11.5, fontFamily: 'var(--mono)', overflowX: 'auto', whiteSpace: 'pre' }}>
-              {seg.lang && <span style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', marginBottom: 6, fontFamily: 'var(--mono)' }}>{seg.lang}</span>}
-              <code>{seg.s}</code>
-            </pre>
+            <div key={si} style={{ border: '1px solid var(--border)', borderRadius: 10, margin: '10px 0', background: 'var(--bg)', overflow: 'hidden' }}>
+              <div style={{ padding: '7px 13px 0', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', userSelect: 'none' }}>{seg.lang || 'code'}</div>
+              <pre style={{ margin: 0, padding: '8px 13px 12px', fontSize: 11.5, fontFamily: 'var(--mono)', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6 }}>
+                <code><CodeTokens code={seg.s} /></code>
+              </pre>
+            </div>
           );
           return (
             <React.Fragment key={si}>
@@ -125,13 +145,13 @@
     const live = !!m.streaming;
     const tail = (m.text || '').slice(-150).replace(/\s+/g, ' ').trim();
     return (
-      <div style={{ alignSelf: 'stretch', paddingLeft: 36, minWidth: 0 }}>
+      <div style={{ alignSelf: 'stretch', minWidth: 0 }}>
         <button onClick={() => setOpen(o => !o)}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, maxWidth: '100%', fontSize: 10.5, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
-          <span style={{ fontSize: 8, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
-          <span style={{ fontWeight: 600, flexShrink: 0 }}>{live ? 'Thinking' : 'Thought process'}</span>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%', fontSize: 11, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
+          <span style={{ flexShrink: 0 }}>{live ? 'Thinking' : 'Thought process'}</span>
           {live && <span className="live-dot" style={{ flexShrink: 0 }}></span>}
-          {!open && tail && <span style={{ fontStyle: 'italic', opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{tail}</span>}
+          {!open && tail && <span style={{ fontStyle: 'italic', opacity: 0.7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>· {tail}</span>}
+          <span style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', opacity: 0.7 }}>›</span>
         </button>
         {open && (
           <div style={{ marginTop: 3, borderLeft: '2px solid var(--border)', paddingLeft: 10, fontSize: 11.5, lineHeight: 1.55, color: 'var(--text-3)', fontStyle: 'italic', whiteSpace: 'pre-wrap', maxHeight: 280, overflowY: 'auto' }}>{m.text}</div>
@@ -239,18 +259,18 @@
       } else { i++; }
     }
     const names = [...new Set(pairs.map(p => p.call.tool))];
-    const preview = names.slice(0, 4).join(' · ') + (names.length > 4 ? ` +${names.length - 4}` : '');
+    const preview = names.slice(0, 5).join(', ') + (names.length > 5 ? ` +${names.length - 5}` : '');
     return (
-      <div style={{ alignSelf: 'flex-start', margin: '1px 0', paddingLeft: 36 }}>
+      <div style={{ alignSelf: 'stretch', margin: '1px 0', minWidth: 0 }}>
         <button onClick={() => setOpen(o => !o)}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
-          <span style={{ fontSize: 8, color: 'var(--accent)' }}>{open ? '▾' : '▸'}</span>
-          <Ic.Zap size={10} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          <span style={{ fontWeight: 600, color: 'var(--text-2)' }}>{pairs.length} tool call{pairs.length !== 1 ? 's' : ''}</span>
-          {!open && <span style={{ color: 'var(--text-3)' }}>· {preview}</span>}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%', fontSize: 11, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            Worked with {pairs.length} tool call{pairs.length !== 1 ? 's' : ''} — {preview}
+          </span>
+          <span style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', opacity: 0.7 }}>›</span>
         </button>
         {open && (
-          <div style={{ marginTop: 4, borderLeft: '1px solid var(--border)', paddingLeft: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ marginTop: 4, border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--bg)' }}>
             {pairs.map(({ call, result }, pi) => <ToolPair key={pi} call={call} result={result} />)}
           </div>
         )}
@@ -618,6 +638,8 @@
     const onComposerChange = (e) => {
       const v = e.target.value;
       setInput(v);
+      // Auto-grow the borderless composer textarea (caps at 140px, then scrolls).
+      try { e.target.style.height = 'auto'; e.target.style.height = Math.min(140, e.target.scrollHeight) + 'px'; } catch (err) { /* ignore */ }
       const caret = e.target.selectionStart != null ? e.target.selectionStart : v.length;
       const m = v.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
       if (m) { setAtQuery(m[1]); setAtIndex(0); setAtOpen(true); ensureAtFiles(); }
@@ -673,66 +695,54 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
     };
 
-    const MimoAvatar = () => (
-      <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#1d4ed8 0%,#7c3aed 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', flexShrink: 0, letterSpacing: '-0.5px', userSelect: 'none' }}>M</div>
-    );
-    const YouAvatar = () => (
-      <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Ic.User size={13} style={{ color: '#fff' }} /></div>
-    );
-
+    /* Document-style chat: no avatars. User = right-aligned soft pill;
+       assistant = plain text in the reading column (modern agent look). */
     const bubble = (m) => {
       if (m.role === 'user') return (
-        <div key={m.id} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8 }}>
-          <div style={{ maxWidth: '78%', background: 'var(--editor)', color: 'var(--text)', border: '1px solid var(--border)', padding: '9px 13px', borderRadius: '12px 12px 3px 12px', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <div key={m.id} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ maxWidth: '72%', background: 'var(--accent-bg)', color: 'var(--text)', padding: '8px 14px', borderRadius: 16, fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {m.text}
             {m.attachments && m.attachments.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
                 {m.attachments.map((n, i) => (
-                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '1px 6px' }}><Ic.File size={10} /> {n}</span>
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '1px 6px' }}><Ic.File size={10} /> {n}</span>
                 ))}
               </div>
             )}
           </div>
-          <YouAvatar />
         </div>
       );
 
       if (m.role === 'thinking') return <ThinkingBlock key={m.id} m={m} />;
 
       if (m.role === 'assistant') return (
-        <div key={m.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <MimoAvatar />
-          <div style={{ flex: 1, minWidth: 0, paddingTop: 3, fontSize: 13, color: 'var(--text)' }}>
-            <Markdown text={m.text} />
-            {m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}
-          </div>
+        <div key={m.id} style={{ minWidth: 0, fontSize: 13.5, color: 'var(--text)' }}>
+          <Markdown text={m.text} />
+          {m.streaming && <span className="live-dot" style={{ marginLeft: 4 }}></span>}
         </div>
       );
 
       // tool/tool_result are batched by groupMessages; these are fallback singles
       if (m.role === 'tool') return (
-        <div key={m.id} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--accent)', paddingLeft: 38 }}>
-          <Ic.Zap size={10} /><b>{m.tool}</b><span style={{ color: 'var(--text-3)' }}>{argStr(m.args).slice(0, 100)}</span>
+        <div key={m.id} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-3)' }}>
+          <b style={{ color: 'var(--text-2)' }}>{m.tool}</b><span>{argStr(m.args).slice(0, 100)}</span>
         </div>
       );
       if (m.role === 'tool_result') return (
-        <div key={m.id} style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 54 }}>↳ {String(m.text).slice(0, 120)}</div>
+        <div key={m.id} style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--text-3)', paddingLeft: 14 }}>↳ {String(m.text).slice(0, 120)}</div>
       );
 
       if (m.role === 'error') return (
-        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'center', fontSize: 11.5, color: 'var(--fail)', background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 8, padding: '7px 12px', maxWidth: '90%' }}>
+        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'center', fontSize: 11.5, color: 'var(--fail)', background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 10, padding: '7px 12px', maxWidth: '90%' }}>
           <Ic.AlertCircle size={14} style={{ flexShrink: 0 }} /> {m.text}
         </div>
       );
 
       if (m.role === 'input_request') return (
-        <div key={m.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <MimoAvatar />
-          <div style={{ flex: 1, minWidth: 0, padding: '10px 14px', background: 'rgba(245,158,11,0.08)', border: '1.5px solid #f59e0b', borderRadius: '12px 12px 12px 3px' }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: '#f59e0b', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 5 }}><Ic.Pause size={12} /> Needs your input</div>
-            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>{m.text}</div>
-            <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--text-3)' }}>Type your answer in the box below ↓</div>
-          </div>
+        <div key={m.id} style={{ minWidth: 0, padding: '10px 14px', background: 'rgba(245,158,11,0.07)', border: '1.5px solid #f59e0b', borderRadius: 12 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#f59e0b', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 5 }}><Ic.Pause size={12} /> Needs your input</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>{m.text}</div>
+          <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--text-3)' }}>Type your answer in the box below ↓</div>
         </div>
       );
 
@@ -750,12 +760,9 @@
           {onBack && <HBtn onClick={onBack} title="Back to sessions"><Ic.ChevronLeft size={13} /></HBtn>}
           <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }} title={session.title}>{session.title || 'Untitled session'}</b>
           <StatusChip rt={rt} />
-          {connected && <ModeChip mode={rt.mode} onToggle={onToggleMode} disabled={busy} />}
-          {info && (
-            <span title={`Provider: ${info.provider} · Model: ${info.model} · ${info.auth ? 'Authenticated via ' + (info.auth_via || 'saved session') : 'NOT logged in — set credentials in Settings'}`}
-              style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
-              {info.model}{info.auth ? '' : ' · no auth'}
-            </span>
+          {info && !info.auth && (
+            <span title="NOT logged in — set credentials in Settings or capture a login for this project"
+              style={{ fontSize: 10.5, color: 'var(--fail, #dc2626)', fontFamily: 'var(--mono)' }}>no auth</span>
           )}
           {connected && (
             <span title={`Tokens this session${(rt.usage && rt.usage.estimated) ? ' (estimated — the model provider did not report usage)' : ''} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, total ${(rt.usage && rt.usage.total) || 0}`}
@@ -824,20 +831,22 @@
           onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
           onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
           onDrop={onDrop}
-          style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
-          <PlanCard plan={rt.plan || []} />
-          {messages.length === 0 && !connected && (
-            <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, fontSize: 12.5, lineHeight: 1.6 }}>
-              {canResume ? 'This session is paused. Resume it to continue from where you left off — its memory is restored.'
-                         : 'New session. Start the agent below, then tell it what to do — e.g. "explore the orders area and write a test for the full order lifecycle."'}
-            </div>
-          )}
-          {groupMessages(messages).map(g =>
-            g.type === 'batch'
-              ? <ToolBatch key={g.key} items={g.items} />
-              : bubble(g.msg)
-          )}
-          {dragOver && <div style={{ alignSelf: 'center', margin: 'auto', color: 'var(--accent)', fontSize: 12, fontFamily: 'var(--mono)' }}>Drop files to attach</div>}
+          style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '16px 18px', outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
+          <div style={{ maxWidth: 780, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}>
+            <PlanCard plan={rt.plan || []} />
+            {messages.length === 0 && !connected && (
+              <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, fontSize: 12.5, lineHeight: 1.6 }}>
+                {canResume ? 'This session is paused. Resume it to continue from where you left off — its memory is restored.'
+                           : 'New session. Start the agent below, then tell it what to do — e.g. "explore the orders area and write a test for the full order lifecycle."'}
+              </div>
+            )}
+            {groupMessages(messages).map(g =>
+              g.type === 'batch'
+                ? <ToolBatch key={g.key} items={g.items} />
+                : bubble(g.msg)
+            )}
+            {dragOver && <div style={{ alignSelf: 'center', margin: 'auto', color: 'var(--accent)', fontSize: 12, fontFamily: 'var(--mono)' }}>Drop files to attach</div>}
+          </div>
         </div>
 
         {busy && rt.lastLog && (
@@ -845,40 +854,31 @@
         )}
 
         {!connected ? (
-          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--accent-bg)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ padding: '10px 18px 14px' }}>
             {autoOpen && onStartAuto && (
               <RunAutoModal projectId={projectId} onClose={() => setAutoOpen(false)}
                 onConfirm={(msg) => { setAutoOpen(false); onStartAuto(msg, []); }} />
             )}
-            <SetupBar provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
-              toolBudget={toolBudget} setToolBudget={setToolBudget}
-              mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
-              {onStartAuto && (
-                <button className="rv-cta" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised (starts a new session)">
-                  <Ic.Zap size={12} /> Auto
+            <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '12px 14px' }}>
+              <SetupBar provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+                toolBudget={toolBudget} setToolBudget={setToolBudget}
+                mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
+                {onStartAuto && (
+                  <button className="rv-cta" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised (starts a new session)">
+                    <Ic.Zap size={12} /> Auto
+                  </button>
+                )}
+                <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
+                  <Ic.Play size={13} /> {status === 'starting' ? 'Starting…' : (canResume ? 'Resume session' : 'Start session')}
                 </button>
-              )}
-              <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
-                <Ic.Play size={13} /> {status === 'starting' ? 'Starting…' : (canResume ? 'Resume session' : 'Start session')}
-              </button>
-            </SetupBar>
+              </SetupBar>
+            </div>
           </div>
         ) : (
-          <div style={{ padding: '8px 16px 10px', borderTop: '1px solid var(--accent-bg)' }}>
-            {attachments.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
-                {attachments.map((a) => (
-                  <span key={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent-bg)', borderRadius: 6, padding: '2px 4px 2px 7px' }}>
-                    {isImg(a.ext) ? <Ic.File size={10} /> : <Ic.FileText size={10} />}
-                    <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
-                    <button onClick={() => removeAttachment(a.path)} title="Remove" style={{ display: 'inline-flex', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text-3)' }}><Ic.X size={11} /></button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 8, position: 'relative' }}>
+          <div style={{ padding: '6px 18px 14px' }}>
+            <div style={{ maxWidth: 780, margin: '0 auto', position: 'relative', background: 'var(--bg)', border: awaitingInput ? '1.5px solid #f59e0b' : '1px solid var(--border)', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '10px 12px 8px', transition: 'border-color 0.15s' }}>
               {atOpen && atMatches.length > 0 && (
-                <div style={{ position: 'absolute', bottom: '100%', left: 40, right: 0, marginBottom: 6, maxHeight: 210, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', zIndex: 40, fontSize: 11.5, fontFamily: 'var(--mono)' }}>
+                <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 8, maxHeight: 210, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', zIndex: 40, fontSize: 11.5, fontFamily: 'var(--mono)' }}>
                   <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-3)', borderBottom: '1px solid var(--accent-bg)' }}>Reference a file — ↑↓ then Enter</div>
                   {atMatches.map((p, i) => (
                     <div key={p} onMouseDown={(e) => { e.preventDefault(); insertAtMatch(p); }} onMouseEnter={() => setAtIndex(i)}
@@ -889,13 +889,33 @@
                   ))}
                 </div>
               )}
-              <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images" style={{ alignSelf: 'flex-end' }}><Ic.Upload size={14} /></button>
+              {attachments.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
+                  {attachments.map((a) => (
+                    <span key={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--accent-bg)', borderRadius: 6, padding: '2px 4px 2px 7px' }}>
+                      {isImg(a.ext) ? <Ic.File size={10} /> : <Ic.FileText size={10} />}
+                      <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
+                      <button onClick={() => removeAttachment(a.path)} title="Remove" style={{ display: 'inline-flex', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text-3)' }}><Ic.X size={11} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
                 onBlur={() => setTimeout(() => setAtOpen(false), 120)}
-                placeholder={awaitingInput ? 'The agent is waiting — type your answer and press Enter…' : status === 'ready' ? 'Message the agent… (Enter to send · @ to reference a file · drop files to attach)' : 'The agent is working — it will be ready for your next message shortly…'}
+                rows={1}
+                placeholder={awaitingInput ? 'The agent is waiting — type your answer and press Enter…' : status === 'ready' ? 'Write a message…  (@ to reference a file · drop files to attach)' : 'The agent is working…'}
                 disabled={status !== 'ready' && status !== 'awaiting_input'}
-                style={{ flex: 1, minHeight: 38, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '9px 10px', fontFamily: 'inherit', background: awaitingInput ? 'rgba(245,158,11,0.06)' : 'var(--editor)', color: 'var(--text)', border: awaitingInput ? '1.5px solid #f59e0b' : '1px solid var(--border)', borderRadius: 'var(--radius-lg)', outline: 'none', transition: 'border-color 0.15s, background 0.15s' }} />
-              <button className="rv-cta primary" onClick={onSend} disabled={(status !== 'ready' && status !== 'awaiting_input') || (!(rt.input || '').trim() && !attachments.length)} style={{ alignSelf: 'flex-end' }}><Ic.Play size={13} /></button>
+                style={{ display: 'block', width: '100%', boxSizing: 'border-box', minHeight: 30, maxHeight: 140, resize: 'none', fontSize: 13.5, padding: '4px 4px 6px', fontFamily: 'inherit', background: 'transparent', color: 'var(--text)', border: 'none', outline: 'none', lineHeight: 1.55 }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images"
+                  style={{ border: 'none', background: 'transparent', padding: '3px 5px' }}><Ic.Plus size={16} /></button>
+                <span style={{ flex: 1 }}></span>
+                {info && <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', userSelect: 'none' }} title={`Provider: ${info.provider}`}>{info.model}</span>}
+                <ModeChip mode={rt.mode} onToggle={onToggleMode} disabled={busy} />
+                <button className="rv-cta primary" onClick={onSend}
+                  disabled={(status !== 'ready' && status !== 'awaiting_input') || (!(rt.input || '').trim() && !attachments.length)}
+                  title="Send (Enter)" style={{ borderRadius: 10 }}><Ic.Play size={13} /></button>
+              </div>
             </div>
           </div>
         )}
