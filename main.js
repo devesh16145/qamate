@@ -885,6 +885,8 @@ ipcMain.handle('create-project', async (e, { name, baseUrl, environment, apps })
 });
 ipcMain.handle('set-active-project', async (e, { projectId }) =>
   runEngine(e, [PROJECT_STORE, 'set-active', projectId], null));
+ipcMain.handle('update-project', async (e, { projectId, patch }) =>
+  runEngine(e, [PROJECT_STORE, 'update', projectId, JSON.stringify(patch || {})], null));
 ipcMain.handle('delete-project', async (e, { projectId }) =>
   runEngine(e, [PROJECT_STORE, 'delete', projectId], null));
 ipcMain.handle('capture-login', async (e, { projectId, url }) => {
@@ -907,7 +909,7 @@ ipcMain.handle('capture-login', async (e, { projectId, url }) => {
 ipcMain.handle('get-run-history', async () => {
   if (!fs.existsSync(RESULTS_DIR)) return [];
 
-  const runs = fs.readdirSync(RESULTS_DIR)
+  const candidates = fs.readdirSync(RESULTS_DIR)
     .filter(f => {
       // Only real run folders, which are timestamped YYYY-MM-DD_HH-MM-SS. This excludes
       // helper dirs (_coverage, _agent_verify, _agent_eval, …) that have no run_metadata
@@ -917,9 +919,14 @@ ipcMain.handle('get-run-history', async () => {
       try { return fs.lstatSync(path.join(RESULTS_DIR, f)).isDirectory(); }
       catch { return false; }
     })
-    .sort().reverse().slice(0, 10);
+    .sort().reverse();
 
-  return runs.map(run => {
+  // History is scoped to the ACTIVE project: a project sees only its own runs;
+  // the built-in suite sees legacy runs (which have no project_id) + its own.
+  const active = _activeProjectId();
+  const out = [];
+  for (const run of candidates) {
+    if (out.length >= 10) break;
     const metaPath = path.join(RESULTS_DIR, run, 'run_metadata.json');
     let meta = {};
     try {
@@ -927,8 +934,10 @@ ipcMain.handle('get-run-history', async () => {
         meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
       }
     } catch (e) { /* ignore corrupt metadata */ }
-    return { id: run, ...meta };
-  });
+    if ((meta.project_id || null) !== (active || null)) continue;
+    out.push({ id: run, ...meta });
+  }
+  return out;
 });
 
 // ──────────────────────────────────────

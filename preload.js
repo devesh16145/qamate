@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('ats', {
   listProjects: () => ipcRenderer.invoke('list-projects'),
   createProject: (opts) => ipcRenderer.invoke('create-project', opts),
   setActiveProject: (opts) => ipcRenderer.invoke('set-active-project', opts),
+  updateProject: (opts) => ipcRenderer.invoke('update-project', opts),         // {projectId, patch}
   createFlow: (opts) => ipcRenderer.invoke('create-flow', opts),               // {flowId}
   createTestCase: (opts) => ipcRenderer.invoke('create-test-case', opts),      // {flowId, tcId, description, preconditions, expectedResult, steps[]}
   listCloneSources: () => ipcRenderer.invoke('list-clone-sources'),

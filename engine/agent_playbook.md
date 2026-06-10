@@ -178,6 +178,10 @@ When starting work on a new app or project (or after the app has changed signifi
    pick the right actions without blind inspect-and-guess loops.
 
 The UI map is authoritative for structure (what pages exist, what elements they have).
+Every element carries `locator_status` — `verified` (resolves uniquely on the live page),
+`ambiguous`, or `broken`. TRUST verified locators; for ambiguous/broken ones observe the
+live page instead of using the mapped locator. `js_nav_candidates` lists menu items/tabs
+that lead to screens the crawler could not safely visit — navigate there yourself.
 It does NOT capture dynamic content (data rows, generated IDs) — use observe for those.
 Update the map with a fresh `map_app` call when the app's navigation or layout changes.
 

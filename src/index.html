@@ -1716,6 +1716,86 @@ function NewProjectModal({ onClose, onCreated, toast }) {
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Project settings — edit an existing project's apps/environment and
+   capture login sessions. Saved into projects/<id>/project.json.
+   ────────────────────────────────────────────────────────────── */
+function ProjectSettingsModal({ project, onClose, toast }) {
+  const initApps = (project.apps && project.apps.length)
+    ? project.apps.map(a => ({ label: a.label || '', url: a.url || '', email: (a.credentials || {}).email || '', password: (a.credentials || {}).password || '' }))
+    : [{ label: project.name || '', url: (project.environments ? Object.values(project.environments)[0] : '') || '', email: '', password: '' }];
+  const [apps, setApps] = useState(initApps);
+  const [envName, setEnvName] = useState(project.default_environment || 'dev');
+  const [busy, setBusy] = useState(false);
+  const iStyle = { width: '100%', fontSize: 12.5, padding: '6px 9px', background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' };
+  const patchApp = (i, field, v) => setApps(prev => prev.map((a, j) => j === i ? { ...a, [field]: v } : a));
+  const save = async () => {
+    const valid = apps.filter(a => a.url.trim());
+    if (!valid.length) { toast('At least one app URL is required'); return; }
+    setBusy(true);
+    const env = envName.trim() || 'dev';
+    const r = await window.ats.updateProject({ projectId: project.id, patch: {
+      apps: valid.map((a, i) => ({ label: a.label.trim() || `App ${i + 1}`, url: a.url.trim(),
+                                   credentials: { email: a.email.trim(), password: a.password } })),
+      environments: { [env]: valid[0].url.trim() },
+      default_environment: env,
+    } });
+    setBusy(false);
+    if (!r || r.status !== 'success') { toast((r && r.message) || 'Could not save project'); return; }
+    toast('Project saved');
+    setTimeout(() => window.location.reload(), 500);
+  };
+  const capture = async (url) => {
+    toast('Capture browser opening — log in to EACH of this project\'s apps, then close the window');
+    const r = await window.ats.captureLogin({ projectId: project.id, url: url || (apps[0] && apps[0].url) || '' });
+    toast(r && r.captured ? 'Login captured for this project' : ((r && r.message) || 'Capture did not save a session'));
+  };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ width: 500, maxHeight: '86vh', overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 14px 40px rgba(0,0,0,0.35)', padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <b style={{ fontSize: 13.5 }}>Project settings — {project.name || project.id}</b>
+          <span style={{ flex: 1 }}></span>
+          <button className="editor-action" onClick={onClose}><I.X size={13} /></button>
+        </div>
+        <div style={{ display: 'flex', gap: 9, marginBottom: 10 }}>
+          <label style={{ flex: 1, fontSize: 11, color: 'var(--text-2)' }}>Environment
+            <input style={iStyle} value={envName} onChange={e => setEnvName(e.target.value)} placeholder="dev" /></label>
+        </div>
+        {apps.map((a, i) => (
+          <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-2)' }}>App {i + 1}{i === 0 ? ' (primary)' : ''}</span>
+              <input style={{ ...iStyle, width: 'auto', flex: 1, fontSize: 11.5, padding: '3px 8px' }} value={a.label}
+                onChange={e => patchApp(i, 'label', e.target.value)} placeholder="Label" />
+              <button className="editor-action" title="Open a browser to log in to this app (saved to the project)" onClick={() => capture(a.url)}><I.Play size={11} /> Capture login</button>
+              {apps.length > 1 && (
+                <button className="editor-action" title="Remove this app" onClick={() => setApps(prev => prev.filter((_, j) => j !== i))}><I.X size={12} /></button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input style={iStyle} value={a.url} onChange={e => patchApp(i, 'url', e.target.value)} placeholder="https://staging.acme.com/" />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...iStyle, flex: 1 }} value={a.email} onChange={e => patchApp(i, 'email', e.target.value)} placeholder="Login email (optional)" />
+                <input style={{ ...iStyle, flex: 1 }} type="password" value={a.password} onChange={e => patchApp(i, 'password', e.target.value)} placeholder="Password (optional)" />
+              </div>
+            </div>
+          </div>
+        ))}
+        <button className="editor-action" onClick={() => setApps(prev => [...prev, { label: '', url: '', email: '', password: '' }])}>+ Add another app</button>
+        <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 8, lineHeight: 1.5 }}>
+          One captured login session covers ALL apps — in the capture browser, log in to each
+          app (navigate between their URLs) before closing it.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+          <button className="editor-action" onClick={onClose}>Cancel</button>
+          <button className="editor-action primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
    Title Bar
    ────────────────────────────────────────────────────────────── */
 function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, leftTool, setLeftTool, setLeftCollapsed, leftCollapsed, rightCollapsed, setRightCollapsed, agentDocked, setAgentDocked, historyDocked, setHistoryDocked, setActiveTab, openResultsTab, openTab, tabs, toast }) {
@@ -1731,6 +1811,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
   const [projects, setProjects] = useState([]);
   const [activeProj, setActiveProj] = useState(null);
   const [newProjOpen, setNewProjOpen] = useState(false);
+  const [projSettingsOpen, setProjSettingsOpen] = useState(false);
   const projRef = useRef(null);
 
   useEffect(() => {
@@ -1824,12 +1905,19 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
               </button>
             ))}
             <div className="div"></div>
+            {activeProjObj && (
+              <button onClick={() => { setProjOpen(false); setProjSettingsOpen(true); }}>Project settings…</button>
+            )}
             <button onClick={() => { setProjOpen(false); setNewProjOpen(true); }}>+ New project…</button>
           </div>
         )}
         {newProjOpen && (
           <NewProjectModal toast={toast} onClose={() => setNewProjOpen(false)}
             onCreated={() => { setNewProjOpen(false); window.location.reload(); }} />
+        )}
+        {projSettingsOpen && activeProjObj && (
+          <ProjectSettingsModal project={activeProjObj} toast={toast}
+            onClose={() => setProjSettingsOpen(false)} />
         )}
       </div>
 

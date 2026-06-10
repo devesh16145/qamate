@@ -79,7 +79,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 
 # Default max tool calls per chat turn. 0 = unlimited (no pause).
 # Overridden per-session via the init command's tool_budget field or ATS_AGENT_TOOL_BUDGET env var.
@@ -114,6 +114,55 @@ def _read_json_file(path, default=None):
             return json.load(f)
     except Exception:
         return default
+
+
+# ── Context compaction ────────────────────────────────────────────────────────
+# Long sessions replay the whole history every turn. Browser percepts (observe
+# payloads, aria trees, run logs) dominate the tokens but go STALE immediately —
+# the agent re-observes rather than re-reading them, so old copies are dead
+# weight that slows turns and degrades the model's decisions (4M+ token turns
+# were observed on autonomous runs).
+
+_COMPACT_KEEP_RECENT = 12     # most recent messages stay verbatim (current task context)
+_COMPACT_MAX_CHARS = 1200     # what an OLD tool result may keep
+
+
+def _compact_history(messages, keep_recent=_COMPACT_KEEP_RECENT,
+                     max_chars=_COMPACT_MAX_CHARS):
+    """Shrink stale tool results in the model history. Structure is never touched
+    (tool_call_id pairing stays intact) — only the CONTENT of old ToolReturnParts
+    is truncated, with a hint to re-call the tool for fresh data. Idempotent."""
+    import dataclasses
+    msgs = list(messages)
+    if len(msgs) <= keep_recent:
+        return msgs
+    cutoff = len(msgs) - keep_recent
+    out = []
+    for i, m in enumerate(msgs):
+        if i >= cutoff or not isinstance(m, ModelRequest):
+            out.append(m)
+            continue
+        parts, changed = [], False
+        for p in getattr(m, "parts", []):
+            if isinstance(p, ToolReturnPart):
+                c = p.content
+                if isinstance(c, str):
+                    s = c
+                else:
+                    try:
+                        s = json.dumps(c, ensure_ascii=True, default=str)
+                    except Exception:
+                        s = str(c)
+                if len(s) > max_chars:
+                    stub = (s[:max_chars] +
+                            f" ...[compacted {len(s)} chars of stale data - call the "
+                            f"tool again if you need it fresh]")
+                    parts.append(dataclasses.replace(p, content=stub))
+                    changed = True
+                    continue
+            parts.append(p)
+        out.append(dataclasses.replace(m, parts=parts) if changed else m)
+    return out
 
 
 def _trim_dangling_tool_calls(messages):
@@ -1941,10 +1990,28 @@ class BrowserSession:
 
 # ── UI Map crawler (sync, runs on _BROWSER thread) ───────────────────────────
 
+def _map_norm_url(url):
+    """URL identity for the UI-map crawl. Unlike dom_inspector._normalize_url this
+    KEEPS hash-route fragments (#/oms/cart) — on hash-routed SPAs (the admin panel)
+    every screen would otherwise collapse into one page. Plain in-page anchors
+    (#section) and query strings are still dropped."""
+    if not url:
+        return ""
+    base, _, frag = url.partition("#")
+    base = base.split("?", 1)[0].rstrip("/")
+    if frag.startswith("/"):                      # SPA route, not an anchor
+        return base + "#" + frag.split("?", 1)[0].rstrip("/")
+    return base
+
+
 def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
     """BFS crawl using the agent's existing authenticated sync Playwright page.
-    Follows same-origin <a href> links only (no button-clicks that might mutate state).
-    Saves elements per page, nav edges, errors. Navigates back to start_url when done."""
+    Follows same-origin <a href> links only (no button-clicks that might mutate
+    state) — including hash routes on SPAs. Every element's primary locator is
+    VALIDATED live (verified/ambiguous/broken) so the map never lies about how
+    to reach an element. JS-navigation candidates (menuitems/tabs without href)
+    are listed per page so the agent knows screens exist beyond the crawl.
+    Saves elements per page, nav edges, errors. Navigates back to start_url."""
     page = session.page
     if not page:
         return {"ok": False, "error": "browser not running"}
@@ -1964,7 +2031,7 @@ def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
 
     while queue and len(pages_data) < max_pages:
         url, depth, edge = queue.pop(0)
-        norm = _normalize_url(url)
+        norm = _map_norm_url(url)
         if norm in visited:
             continue
         visited.add(norm)
@@ -1990,8 +2057,7 @@ def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
             pass
 
         raw = _comprehensive_snapshot(page)
-        elements = []
-        seen_refs: dict = {}
+        mods, seen_refs = [], {}
         for el in raw:
             if "_error" in el or not _label(el) or not el.get("visible", True):
                 continue
@@ -2002,10 +2068,30 @@ def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
                 mod["ref"] = f"{ref}-{seen_refs[ref]}"
             else:
                 seen_refs[ref] = 0
-            # Keep only what the agent needs — drop fingerprint/fallback bulk
-            elements.append({k: mod[k] for k in
-                              ("ref", "role", "name", "tag", "test_id",
-                               "input_type", "placeholder", "primary") if k in mod})
+            mods.append(mod)
+        disambiguate(mods)   # Paid/Unpaid exact=True fixes apply AT MAP TIME too
+
+        elements, js_nav, verified_n = [], [], 0
+        for mod in mods:
+            # Validate the primary locator against the LIVE page — a map that
+            # records a wrong role (run3's combobox-vs-button) burns agent turns.
+            status = "broken"
+            try:
+                loc = to_locator(page, mod.get("primary") or {})
+                n = loc.count() if loc is not None else 0
+                status = "verified" if n == 1 else ("ambiguous" if n > 1 else "broken")
+            except Exception:
+                pass
+            if status == "verified":
+                verified_n += 1
+            entry = {k: mod[k] for k in
+                     ("ref", "role", "name", "tag", "test_id",
+                      "input_type", "placeholder", "primary") if k in mod}
+            entry["locator_status"] = status
+            elements.append(entry)
+            # Navigation the crawler can't safely follow (no href — JS routing).
+            if mod.get("role") in ("menuitem", "tab") and mod.get("name"):
+                js_nav.append(mod["name"][:60])
 
         links_out = []
         try:
@@ -2014,7 +2100,7 @@ def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
                 text = lnk.get("text", "")
                 if not href or _should_skip_link(href, text):
                     continue
-                norm_href = _normalize_url(href)
+                norm_href = _map_norm_url(href)
                 if norm_href and norm_href not in visited:
                     links_out.append(norm_href)
                     if depth + 1 <= max_depth:
@@ -2027,10 +2113,13 @@ def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
         pages_data[norm] = {
             "title": title, "url": norm, "depth": depth,
             "element_count": len(elements), "elements": elements,
+            "verified_locators": verified_n,
             "links_out": sorted(set(links_out)),
         }
+        if js_nav:
+            pages_data[norm]["js_nav_candidates"] = sorted(set(js_nav))[:20]
         _log(f"[map] [{len(pages_data)}/{max_pages}] {norm}  "
-             f"({len(elements)} elements, depth {depth})")
+             f"({len(elements)} elements, {verified_n} verified, depth {depth})")
 
     # Return browser to start page so the agent can continue where it was
     try:
@@ -2040,9 +2129,9 @@ def _crawl_ui_map(session, start_url, max_pages=30, max_depth=3, on_log=None):
 
     return {
         "ok": True,
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "start_url": _normalize_url(start_url),
+        "start_url": _map_norm_url(start_url),
         "base_origin": base_origin,
         "page_count": len(pages_data),
         "element_count": sum(p["element_count"] for p in pages_data.values()),
@@ -3674,7 +3763,8 @@ class AgentRuntime:
         # Restore the model's conversation memory on resume (this is what lets it "continue
         # from a point"); a fresh session starts empty. Then mark the session running and load
         # the saved transcript so the window can redraw the visible chat.
-        self.history = agent_sessions.load_messages(self.ats_root, project_id, self.session_id) if resumed else []
+        self.history = _compact_history(
+            agent_sessions.load_messages(self.ats_root, project_id, self.session_id)) if resumed else []
         if resumed:
             _t = (agent_sessions.read_session(self.ats_root, project_id, self.session_id) or {}).get("tokens") or {}
             self.session_tokens = {"input": int(_t.get("input", 0) or 0),
@@ -3739,7 +3829,7 @@ class AgentRuntime:
                     prompt, deps=self.deps, message_history=self.history,
                     event_stream_handler=_stream_handler,
                     usage_limits=UsageLimits(tool_calls_limit=self.tool_budget or None))
-                self.history = result.all_messages()
+                self.history = _compact_history(result.all_messages())
                 self._add_usage(result)
                 self._persist_turn(message, attachment_names, result.new_messages())
                 emit({"event": "turn_complete", "text": result.output})
@@ -3748,7 +3838,7 @@ class AgentRuntime:
                 # has context, but TRIM the trailing un-executed tool call (else
                 # pydantic-ai rejects the next prompt), then summarize findings.
                 if messages:
-                    self.history = _trim_dangling_tool_calls(messages)
+                    self.history = _compact_history(_trim_dangling_tool_calls(messages))
                 summary = await self._summarize_after_budget()
                 extra = [{"role": "assistant", "text": summary}] if summary else None
                 self._persist_turn(message, attachment_names, self.history[hist_before:], extra_bubbles=extra)
