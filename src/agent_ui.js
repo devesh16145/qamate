@@ -48,17 +48,29 @@
   const fmtTok = (n) => { n = n || 0; if (n < 1000) return '' + n; if (n < 1e6) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k'; return (n / 1e6).toFixed(2) + 'M'; };
 
   /* ── Markdown rendering ──────────────────────────────────────────────────── */
+  function ALink({ href, children }) {
+    return (
+      <a href="#" title={href}
+        onClick={(e) => { e.preventDefault(); if (window.ats && window.ats.openExternal) window.ats.openExternal(href); }}
+        style={{ color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: 2, cursor: 'pointer', wordBreak: 'break-all' }}>
+        {children}
+      </a>
+    );
+  }
+
   function Spans({ text }) {
-    const re = /\*\*(.+?)\*\*|__(.+?)__|`([^`\n]+)`|\*(.+?)\*|_(.+?)_|~~(.+?)~~/gs;
+    const re = /\[([^\]]+)\]\((https?:[^)\s]+)\)|(https?:\/\/[^\s<>"')\]]+)|\*\*(.+?)\*\*|__(.+?)__|`([^`\n]+)`|\*(.+?)\*|_(.+?)_|~~(.+?)~~/gs;
     const nodes = []; let last = 0, m, k = 0;
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) nodes.push(text.slice(last, m.index));
-      if (m[1] != null) nodes.push(<strong key={k++}>{m[1]}</strong>);
-      else if (m[2] != null) nodes.push(<strong key={k++}>{m[2]}</strong>);
-      else if (m[3] != null) nodes.push(<code key={k++} style={{ background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 4, fontSize: '0.87em', fontFamily: 'var(--mono)', color: 'var(--text)' }}>{m[3]}</code>);
-      else if (m[4] != null) nodes.push(<em key={k++}>{m[4]}</em>);
-      else if (m[5] != null) nodes.push(<em key={k++}>{m[5]}</em>);
-      else if (m[6] != null) nodes.push(<s key={k++} style={{ opacity: 0.6 }}>{m[6]}</s>);
+      if (m[1] != null) nodes.push(<ALink key={k++} href={m[2]}>{m[1]}</ALink>);
+      else if (m[3] != null) nodes.push(<ALink key={k++} href={m[3]}>{m[3]}</ALink>);
+      else if (m[4] != null) nodes.push(<strong key={k++}>{m[4]}</strong>);
+      else if (m[5] != null) nodes.push(<strong key={k++}>{m[5]}</strong>);
+      else if (m[6] != null) nodes.push(<code key={k++} style={{ background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 4, fontSize: '0.87em', fontFamily: 'var(--mono)', color: 'var(--text)' }}>{m[6]}</code>);
+      else if (m[7] != null) nodes.push(<em key={k++}>{m[7]}</em>);
+      else if (m[8] != null) nodes.push(<em key={k++}>{m[8]}</em>);
+      else if (m[9] != null) nodes.push(<s key={k++} style={{ opacity: 0.6 }}>{m[9]}</s>);
       last = m.index + m[0].length;
     }
     if (last < text.length) nodes.push(text.slice(last));
@@ -83,6 +95,86 @@
     return nodes.length ? nodes : [code];
   }
 
+  function CodeCard({ lang, code }) {
+    return (
+      <div style={{ border: '1px solid var(--border)', borderRadius: 10, margin: '10px 0', background: 'var(--bg)', overflow: 'hidden' }}>
+        <div style={{ padding: '7px 13px 0', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', userSelect: 'none' }}>{lang || 'code'}</div>
+        <pre style={{ margin: 0, padding: '8px 13px 12px', fontSize: 11.5, fontFamily: 'var(--mono)', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6 }}>
+          <code><CodeTokens code={code} /></code>
+        </pre>
+      </div>
+    );
+  }
+
+  const _mdCell = { padding: '5px 10px', borderBottom: '1px solid var(--accent-bg)', textAlign: 'left', verticalAlign: 'top' };
+
+  /* Block-level prose: headings, lists, quotes, MARKDOWN TABLES, and bare JSON
+     blocks the model emits without code fences (rendered as code cards). */
+  function ProseBlock({ s }) {
+    const lines = s.split('\n');
+    const out = []; let i = 0, k = 0;
+    const isRow = (l) => /^\|.*\|\s*$/.test(l.trim());
+    const splitRow = (l) => l.trim().replace(/^\||\|\s*$/g, '').split('|').map(c => c.trim());
+    while (i < lines.length) {
+      const line = lines[i];
+      const trim = line.trimStart(), ind = line.length - trim.length;
+
+      // ── Markdown table: header row + |---| separator + body rows ──
+      if (isRow(line) && i + 1 < lines.length && /^\|[\s:\-|]+\|\s*$/.test(lines[i + 1].trim())) {
+        const header = splitRow(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && isRow(lines[i])) { rows.push(splitRow(lines[i])); i++; }
+        out.push(
+          <div key={k++} style={{ margin: '10px 0', border: '1px solid var(--border)', borderRadius: 10, overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>
+              <thead><tr>{header.map((h, hi) => <th key={hi} style={{ ..._mdCell, fontWeight: 600, color: 'var(--text-2)', borderBottom: '1px solid var(--border)', background: 'var(--bg-2, var(--bg))', whiteSpace: 'nowrap' }}><Spans text={h} /></th>)}</tr></thead>
+              <tbody>{rows.map((r, ri) => (
+                <tr key={ri}>{header.map((_, ci) => <td key={ci} style={_mdCell}><Spans text={r[ci] || ''} /></td>)}</tr>
+              ))}</tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+
+      // ── Bare JSON block (no code fence): consecutive lines that parse as JSON ──
+      if (/^[{\[]/.test(trim)) {
+        let j = i;
+        while (j < lines.length && lines[j].trim()) j++;
+        const chunk = lines.slice(i, j).join('\n').trim();
+        let parsed = null;
+        if (chunk.length > 2) { try { parsed = JSON.parse(chunk); } catch (e) { parsed = null; } }
+        if (parsed !== null && typeof parsed === 'object') {
+          out.push(<CodeCard key={k++} lang="json" code={JSON.stringify(parsed, null, 2)} />);
+          i = j;
+          continue;
+        }
+      }
+
+      if (!trim) out.push(<div key={k++} style={{ height: 6 }} />);
+      else if (trim.startsWith('### ')) out.push(<div key={k++} style={{ fontWeight: 600, fontSize: 12.5, marginTop: 10, marginBottom: 2, color: 'var(--text)' }}><Spans text={trim.slice(4)} /></div>);
+      else if (trim.startsWith('## '))  out.push(<div key={k++} style={{ fontWeight: 700, fontSize: 13.5, marginTop: 12, marginBottom: 4, color: 'var(--text)' }}><Spans text={trim.slice(3)} /></div>);
+      else if (trim.startsWith('# '))   out.push(<div key={k++} style={{ fontWeight: 700, fontSize: 15,   marginTop: 14, marginBottom: 5, color: 'var(--text)' }}><Spans text={trim.slice(2)} /></div>);
+      else if (/^[-*] /.test(trim)) out.push(
+        <div key={k++} style={{ display: 'flex', gap: 8, paddingLeft: 4 + ind * 4, marginTop: 2 }}>
+          <span style={{ color: 'var(--accent)', fontSize: 8, marginTop: 5, flexShrink: 0 }}>◆</span>
+          <span><Spans text={trim.slice(2)} /></span>
+        </div>);
+      else if (/^\d+\. /.test(trim)) out.push(
+        <div key={k++} style={{ display: 'flex', gap: 8, paddingLeft: 4 + ind * 4, marginTop: 2 }}>
+          <span style={{ color: 'var(--accent)', flexShrink: 0, fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{trim.match(/^(\d+)\. /)[1]}.</span>
+          <span><Spans text={trim.replace(/^\d+\. /, '')} /></span>
+        </div>);
+      else if (/^---+$/.test(trim)) out.push(<hr key={k++} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0' }} />);
+      else if (trim.startsWith('> ')) out.push(
+        <div key={k++} style={{ borderLeft: '3px solid var(--accent)', paddingLeft: 10, margin: '4px 0', color: 'var(--text-2)', fontStyle: 'italic' }}><Spans text={trim.slice(2)} /></div>);
+      else out.push(<div key={k++}><Spans text={line} /></div>);
+      i++;
+    }
+    return <React.Fragment>{out}</React.Fragment>;
+  }
+
   function Markdown({ text }) {
     if (!text) return null;
     // Split code fences out first
@@ -96,45 +188,9 @@
     if (last < text.length) segs.push({ t: 'prose', s: text.slice(last) });
     return (
       <div style={{ lineHeight: 1.7, wordBreak: 'break-word' }}>
-        {segs.map((seg, si) => {
-          if (seg.t === 'code') return (
-            <div key={si} style={{ border: '1px solid var(--border)', borderRadius: 10, margin: '10px 0', background: 'var(--bg)', overflow: 'hidden' }}>
-              <div style={{ padding: '7px 13px 0', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', userSelect: 'none' }}>{seg.lang || 'code'}</div>
-              <pre style={{ margin: 0, padding: '8px 13px 12px', fontSize: 11.5, fontFamily: 'var(--mono)', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6 }}>
-                <code><CodeTokens code={seg.s} /></code>
-              </pre>
-            </div>
-          );
-          return (
-            <React.Fragment key={si}>
-              {seg.s.split('\n').map((line, li) => {
-                const trim = line.trimStart(), ind = line.length - trim.length;
-                if (!trim) return <div key={li} style={{ height: 6 }} />;
-                if (trim.startsWith('### ')) return <div key={li} style={{ fontWeight: 600, fontSize: 12.5, marginTop: 10, marginBottom: 2, color: 'var(--text)' }}><Spans text={trim.slice(4)} /></div>;
-                if (trim.startsWith('## '))  return <div key={li} style={{ fontWeight: 700, fontSize: 13.5, marginTop: 12, marginBottom: 4, color: 'var(--text)' }}><Spans text={trim.slice(3)} /></div>;
-                if (trim.startsWith('# '))   return <div key={li} style={{ fontWeight: 700, fontSize: 15,   marginTop: 14, marginBottom: 5, color: 'var(--text)' }}><Spans text={trim.slice(2)} /></div>;
-                if (/^[-*] /.test(trim)) return (
-                  <div key={li} style={{ display: 'flex', gap: 8, paddingLeft: 4 + ind * 4, marginTop: 2 }}>
-                    <span style={{ color: 'var(--accent)', fontSize: 8, marginTop: 5, flexShrink: 0 }}>◆</span>
-                    <span><Spans text={trim.slice(2)} /></span>
-                  </div>
-                );
-                const num = trim.match(/^(\d+)\. /);
-                if (num) return (
-                  <div key={li} style={{ display: 'flex', gap: 8, paddingLeft: 4 + ind * 4, marginTop: 2 }}>
-                    <span style={{ color: 'var(--accent)', flexShrink: 0, fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{num[1]}.</span>
-                    <span><Spans text={trim.replace(/^\d+\. /, '')} /></span>
-                  </div>
-                );
-                if (/^---+$/.test(trim)) return <hr key={li} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0' }} />;
-                if (trim.startsWith('> ')) return (
-                  <div key={li} style={{ borderLeft: '3px solid var(--accent)', paddingLeft: 10, margin: '4px 0', color: 'var(--text-2)', fontStyle: 'italic' }}><Spans text={trim.slice(2)} /></div>
-                );
-                return <div key={li}><Spans text={line} /></div>;
-              })}
-            </React.Fragment>
-          );
-        })}
+        {segs.map((seg, si) => seg.t === 'code'
+          ? <CodeCard key={si} lang={seg.lang} code={seg.s} />
+          : <ProseBlock key={si} s={seg.s} />)}
       </div>
     );
   }
@@ -167,36 +223,46 @@
     skipped: ['⊘', 'var(--text-3)'],
   };
   function PlanCard({ plan }) {
-    const [open, setOpen] = useState(true);
+    const [open, setOpen] = useState(false);   // minimized by default — never covers the chat
     if (!plan || !plan.length) return null;
     const done = plan.filter(p => p.status === 'done').length;
     const active = plan.find(p => p.status === 'active');
+
+    if (!open) return (
+      <div style={{ position: 'sticky', top: 0, zIndex: 5, alignSelf: 'flex-end' }}>
+        <button onClick={() => setOpen(true)}
+          title={active ? `Now: ${active.step} — click to expand the plan` : 'Click to expand the plan'}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: 'inherit', color: 'var(--text-2)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 20, padding: '3px 11px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.10)' }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: done === plan.length ? 'var(--pass, #16a34a)' : 'var(--accent)' }}></span>
+          <b>Plan</b>
+          <span style={{ fontFamily: 'var(--mono)' }}>{done}/{plan.length}</span>
+        </button>
+      </div>
+    );
+
     return (
-      <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '7px 12px', boxShadow: '0 2px 10px rgba(0,0,0,0.10)' }}>
-        <button onClick={() => setOpen(o => !o)}
-          style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: 11, minWidth: 0 }}>
-          <span style={{ fontSize: 8, color: 'var(--accent)', flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+      <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '7px 12px', boxShadow: '0 2px 10px rgba(0,0,0,0.12)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, minWidth: 0 }}>
           <b style={{ color: 'var(--text-2)', flexShrink: 0 }}>Plan</b>
           <span style={{ color: 'var(--text-3)', fontFamily: 'var(--mono)', flexShrink: 0 }}>{done}/{plan.length}</span>
           <span style={{ flex: 1, height: 3, background: 'var(--accent-bg)', borderRadius: 2, overflow: 'hidden', minWidth: 30 }}>
             <span style={{ display: 'block', height: '100%', width: `${Math.round(100 * done / plan.length)}%`, background: 'var(--pass, #16a34a)', transition: 'width 0.3s' }}></span>
           </span>
-          {!open && active && <span style={{ color: 'var(--accent)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>▶ {active.step}</span>}
-        </button>
-        {open && (
-          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {plan.map((p, i) => {
-              const [glyph, color] = PLAN_GLYPH[p.status] || PLAN_GLYPH.pending;
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 7, fontSize: 11.5, color: p.status === 'done' ? 'var(--text-3)' : 'var(--text)', textDecoration: p.status === 'skipped' ? 'line-through' : 'none' }}>
-                  <span style={{ color, fontWeight: 700, width: 13, textAlign: 'center', flexShrink: 0, fontFamily: 'var(--mono)' }}>{glyph}</span>
-                  <span style={{ fontWeight: p.status === 'active' ? 600 : 400, minWidth: 0 }}>{p.step}</span>
-                  {p.note && <span style={{ color: 'var(--text-3)', fontSize: 10.5, fontStyle: 'italic' }}>— {p.note}</span>}
-                </div>
-              );
-            })}
-          </div>
-        )}
+          <button onClick={() => setOpen(false)} title="Minimize — shows just the progress count"
+            style={{ display: 'inline-flex', alignItems: 'center', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-3)', padding: '0 2px', fontSize: 14, lineHeight: 1, fontFamily: 'inherit' }}>—</button>
+        </div>
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto' }}>
+          {plan.map((p, i) => {
+            const [glyph, color] = PLAN_GLYPH[p.status] || PLAN_GLYPH.pending;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 7, fontSize: 11.5, color: p.status === 'done' ? 'var(--text-3)' : 'var(--text)', textDecoration: p.status === 'skipped' ? 'line-through' : 'none' }}>
+                <span style={{ color, fontWeight: 700, width: 13, textAlign: 'center', flexShrink: 0, fontFamily: 'var(--mono)' }}>{glyph}</span>
+                <span style={{ fontWeight: p.status === 'active' ? 600 : 400, minWidth: 0 }}>{p.step}</span>
+                {p.note && <span style={{ color: 'var(--text-3)', fontSize: 10.5, fontStyle: 'italic' }}>— {p.note}</span>}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
