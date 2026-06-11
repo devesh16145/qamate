@@ -97,6 +97,29 @@
       "difficulty": "hard",
       "probe": "adaptability: the prompt uses wrong control names ('product finder box') and demands an empty-state oracle; the agent must observe the real UI and map intent to it",
       "prompt": "Using the product finder box at the top of the catalog, create a test that looks up the nonsense term 'zzqxv123' and verifies the catalog shows its empty/no-results state instead of product cards. Save it as test case TC-BENCH-010 in flow bench_catalog, verify it passes, then stop."
+    },
+    {
+      "id": "BENCH-011",
+      "tc_id": "TC-BENCH-011",
+      "flow_id": "bench_cart",
+      "app": "admin",
+      "difficulty": "epic",
+      "tags": ["admin"],
+      "timeout_s": 3000,
+      "probe": "PRD-driven multi-section form epic: read the flow doc from context, then drive customer autocomplete + address + SKU with master-pack validation + payment method + save-as-draft on the admin offline cart",
+      "prompt": "The complete cart-to-dispatch business flow is documented in the context file COMPLETE_LLM_FLOW_CART_TO_DISPATCH.md - read PHASE 1 (cart creation) before driving anything. On the admin panel, create a test for the offline cart creation flow: open the cart creation form (OMS > Carts > create, or the direct cart create route); select customer 'SUPERTECH LIMITED' via the customer autocomplete; provide a shipping address (pick a saved address if the customer has one, otherwise add a new one); add the SKU 'Testing Ajay Seeds' with a quantity that satisfies the master-pack multiple rule (if a quantity validation error appears, read it and correct the quantity); select the COD payment method if a payment section is present; then save the cart as Draft and verify the cart reaches Draft status. Do NOT send the cart to the customer - that triggers a real SMS/OTP. Save it as test case TC-BENCH-011 in flow bench_cart, verify it passes, then stop.",
+      "_feasibility": "phases 2-4 of the doc (customer OTP, payment, finance approval) are NOT unattended-automatable; this task covers the automatable admin half. Creates draft carts on dev (acceptable mutation)."
+    },
+    {
+      "id": "BENCH-012",
+      "tc_id": "TC-BENCH-012",
+      "flow_id": "bench_po",
+      "app": "seller",
+      "difficulty": "epic",
+      "timeout_s": 3000,
+      "probe": "PRD-driven stateful lifecycle epic: PO accept -> pack with file upload; each run CONSUMES an Issued PO, so the test must be authored generically (first PO in the Issued tab)",
+      "prompt": "Read PHASE 6 (purchase order lifecycle) of the context file COMPLETE_LLM_FLOW_CART_TO_DISPATCH.md before driving anything. On the Seller App, create a test for the PO accept-and-pack lifecycle slice: open Purchase Orders, switch to the 'Issued' status tab, open the FIRST issued PO's detail page, click Accept and confirm in the dialog, verify the order timeline marks Accepted; then click 'Mark as Packed' and complete the pack form - it requires a ready-proof image, use the upload_file tool with the standard test image - and verify the PO status becomes Packed. IMPORTANT: accepting a PO consumes it (it leaves the Issued tab), so author the test against the FIRST PO in the Issued tab generically, never a hardcoded PO number. If NO issued PO exists on dev right now, say so and deliver a test covering the deepest step that is reachable. Save it as test case TC-BENCH-012 in flow bench_po, verify it passes, then stop.",
+      "_feasibility": "data-dependent: needs Issued POs on dev (the orders suite and admin runs create them). State-mutating by nature - exactly the hard reality this epic tier measures."
     }
   ]
 }

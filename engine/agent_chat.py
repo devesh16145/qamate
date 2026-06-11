@@ -2088,6 +2088,71 @@ class BrowserSession:
             out["hint"] = "act on this ref with click(ref); the scroll step is already recorded"
         return out
 
+    def upload_file(self, ref, file_path=""):
+        """Attach a file to an upload control and RECORD a replay-safe step.
+        Defaults to the suite's standard fixture (tests/fixtures/test_upload.png);
+        the generated test replays with TEST_UPLOAD_IMAGE regardless of the live
+        path (recorder_parser rewrites set_input_files args). Handles real
+        <input type=file> elements (hidden ones included — Playwright allows it)
+        and buttons that open a native file chooser."""
+        if not self._ensure_alive():
+            return {"ok": False, "error": "browser is closed; call restart_browser"}
+        path = (file_path or "").strip()
+        if not path:
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "tests", "fixtures", "test_upload.png")
+        if not os.path.isfile(path):
+            return {"ok": False, "error": f"file not found: {path[:120]}"}
+        el = self.by_ref.get(ref)
+        if el is None and not self._is_direct_selector(ref):
+            return {"ok": False, "error": f"ref '{ref}' is not on the current page; call observe first"}
+        pre_url = self._url()
+
+        def _record(raw, desc):
+            self.step_id += 1
+            self.steps.append({"id": self.step_id, "rawLine": raw, "type": "upload",
+                               "target": "", "url": pre_url,
+                               "targetDescription": desc, "value": "", "varName": ""})
+
+        fname = os.path.basename(path)
+        try:
+            # Case 1: the ref IS a file input (or a direct selector for one).
+            if el is not None and (el.get("input_type") or "").lower() == "file":
+                strat, loc_str, _w, _n = self._record_strategy(el)
+                live = smart_locator(self.page, strat, fallbacks=el.get("fallbacks"),
+                                     fingerprint=el.get("fingerprint")).resolve()
+                live.set_input_files(path)
+                _record(f'{loc_str}.set_input_files("{_q(path)}")', f"Upload {fname}")
+                self._settle()
+                return {"ok": True, "via": "file-input", "file": fname}
+            # Case 2: exactly one file input on the page — upload buttons usually
+            # proxy a hidden <input type=file>; set directly (works while hidden).
+            finput = self.page.locator('input[type="file"]')
+            if finput.count() == 1:
+                finput.set_input_files(path)
+                _record(f'page.locator(\'input[type="file"]\').set_input_files("{_q(path)}")',
+                        f"Upload {fname}")
+                self._settle()
+                return {"ok": True, "via": "hidden-input", "file": fname}
+            # Case 3: click the control and feed the native file chooser. Record the
+            # click + set_input_files pair — recorder_parser regenerates it as a
+            # with page.expect_file_chooser() block.
+            if el is None:
+                live, loc_str = self.page.locator(ref), f'page.locator("{_q(ref)}")'
+            else:
+                strat, loc_str, _w, _n = self._record_strategy(el)
+                live = smart_locator(self.page, strat, fallbacks=el.get("fallbacks"),
+                                     fingerprint=el.get("fingerprint")).resolve()
+            with self.page.expect_file_chooser(timeout=8000) as fc:
+                live.click()
+            fc.value.set_files(path)
+            _record(f"{loc_str}.click()", f"Click {el.get('name') if el else ref} (opens file chooser)")
+            _record(f'page.set_input_files("{_q(path)}")', f"Upload {fname}")
+            self._settle()
+            return {"ok": True, "via": "file-chooser", "file": fname}
+        except Exception as e:
+            return {"ok": False, "error": f"upload failed on '{ref}': {str(e)[:160]}"}
+
     def mark_step_manual(self, prompt):
         """Convert the LAST recorded fill step into a manual-input gate: the generated
         test pauses there and prompts the human for a fresh value (an OTP that arrived
@@ -2665,6 +2730,15 @@ def build_agent(model, max_tokens=None):
         re-observing in a loop - ONE call does the whole hunt and records a single
         replay-safe scroll step. Returns {found, scrolls, ref} - then click(ref)."""
         return await _bro(ctx.deps.session.scroll_to_text, text)
+
+    @agent.tool
+    async def upload_file(ctx: RunContext[Deps], ref: str, file_path: str = "") -> dict:
+        """Attach a file to an upload control (ready proof, tax invoice, product image,
+        payment screenshot). Pass the ref of the upload button or file input from
+        observe(). Leave file_path EMPTY to use the suite's standard test image —
+        the generated test always replays with the standard fixture, so a custom
+        path is rarely needed. Records a replay-safe upload step automatically."""
+        return await _bro(ctx.deps.session.upload_file, ref, file_path)
 
     @agent.tool
     async def find_on_screen(ctx: RunContext[Deps], description: str) -> dict:
