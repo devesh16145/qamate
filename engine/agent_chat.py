@@ -717,6 +717,22 @@ class BrowserSession:
                 ctx_args["device_scale_factor"] = _dpr
         if storage_state:
             ctx_args["storage_state"] = storage_state
+        # Record the agent's OWN navigation for post-hoc analysis (what did it
+        # actually do for 40 minutes?). Opt-in: ATS_AGENT_VIDEO_DIR points at the
+        # destination (the bench sets it per task; the UI can set it per session).
+        # Videos finalize on context close; hash-named .webm files land in the dir.
+        self._video_dir = (os.environ.get("ATS_AGENT_VIDEO_DIR") or "").strip() or None
+        if self._video_dir:
+            try:
+                os.makedirs(self._video_dir, exist_ok=True)
+                ctx_args["record_video_dir"] = self._video_dir
+                if headless:
+                    ctx_args["record_video_size"] = dict(ctx_args.get("viewport") or
+                                                         {"width": 1280, "height": 720})
+                log(f"[agent] navigation video -> {self._video_dir}")
+            except Exception as e:
+                log(f"[agent] video recording disabled: {e}")
+                self._video_dir = None
         self.context = self.browser.new_context(**ctx_args)
         # Pre-inject localStorage for additional origins (e.g. admin panel JWT auth).
         # add_init_script runs before the page's own scripts on every navigation,

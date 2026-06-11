@@ -335,9 +335,12 @@ def _child_env(ats_root, env_name):
 
 def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80,
              ready_timeout=240, turn_timeout=1500, reply=DEFAULT_REPLY,
-             agent_script=None, events_path=None, stderr_path=None):
+             agent_script=None, events_path=None, stderr_path=None, video_dir=None):
     """Run ONE bench task in a FRESH agent process. Returns the task result dict
-    (verdict-ready except for the independent verification leg)."""
+    (verdict-ready except for the independent verification leg). When video_dir
+    is set, the agent's OWN navigation is recorded there (.webm, finalized when
+    the agent closes its browser) — the raw material for analyzing where long
+    tasks actually spend their time."""
     t0 = time.monotonic()
     events = []
     result = {"task_id": task["id"], "tc_id": task["tc_id"], "flow_id": task["flow_id"],
@@ -348,8 +351,11 @@ def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80
         ev["_ts"] = round(time.monotonic() - t0, 2)
         events.append(ev)
 
+    child_env = _child_env(ats_root, env_name)
+    if video_dir:
+        child_env["ATS_AGENT_VIDEO_DIR"] = video_dir
     try:
-        ap = AgentProc(ats_root, env=_child_env(ats_root, env_name),
+        ap = AgentProc(ats_root, env=child_env,
                        agent_script=agent_script, stderr_path=stderr_path)
     except Exception as e:
         result["infra_error"] = f"could not spawn agent: {str(e)[:200]}"
@@ -416,6 +422,10 @@ def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80
 
     result.update(score_events(events))
     result["wall_s"] = round(time.monotonic() - t0, 1)
+    if video_dir and os.path.isdir(video_dir):
+        vids = sorted(f for f in os.listdir(video_dir) if f.endswith(".webm"))
+        if vids:
+            result["videos"] = [os.path.join(video_dir, v) for v in vids]
     if events_path:
         try:
             os.makedirs(os.path.dirname(events_path), exist_ok=True)
@@ -512,6 +522,9 @@ def main(argv=None):
                     help="skip the independent K-run verification leg")
     ap.add_argument("--no-clean", action="store_true",
                     help="keep pre-existing bench_* flows (agent may shortcut!)")
+    ap.add_argument("--no-video", action="store_true",
+                    help="skip recording the agent's navigation video (saves disk; "
+                         "a long task can produce 100-300MB)")
     ap.add_argument("--reply", default=DEFAULT_REPLY,
                     help="canned answer for any ask_user pause")
     ap.add_argument("--strict", action="store_true",
@@ -569,7 +582,9 @@ def main(argv=None):
                      ready_timeout=args.ready_timeout, turn_timeout=args.turn_timeout,
                      reply=args.reply,
                      events_path=os.path.join(out_dir, "events", f"{task['id']}.jsonl"),
-                     stderr_path=os.path.join(out_dir, "stderr", f"{task['id']}.log"))
+                     stderr_path=os.path.join(out_dir, "stderr", f"{task['id']}.log"),
+                     video_dir=None if args.no_video
+                               else os.path.join(out_dir, "videos", task["id"]))
         if r.get("created") and not args.no_verify:
             print(f"    delivered (self-verified={r.get('self_verified')}, "
                   f"attempts={r.get('run_attempts')}) - verifying x{args.verify_runs}...")
