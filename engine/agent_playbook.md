@@ -266,8 +266,11 @@ Notes:
   `find_on_screen("<description>")` — it returns a ref you can click/fill like any other.
 - To open an item's detail, click its main ROW or TITLE link — not an inline per-row action
   button (invoice, accept, reject, raise-ticket, ...) unless the goal explicitly needs it.
-- Many elements are below the fold. Scroll to reveal them (some apps repeat an action — e.g.
-  a "Create New" button — only every Nth row).
+- Many elements are below the fold. Use `scroll_until_visible("<text>")` to find them —
+  ONE call hunts the whole page (inner scroll panes included), returns a ref, and records
+  a single replay-safe scroll step. Never scroll+re-observe in a loop; it burns your whole
+  budget on percepts (some apps repeat an action — e.g. a "Create New" card — only every
+  Nth row; one call still finds the first one).
 - Set `include_hidden=true` on `observe` only when you suspect an element exists but is
   not showing.
 

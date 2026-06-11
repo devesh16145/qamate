@@ -570,3 +570,54 @@ def test_record_strategy_zero_match_no_usable_fallback_keeps_primary():
           "name": "Select an option"}
     strat, loc_str, warn, nth = sess._record_strategy(el)
     assert strat == el["primary"] and warn is None and nth is None
+
+
+# -- add_checkpoint record-time truth gate -------------------------------------
+
+class _CpPage:
+    url = "https://x.app/orders?tab=new"
+    def __init__(self, body): self._body = body
+    def is_closed(self): return False
+    def inner_text(self, sel): return self._body
+    def wait_for_load_state(self, *a, **k): pass
+
+class _CpBrowser:
+    def is_connected(self): return True
+
+def _cp_session(body="Order PO-442 Packed GSTIN 24ABC"):
+    s = ac.BrowserSession()
+    s.page = _CpPage(body)
+    s.browser = _CpBrowser()
+    return s
+
+
+def test_checkpoint_true_text_recorded():
+    s = _cp_session()
+    r = s.add_checkpoint("gst shown", "page_contains_text", "GSTIN")
+    assert r["ok"] and len(s.assertions) == 1
+
+
+def test_checkpoint_false_text_rejected():
+    # asserting text that was only visible in a transient dropdown (run-5
+    # BENCH-009) -> rejected at record time, NOT recorded
+    s = _cp_session()
+    r = s.add_checkpoint("vendor shown", "page_contains_text", "HDFC BANK LIMITED pvt")
+    assert r["ok"] is False and "NOT TRUE right now" in r["error"]
+    assert s.assertions == []
+
+
+def test_checkpoint_url_gate():
+    s = _cp_session()
+    assert s.add_checkpoint("on orders", "url_contains", "/orders")["ok"]
+    r = s.add_checkpoint("on po page", "url_contains", "/oms/po")
+    assert r["ok"] is False and s.assertions[-1]["value"] == "/orders"
+
+
+def test_checkpoint_probe_failure_still_records():
+    class _Boom(_CpPage):
+        def inner_text(self, sel): raise RuntimeError("page gone")
+    s = ac.BrowserSession()
+    s.page = _Boom("")
+    s.browser = _CpBrowser()
+    r = s.add_checkpoint("x", "page_contains_text", "anything")
+    assert r["ok"] and len(s.assertions) == 1   # best-effort: never block on probe errors

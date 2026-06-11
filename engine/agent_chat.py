@@ -952,9 +952,26 @@ class BrowserSession:
                 const r = el.getBoundingClientRect();
                 if (r.top < inputRect.top - 20) continue;  // above input — skip
             }
-            // Gather direct child text (skip pure-header rows that have no siblings)
-            const children = Array.from(el.children);
-            for (const child of children) {
+            // Unwrap wrapper chains first: with container > scroll-wrapper >
+            // options, the wrapper's textContent is every option concatenated
+            // into one blob (recorded as a single bogus "option" in run-5
+            // BENCH-008 step 6). Only VISIBLE text children count — containers
+            // often carry an extra hidden ghost/measure node that would
+            // otherwise stop the descent at the wrapper level. Descend while
+            // exactly one visible child carries text, then collect THAT level.
+            const textKids = (node) => Array.from(node.children).filter(k => {
+                if (!(k.textContent || '').trim()) return false;
+                const kr = k.getBoundingClientRect();
+                return kr.width > 0 && kr.height > 0;
+            });
+            let level = el;
+            for (let d = 0; d < 10; d++) {   // wrapper chains run deep (portal>dialog>scroll>viewport>list)
+                const kids = textKids(level);
+                if (kids.length === 1 && kids[0].children.length) { level = kids[0]; continue; }
+                break;
+            }
+            // Gather visible child text (skip pure-header rows that have no siblings)
+            for (const child of textKids(level)) {
                 const t = (child.textContent || '').trim();
                 if (t && t.length > 0 && t.length < 120) texts.push(t);
             }
@@ -1971,6 +1988,82 @@ class BrowserSession:
         return {"ok": True, "ref": ref, "role": m.get("role") or m.get("tag"),
                 "name": (m.get("name") or "")[:80]}
 
+    def scroll_to_text(self, text, max_scrolls=20):
+        """Deterministic scroll-until-found: step the page down until an element
+        containing `text` is visible, then register it as a ref (identify_at
+        grounding). ONE call replaces the agent's scroll->observe percept loop
+        (BENCH-007 burned its whole 2400s wall scroll-hunting lazy-loaded cards).
+        Records a single replay-safe scroll_into_view step regardless of how far
+        it scrolled."""
+        if not self._ensure_alive():
+            return {"ok": False, "error": "browser is closed; call restart_browser"}
+        t = str(text or "").strip()
+        if not t:
+            return {"ok": False, "error": "text is required"}
+        # SPAs usually scroll an inner pane, not the window — find the largest
+        # scrollable container and step IT; window scrolling is the fallback.
+        _SCROLL_JS = """() => {
+            const ok = (el) => el.scrollHeight > el.clientHeight + 10 &&
+                ['auto','scroll','overlay'].includes(getComputedStyle(el).overflowY);
+            let best = null, bestArea = 0;
+            for (const el of document.querySelectorAll('div,main,section,ul')) {
+                if (!ok(el)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width * r.height > bestArea) { best = el; bestArea = r.width * r.height; }
+            }
+            const step = Math.round(window.innerHeight * 0.8);
+            if (best) { const b = best.scrollTop; best.scrollTop += step; return best.scrollTop !== b; }
+            const y = window.scrollY; window.scrollBy(0, step); return window.scrollY !== y;
+        }"""
+        found, scrolls, loc, stuck = False, 0, None, 0
+        for i in range(max(1, int(max_scrolls))):
+            try:
+                loc = self.page.get_by_text(t).first
+                if loc.count() > 0:
+                    try:
+                        loc.scroll_into_view_if_needed(timeout=3000)
+                        if loc.is_visible():
+                            found = True
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                moved = self.page.evaluate(_SCROLL_JS)
+                self.page.wait_for_timeout(400)   # let lazy lists render the next batch
+            except Exception as e:
+                return {"ok": False, "error": f"scroll failed: {str(e)[:120]}"}
+            scrolls = i + 1
+            stuck = 0 if moved else stuck + 1
+            if stuck >= 2:
+                break   # nothing scrolls anymore — end of the list
+        if not found:
+            return {"ok": False, "found": False, "scrolls": scrolls,
+                    "error": (f"no visible element containing {t[:50]!r} after {scrolls} scrolls"
+                              + (" (reached the end of the scrollable area)" if stuck >= 2 else ""))}
+        ref_info = {}
+        try:
+            bb = loc.bounding_box()
+            if bb:
+                ref_info = self.identify_at(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2)
+        except Exception:
+            pass
+        pre_url = self._url()
+        self.step_id += 1
+        self.steps.append({"id": self.step_id,
+                           "rawLine": f'page.get_by_text("{_q(t)}").first.scroll_into_view_if_needed()',
+                           "type": "scroll", "target": f'page.get_by_text("{_q(t)}").first',
+                           "url": pre_url,
+                           "targetDescription": f"Scroll until '{t[:40]}' is visible",
+                           "value": "", "varName": ""})
+        out = {"ok": True, "found": True, "scrolls": scrolls}
+        if ref_info.get("ok"):
+            out.update({"ref": ref_info["ref"], "role": ref_info.get("role"),
+                        "name": ref_info.get("name")})
+            out["hint"] = "act on this ref with click(ref); the scroll step is already recorded"
+        return out
+
     def mark_step_manual(self, prompt):
         """Convert the LAST recorded fill step into a manual-input gate: the generated
         test pauses there and prompts the human for a fresh value (an OTP that arrived
@@ -1991,7 +2084,32 @@ class BrowserSession:
 
     def add_checkpoint(self, name, assert_type, value):
         after = self.steps[-1]["id"] if self.steps else 0
-        self.assertions.append({"type": assert_type, "value": value,
+        v = str(value or "")
+        # Record-time truth gate: a checkpoint asserts the CURRENT state (it
+        # replays right after the latest step), so if it isn't true on the
+        # SETTLED page now it can never pass at replay. Catching it here costs
+        # milliseconds; catching it in run_test_case costs a 2-minute browser
+        # cycle (run-5 BENCH-009: asserted the vendor name that was only on
+        # screen inside the open dropdown).
+        try:
+            if assert_type == "page_contains_text" and v and self._alive():
+                self._settle()   # let transient dropdowns/toasts finish
+                body = self.page.inner_text("body") or ""
+                if v.lower() not in body.lower():
+                    return {"ok": False,
+                            "error": (f"checkpoint NOT TRUE right now: the settled page does not "
+                                      f"show {v[:60]!r}. If you saw it inside a dropdown/toast it "
+                                      "was transient and will NOT be there at replay - assert a "
+                                      "durable outcome instead (heading, field label, URL, count).")}
+            elif assert_type == "url_contains" and v:
+                cur = self._url()
+                if cur and v.lower() not in cur.lower():
+                    return {"ok": False,
+                            "error": (f"checkpoint NOT TRUE right now: the current URL "
+                                      f"{cur[:80]!r} does not contain {v[:60]!r}.")}
+        except Exception:
+            pass   # validation is best-effort; never block recording on a probe error
+        self.assertions.append({"type": assert_type, "value": v,
                                 "afterStep": after, "description": name})
         return {"ok": True, "checkpoint_count": len(self.assertions)}
 
@@ -2514,6 +2632,15 @@ def build_agent(model, max_tokens=None):
         Returns {count, errors: [{type, text}]}. Much more reliable than vision for
         small red text under form fields."""
         return await _bro(ctx.deps.session.scan_page_errors_dom)
+
+    @agent.tool
+    async def scroll_until_visible(ctx: RunContext[Deps], text: str) -> dict:
+        """Scroll the page down until an element containing `text` becomes visible, then
+        return a ref for it. Use this whenever the target is further down the page
+        (lazy-loaded lists, 'appears as you scroll' elements) INSTEAD of scrolling and
+        re-observing in a loop - ONE call does the whole hunt and records a single
+        replay-safe scroll step. Returns {found, scrolls, ref} - then click(ref)."""
+        return await _bro(ctx.deps.session.scroll_to_text, text)
 
     @agent.tool
     async def find_on_screen(ctx: RunContext[Deps], description: str) -> dict:
