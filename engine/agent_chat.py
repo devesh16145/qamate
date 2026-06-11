@@ -1522,6 +1522,16 @@ class BrowserSession:
                 return -1
         k = el.get("match_index")
         n = _count(prim)
+        if n == 0:
+            # The primary matches NOTHING live (e.g. Radix/shadcn selects: the
+            # visible placeholder is aria-hidden, so the accessible name is empty
+            # and role+name can never match). The live action would quietly heal
+            # through fallbacks — so RECORD the fallback that actually matches,
+            # or the generated test replays a locator that finds nothing
+            # (run-4 BENCH-008 step 3 timed out exactly here).
+            for fb in (el.get("fallbacks") or []):
+                if _count(fb) == 1:
+                    return fb, _locator_str(fb), None, None
         if n < 2 and k is None:                      # unique (1), none yet (0), or uncountable (-1) -> keep
             return prim, _locator_str(prim), None, None
         tid = (el.get("test_id") or "").strip()      # ambiguous -> try the element's test-id
@@ -1638,6 +1648,7 @@ class BrowserSession:
         before_auth = len(self._auth_failures)
         name = el.get("name") or ref
         hints = el.get("hints") or []
+        pre_url = self._url()   # page this step belongs to (a click may navigate away)
         self.step_id += 1
         try:
             if kind == "fill":
@@ -1654,21 +1665,21 @@ class BrowserSession:
                     live.fill(val)
                 self.input_counter += 1
                 self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.fill("{_q(val)}")',
-                                   "type": "fill", "target": loc_str,
+                                   "type": "fill", "target": loc_str, "url": pre_url,
                                    "targetDescription": f'Enter "{val}" in {name}',
                                    "value": val, "varName": f"input_{self.input_counter}"})
             elif kind == "select":
                 val = str(value or "")
                 live.select_option(val)
                 self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.select_option("{_q(val)}")',
-                                   "type": "select", "target": loc_str,
+                                   "type": "select", "target": loc_str, "url": pre_url,
                                    "targetDescription": f'Select "{val}" in {name}',
                                    "value": val, "varName": ""})
             else:  # click — auto-fallback for Tailwind hidden radio/checkbox inputs
                 used_raw = self._smart_click(live, loc_str, el.get("input_type", ""),
                                              prefer_force="force-click" in hints)
                 self.steps.append({"id": self.step_id, "rawLine": used_raw,
-                                   "type": "click", "target": loc_str,
+                                   "type": "click", "target": loc_str, "url": pre_url,
                                    "targetDescription": f'Click {name}', "value": "", "varName": ""})
         except Exception as e:
             self.step_id -= 1
@@ -1717,6 +1728,7 @@ class BrowserSession:
         before = len(self.issues)
         before_api = len(self._api_errors)
         before_auth = len(self._auth_failures)
+        pre_url = self._url()
         self.step_id += 1
         try:
             loc = self.page.locator(ref)
@@ -1731,20 +1743,20 @@ class BrowserSession:
                 target.fill(val)
                 self.input_counter += 1
                 self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.fill("{_q(val)}")',
-                                   "type": "fill", "target": loc_str,
+                                   "type": "fill", "target": loc_str, "url": pre_url,
                                    "targetDescription": f'Enter "{val}" in {ref}',
                                    "value": val, "varName": f"input_{self.input_counter}"})
             elif kind == "select":
                 val = str(value or "")
                 target.select_option(val)
                 self.steps.append({"id": self.step_id, "rawLine": f'{loc_str}.select_option("{_q(val)}")',
-                                   "type": "select", "target": loc_str,
+                                   "type": "select", "target": loc_str, "url": pre_url,
                                    "targetDescription": f'Select "{val}" in {ref}',
                                    "value": val, "varName": ""})
             else:  # click — auto-fallback for Tailwind hidden radio/checkbox inputs
                 used_raw = self._smart_click(target, loc_str, ref)
                 self.steps.append({"id": self.step_id, "rawLine": used_raw,
-                                   "type": "click", "target": loc_str,
+                                   "type": "click", "target": loc_str, "url": pre_url,
                                    "targetDescription": f'Click {ref}', "value": "", "varName": ""})
         except Exception as e:
             self.step_id -= 1
@@ -2028,10 +2040,11 @@ class BrowserSession:
                                "interaction (click, fill, or select_option) after navigating. "
                                "Drive the flow further, then call create_test_case again."}
         pname = (project or {}).get("name") or (project or {}).get("id") or "the app"
+        steps = _ensure_leading_navigation(list(self.steps))
         payload = {
             "tc_id": tc_id, "description": (description or tc_id)[:200], "flowId": flow_id,
             "preconditions": preconditions or f"{pname} reachable; logged in if required",
-            "expectedResult": expected, "steps": self.steps,
+            "expectedResult": expected, "steps": steps,
             "assertions": self.assertions, "criteria": [],
         }
         res = generate_from_review(payload, ats_root, tests_dir=_tests_root_for(ats_root, project))
@@ -2058,6 +2071,24 @@ class BrowserSession:
                                   "flow (re-record the bad step) and call create_test_case again "
                                   "(same tc_id overwrites).")
         return res
+
+
+def _ensure_leading_navigation(steps):
+    """A recording that doesn't START with a navigation generates a test that
+    begins mid-flow: the fixture opens the app root while step 1 expects the page
+    the agent had already explored its way onto (run-4 BENCH-009: the goto landed
+    LAST, so the test filled a search box on a page it never opened). When the
+    first step isn't a navigate, synthesize one from the URL captured when that
+    step was recorded. Pure — unit-tested in engine/tests."""
+    if not steps or steps[0].get("type") == "navigate":
+        return steps
+    url = (steps[0].get("url") or "").strip()
+    if not url:
+        return steps
+    nav = {"id": 0, "rawLine": f'page.goto("{_q(url)}")', "type": "navigate",
+           "target": url, "targetDescription": f"Navigate to {url}",
+           "value": "", "varName": ""}
+    return [nav] + steps
 
 
 # ── UI Map crawler (sync, runs on _BROWSER thread) ───────────────────────────

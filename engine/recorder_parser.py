@@ -107,6 +107,15 @@ def _step_comment(stype, desc, value=""):
     # the stray text -> IndentationError).
     desc = re.sub(r"\s+", " ", str(desc)).strip()
     value = re.sub(r"\s+", " ", str(value)).strip()
+    # Agent-recorded targetDescriptions are already full sentences ("Enter "x" in
+    # Search", "Navigate to <url>") — don't stack the verb a second time
+    # ('Enter "x" in Enter "x" in Search').
+    low = desc.lower()
+    if ((stype == "navigate" and low.startswith("navigate to "))
+            or (stype == "fill" and low.startswith("enter "))
+            or (stype == "click" and low.startswith("click "))
+            or (stype == "select" and low.startswith("select "))):
+        return desc
     if stype == "navigate":
         return f"Navigate to {desc}"
     elif stype == "fill":

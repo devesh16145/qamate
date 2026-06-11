@@ -621,9 +621,15 @@ def seller_url(ats_config, active_project):
 
 @pytest.fixture(scope="session")
 def admin_url(ats_config, active_project):
-    """Admin panel URL. In project mode there's no separate admin app, so this
-    falls back to the project base URL; otherwise the Agrim admin URL."""
+    """Admin panel URL. Projects MAY define a separate admin app (project.json
+    "admin": {url, storage_state, credentials}) — honor it, or admin tests run
+    against the seller origin and die on its login page (run-4 BENCH-009: the
+    agent fought this for 188 tool calls). Generic projects without an admin
+    block keep the base-URL fallback; legacy mode uses the platform admin URL."""
     if active_project:
+        admin_app = (active_project.get("admin") or {})
+        if admin_app.get("url"):
+            return admin_app["url"]
         return project_store.resolve_base_url(active_project, os.environ.get("ATS_ENV"))
     return _get_platform_url(ats_config, "admin")
 

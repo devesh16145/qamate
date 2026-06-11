@@ -408,6 +408,15 @@ class _FakePage:
     def get_by_test_id(self, value):
         return _Loc(self._counts.get(("test_id", value), 0))
 
+    def get_by_role(self, role, name=None, exact=None):
+        return _Loc(self._counts.get(("role", role, name), 0))
+
+    def get_by_text(self, value, exact=None):
+        return _Loc(self._counts.get(("text", value), 0))
+
+    def get_by_placeholder(self, value, exact=None):
+        return _Loc(self._counts.get(("placeholder", value), 0))
+
 
 def _session_with(counts):
     sess = ac.BrowserSession()
@@ -503,3 +512,61 @@ def test_collect_check_no_match_reported(tmp_path):
     err = ac.BrowserSession._collect_check(root, os.path.join(root, "tests"),
                                            "demo", "TC-DEMO-001")
     assert "NO test matched" in err
+
+
+# -- _ensure_leading_navigation: recordings must not start mid-flow ------------
+
+def test_leading_nav_synthesized_from_first_step_url():
+    steps = [{"id": 1, "type": "fill", "rawLine": 'page.get_by_role("textbox").fill("x")',
+              "url": "https://admin-dev.agrim.app/#/oms/po/all/create"}]
+    out = ac._ensure_leading_navigation(steps)
+    assert len(out) == 2 and out[0]["type"] == "navigate"
+    assert out[0]["rawLine"] == 'page.goto("https://admin-dev.agrim.app/#/oms/po/all/create")'
+    compile(out[0]["rawLine"], "<rawline>", "exec")
+
+
+def test_leading_nav_untouched_when_first_step_is_navigate():
+    steps = [{"id": 1, "type": "navigate", "rawLine": 'page.goto("https://a/")'},
+             {"id": 2, "type": "click", "rawLine": "page.get_by_text('x').click()"}]
+    assert ac._ensure_leading_navigation(steps) is steps
+
+
+def test_leading_nav_skipped_without_url():
+    steps = [{"id": 1, "type": "fill", "rawLine": 'page.locator("#a").fill("x")'}]
+    assert ac._ensure_leading_navigation(steps) is steps
+    assert ac._ensure_leading_navigation([]) == []
+
+
+# -- _step_comment verb dedupe (agent descriptions are full sentences) ---------
+
+def test_step_comment_no_double_verb():
+    from recorder_parser import _step_comment
+    assert _step_comment("fill", 'Enter "x" in Search', "x") == 'Enter "x" in Search'
+    assert _step_comment("navigate", "Navigate to https://a/") == "Navigate to https://a/"
+    assert _step_comment("click", "Click Save") == "Click Save"
+    # recorder-style bare element descriptions still get the verb
+    assert _step_comment("fill", "Search box", "x") == 'Enter "x" in Search box'
+    assert _step_comment("click", "Save button") == "Click Save button"
+
+
+def test_record_strategy_zero_match_primary_records_healing_fallback():
+    # Radix/shadcn selects: visible placeholder is aria-hidden -> accessible name
+    # empty -> the role+name primary matches NOTHING, while the live click heals
+    # via the text fallback. The RECORDED locator must be the one that matches.
+    sess = _session_with({("role", "combobox", "Select an option"): 0, ("text", "Select an option"): 1})
+    el = {"primary": {"by": "role", "role": "combobox", "name": "Select an option"},
+          "fallbacks": [{"by": "text", "value": "Select an option"}],
+          "name": "Select an option"}
+    strat, loc_str, warn, nth = sess._record_strategy(el)
+    assert strat == {"by": "text", "value": "Select an option"}
+    assert warn is None and nth is None
+
+
+def test_record_strategy_zero_match_no_usable_fallback_keeps_primary():
+    # nothing matches anywhere (element renders late) -> keep the primary, no warn
+    sess = _session_with({("role", "combobox", "Select an option"): 0, ("text", "Select an option"): 0})
+    el = {"primary": {"by": "role", "role": "combobox", "name": "Select an option"},
+          "fallbacks": [{"by": "text", "value": "Select an option"}],
+          "name": "Select an option"}
+    strat, loc_str, warn, nth = sess._record_strategy(el)
+    assert strat == el["primary"] and warn is None and nth is None
