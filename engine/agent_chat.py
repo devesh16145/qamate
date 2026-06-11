@@ -175,9 +175,29 @@ class TurnCompactingModel(WrapperModel):
     used between turns: structure intact, recent messages verbatim); the
     runner's own history is never mutated."""
 
+    # Rough constant for what rides on EVERY request outside the message list:
+    # system prompt incl. playbook (~5.4k) + tool schemas/docstrings (~4.2k) +
+    # AGENT_MEMORY (~2.8k) + framing — measured 2026-06-11.
+    _SYS_OVERHEAD_EST = 15000
+
     def prepare_messages(self, messages):
-        return super().prepare_messages(
-            _compact_history(messages, keep_recent=12, max_chars=600))
+        out = _compact_history(messages, keep_recent=12, max_chars=600)
+        # Cost telemetry that SURVIVES killed turns: provider usage only lands when
+        # a turn completes, so 40-minute timeout tasks reported ZERO tokens (nine
+        # such tasks hid an estimated 100M+ real spend). Estimate the outgoing
+        # context per request (chars/4 + fixed overhead, INPUT side only) and emit
+        # it; consumers use the estimate when real usage never arrives.
+        try:
+            est = self._SYS_OVERHEAD_EST + sum(
+                len(str(getattr(p, "content", "") or ""))
+                for m in out for p in getattr(m, "parts", [])) // 4
+            self._req_count = getattr(self, "_req_count", 0) + 1
+            self._input_est = getattr(self, "_input_est", 0) + est
+            emit({"event": "usage_est", "requests": self._req_count,
+                  "input_est_total": self._input_est, "last_request_est": est})
+        except Exception:
+            pass
+        return super().prepare_messages(out)
 
 
 def _trim_dangling_tool_calls(messages):

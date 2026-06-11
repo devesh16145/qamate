@@ -287,3 +287,26 @@ def test_child_env_defaults_dev_seller_index(monkeypatch):
     monkeypatch.setenv("ATS_SELLER_USER_INDEX", "0")
     assert "ATS_SELLER_USER_INDEX" not in ab._child_env("/r", "dev")
     assert "ATS_SELLER_USER_INDEX" not in ab._child_env("/r", "staging")
+
+
+def test_score_usage_est_survives_killed_turn():
+    # a timed-out turn never emits 'usage' — the wrapper's per-request estimate
+    # is the only cost record (nine such tasks once hid ~100M+ real spend)
+    evs = [_ev("tool_call", tool="observe", args={}),
+           _ev("usage_est", requests=1, input_est_total=18000, last_request_est=18000),
+           _ev("tool_call", tool="click", args={}),
+           _ev("usage_est", requests=2, input_est_total=39000, last_request_est=21000)]
+    s = ab.score_events(evs)
+    assert s["input_est_total"] == 39000 and s["requests"] == 2
+    assert s["tokens"]["total"] == 0          # provider usage never arrived
+
+
+def test_summarize_tokens_incl_est():
+    results = [
+        {"completed": True, "created": True, "tokens": {"total": 1000}},       # reported
+        {"completed": False, "tokens": {"total": 0}, "input_est_total": 5000}, # killed turn
+        {"skipped": True},
+    ]
+    card = ab.summarize_bench(results)
+    assert card["tokens_total"] == 1000
+    assert card["tokens_total_incl_est"] == 6000

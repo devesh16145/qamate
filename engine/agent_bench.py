@@ -138,6 +138,12 @@ def score_events(events):
         elif kind == "usage":
             # cumulative per session - keep the latest snapshot
             s["tokens"] = {k: int(ev.get(k, 0) or 0) for k in ("input", "output", "total")}
+        elif kind == "usage_est":
+            # per-request INPUT-side estimate emitted by the model wrapper; the
+            # ONLY cost signal that survives a killed/timed-out turn (provider
+            # usage lands at turn end). Keep the latest cumulative figure.
+            s["input_est_total"] = int(ev.get("input_est_total", 0) or 0)
+            s["requests"] = int(ev.get("requests", 0) or 0)
         elif kind == "error":
             s["errors"].append(str(ev.get("message", ""))[:200])
         elif kind == "turn_complete":
@@ -202,6 +208,11 @@ def summarize_bench(results):
         "avg_tool_calls": round(sum(calls) / len(calls), 1) if calls else 0,
         "avg_wall_s": round(sum(walls) / len(walls), 1) if walls else 0,
         "tokens_total": sum((r.get("tokens") or {}).get("total", 0) for r in counted),
+        # True spend incl. killed turns: provider-reported when available, the
+        # wrapper's input-side estimate otherwise (labeled _est for honesty).
+        "tokens_total_incl_est": sum(
+            ((r.get("tokens") or {}).get("total", 0)
+             or r.get("input_est_total", 0)) for r in counted),
     }
 
 
@@ -613,7 +624,8 @@ def main(argv=None):
           f"self-verified: {card['self_verified_pct']}%   "
           f"first-try: {card['first_try_pct']}%")
     print(f"  cost            : avg {card['avg_tool_calls']} tool calls, "
-          f"avg {card['avg_wall_s']}s/task, {card['tokens_total']} tokens, "
+          f"avg {card['avg_wall_s']}s/task, {card['tokens_total']} tokens reported "
+          f"({card['tokens_total_incl_est']} incl. killed-turn estimates), "
           f"{card['asks_total']} asks, {card['assumed_values_total']} assumed values")
 
     payload = {"generated": datetime.datetime.now().isoformat(timespec="seconds"),
