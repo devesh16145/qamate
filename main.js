@@ -904,6 +904,89 @@ ipcMain.handle('capture-login', async (e, { projectId, url }) => {
 });
 
 // ──────────────────────────────────────
+// IPC: Authoring benchmark (engine/agent_bench.py) — run vs any provider, list scorecards
+// ──────────────────────────────────────
+let benchProcess = null;
+
+function benchBroadcast(data) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('bench-event', data);
+  }
+}
+
+ipcMain.handle('bench-run', async (event, opts) => {
+  if (benchProcess) return { ok: false, error: 'a benchmark is already running' };
+  if (!fs.existsSync(VENV_PYTHON)) return { ok: false, error: `Python not found at ${VENV_PYTHON}` };
+  const provider = (opts && opts.provider) || '';
+  const only = (opts && opts.only) || '';
+  const args = [path.join(__dirname, 'engine', 'agent_bench.py')];
+  if (provider) args.push('--provider', provider);
+  if (only) args.push('--only', only);
+  benchProcess = spawn(VENV_PYTHON, args, {
+    cwd: __dirname,
+    env: { ...process.env, ATS_ROOT: __dirname, PYTHONPATH: __dirname,
+           PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  const pid = benchProcess.pid;
+  let buf = '';
+  benchProcess.stdout.on('data', (chunk) => {
+    buf += chunk.toString();
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).replace(/\r$/, '');
+      buf = buf.slice(i + 1);
+      if (line.trim()) benchBroadcast({ type: 'log', line });
+    }
+  });
+  benchProcess.stderr.on('data', (chunk) => {
+    const s = chunk.toString().trim();
+    if (s) benchBroadcast({ type: 'log', line: `[stderr] ${s.slice(0, 300)}` });
+  });
+  benchProcess.on('close', (code) => {
+    benchProcess = null;
+    benchBroadcast({ type: 'exit', code });
+  });
+  benchBroadcast({ type: 'started', provider, pid });
+  return { ok: true, pid };
+});
+
+ipcMain.handle('bench-stop', async () => {
+  if (!benchProcess) return { ok: false, error: 'no benchmark running' };
+  const pid = benchProcess.pid;
+  try {
+    // Kill the whole tree: the bench spawns agent processes which spawn Chrome.
+    require('child_process').execSync(`taskkill /F /T /PID ${pid}`, { timeout: 30000 });
+  } catch (e) { /* may already be gone */ }
+  benchProcess = null;
+  benchBroadcast({ type: 'exit', code: -1, stopped: true });
+  return { ok: true };
+});
+
+ipcMain.handle('bench-status', async () => ({ running: !!benchProcess, pid: benchProcess ? benchProcess.pid : null }));
+
+ipcMain.handle('bench-results', async () => {
+  const benchDir = path.join(RESULTS_DIR, '_agent_bench');
+  if (!fs.existsSync(benchDir)) return [];
+  const out = [];
+  const dirs = fs.readdirSync(benchDir)
+    .filter(f => { try { return fs.lstatSync(path.join(benchDir, f)).isDirectory(); } catch { return false; } })
+    .sort().reverse();
+  for (const d of dirs) {
+    if (out.length >= 15) break;
+    const p = path.join(benchDir, d, 'scorecard.json');
+    if (!fs.existsSync(p)) continue;
+    try {
+      const sc = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      out.push({ id: d, generated: sc.generated, provider: sc.provider, env: sc.env,
+                 scorecard: sc.scorecard, tasks: sc.tasks, folder: path.join(benchDir, d) });
+    } catch { /* partial write — skip */ }
+  }
+  return out;
+});
+
+// ──────────────────────────────────────
 // IPC: Run history
 // ──────────────────────────────────────
 ipcMain.handle('get-run-history', async () => {

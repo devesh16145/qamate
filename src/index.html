@@ -1312,6 +1312,13 @@ function App() {
     setActiveTab(id);
   }, []);
 
+  // Open the agent Benchmark tab (singleton)
+  const openBenchTab = useCallback(() => {
+    setTabs(prev => prev.find(t => t.id === 'bench') ? prev : [...prev, { kind: 'bench', id: 'bench' }]);
+    setActiveTab('bench');
+  }, []);
+  useEffect(() => { window.openBenchTab = openBenchTab; }, [openBenchTab]);
+
   const openJiraTab = useCallback((tcId, flowId, description, jiraType) => {
     const id = `jira:${tcId}`;
     setTabs(prev => {
@@ -1863,6 +1870,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
           <div className="dd-menu" style={{ minWidth: 200 }}>
             <button onClick={() => { setMenuOpen(false); onOpenCmd(); }}>Search everywhere… <span className="sub">⌘K</span></button>
             <button onClick={() => { setMenuOpen(false); if (window.openNewTestCaseModal) window.openNewTestCaseModal(); else toast('Open the Test Explorer first'); }}>New test case…</button>
+            <button onClick={() => { setMenuOpen(false); if (window.openBenchTab) window.openBenchTab(); }}>Agent benchmark…</button>
             <button onClick={() => { setMenuOpen(false); toast('Import from CSV'); }}>Import tests…</button>
             <div className="div"></div>
             <button onClick={() => { setMenuOpen(false); onOpenSettings(); }}>Preferences…</button>
@@ -2546,6 +2554,8 @@ function TestExplorer(props) {
           {headless ? <I.EyeOff size={14} /> : <I.Eye size={14} />}
         </button>
         <div style={{ flex: 1 }}></div>
+        <button className="tx-ic" title="Refresh suite from disk (re-scans flows — needed after agent/benchmark runs author new tests)"
+                onClick={() => window.location.reload()}><I.RefreshCw size={14} /></button>
         <button className="tx-ic" title="Hide panel" onClick={onClose}><I.X size={14} /></button>
       </div>
       {running && (
@@ -2847,6 +2857,192 @@ window.nowTs = nowTs;
 /* EditorArea, RightToolWindow, overlays, bootstrap */
 
 /* ──────────────────────────────────────────────────────────────
+   Benchmark panel — run the authoring benchmark vs any provider,
+   watch the live log, compare scorecards (model vs model).
+   ────────────────────────────────────────────────────────────── */
+const BENCH_VERDICT_COLOR = {
+  reliable: 'var(--green, #16a34a)', flaky: '#c2410c', failing: 'var(--red, #dc2626)',
+  not_delivered: 'var(--red, #dc2626)', timeout: '#c2410c', infra_error: '#7c3aed',
+  delivered_unverified: 'var(--text-3)', skipped: 'var(--text-3)',
+};
+
+function BenchPanel({ toast }) {
+  const [providers, setProviders] = useState([]);
+  const [provider, setProvider] = useState('');
+  const [running, setRunning] = useState(false);
+  const [log, setLog] = useState([]);
+  const [results, setResults] = useState([]);
+  const [openRun, setOpenRun] = useState(null);   // result id expanded to per-task table
+  const logRef = useRef(null);
+
+  const refreshResults = async () => {
+    try { setResults(await window.ats.benchResults() || []); } catch (e) { /* noop */ }
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await window.ats.getConfig();
+        const provs = Object.keys((cfg && cfg.llm && cfg.llm.providers) || {}).filter(p => p !== 'mock');
+        setProviders(provs);
+        if (provs.length) setProvider(provs[0]);
+        const st = await window.ats.benchStatus();
+        setRunning(!!(st && st.running));
+      } catch (e) { /* noop */ }
+      refreshResults();
+    })();
+    const off = window.ats.onBenchEvent((ev) => {
+      if (ev.type === 'log') {
+        setLog(prev => [...prev.slice(-400), ev.line]);
+      } else if (ev.type === 'started') {
+        setRunning(true);
+        setLog(prev => [...prev, `— benchmark started (provider: ${ev.provider || 'config default'}, pid ${ev.pid}) —`]);
+      } else if (ev.type === 'exit') {
+        setRunning(false);
+        setLog(prev => [...prev, ev.stopped ? '— benchmark stopped —' : `— benchmark finished (exit ${ev.code}) —`]);
+        refreshResults();
+      }
+    });
+    return off;
+  }, []);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [log]);
+
+  const start = async () => {
+    const r = await window.ats.benchRun({ provider });
+    if (!r || !r.ok) toast((r && r.error) || 'could not start benchmark');
+  };
+  const stop = async () => { await window.ats.benchStop(); };
+
+  const fmtTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n || 0);
+
+  return (
+    <div style={{ height: '100%', overflow: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Run controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>Authoring benchmark</span>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>10 fixed tasks · agent authors + verifies live · independently re-verified</span>
+        <div style={{ flex: 1 }}></div>
+        <label style={{ fontSize: 11, color: 'var(--text-3)' }}>Provider</label>
+        <select value={provider} onChange={e => setProvider(e.target.value)} disabled={running}
+                style={{ fontSize: 12, padding: '4px 8px' }}>
+          {providers.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        {!running ? (
+          <button className="rv-cta primary" onClick={start} disabled={!provider}>
+            <I.Play size={12} /> Run benchmark
+          </button>
+        ) : (
+          <button className="rv-cta" onClick={stop} style={{ color: 'var(--red, #dc2626)' }}>
+            <I.Stop size={12} /> Stop
+          </button>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: -8 }}>
+        A full run drives the LIVE app for 1–3 hours and recreates the bench_* flows. Scorecards land in
+        <span style={{ fontFamily: 'var(--mono)' }}> results/_agent_bench/</span>.
+      </div>
+
+      {/* Live log */}
+      {(running || log.length > 0) && (
+        <div ref={logRef} style={{ maxHeight: 180, minHeight: 80, overflow: 'auto', background: 'var(--bg-2, #f6f6f7)',
+                                   border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px',
+                                   fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+          {log.length ? log.join('\n') : 'waiting for output…'}
+        </div>
+      )}
+
+      {/* Scorecard history */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Scorecards</span>
+          <button className="ic" title="Refresh list" onClick={refreshResults}><I.RefreshCw size={12} /></button>
+        </div>
+        {results.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>No benchmark runs yet.</div>
+        )}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          {results.length > 0 && (
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-3)', fontSize: 10.5 }}>
+                <th style={{ padding: '4px 6px' }}>When</th>
+                <th style={{ padding: '4px 6px' }}>Provider</th>
+                <th style={{ padding: '4px 6px' }}>Score</th>
+                <th style={{ padding: '4px 6px' }}>Delivered</th>
+                <th style={{ padding: '4px 6px' }}>First-try</th>
+                <th style={{ padding: '4px 6px' }}>Tokens</th>
+                <th></th>
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {results.map(r => {
+              const sc = r.scorecard || {};
+              const isOpen = openRun === r.id;
+              return (
+                <React.Fragment key={r.id}>
+                  <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
+                      onClick={() => setOpenRun(isOpen ? null : r.id)}>
+                    <td style={{ padding: '6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{r.id}</td>
+                    <td style={{ padding: '6px' }}>{r.provider}</td>
+                    <td style={{ padding: '6px', fontWeight: 700,
+                                 color: (sc.benchmark_score || 0) >= 70 ? 'var(--green, #16a34a)' : (sc.benchmark_score || 0) >= 40 ? '#c2410c' : 'var(--red, #dc2626)' }}>
+                      {sc.benchmark_score != null ? `${sc.benchmark_score}%` : '—'}
+                      <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> ({sc.independent_reliable}/{sc.total})</span>
+                    </td>
+                    <td style={{ padding: '6px' }}>{sc.delivered_pct != null ? `${sc.delivered_pct}%` : '—'}</td>
+                    <td style={{ padding: '6px' }}>{sc.first_try_pct != null ? `${sc.first_try_pct}%` : '—'}</td>
+                    <td style={{ padding: '6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{fmtTok(sc.tokens_total)}</td>
+                    <td style={{ padding: '6px', textAlign: 'right' }}>
+                      <button className="ic" title="Open folder"
+                              onClick={(e) => { e.stopPropagation(); window.ats.openFolder(r.folder); }}>
+                        <I.Folder size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: '4px 6px 10px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ textAlign: 'left', color: 'var(--text-3)', fontSize: 10 }}>
+                              <th style={{ padding: '3px 6px' }}>Task</th>
+                              <th style={{ padding: '3px 6px' }}>Verdict</th>
+                              <th style={{ padding: '3px 6px' }}>Attempts</th>
+                              <th style={{ padding: '3px 6px' }}>Tools</th>
+                              <th style={{ padding: '3px 6px' }}>Wall</th>
+                              <th style={{ padding: '3px 6px' }}>Tokens</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(r.tasks || []).map(t => (
+                              <tr key={t.task_id} style={{ borderTop: '1px solid var(--border)' }}>
+                                <td style={{ padding: '3px 6px', fontFamily: 'var(--mono)' }}>{t.task_id} <span style={{ color: 'var(--text-3)' }}>{t.difficulty}</span></td>
+                                <td style={{ padding: '3px 6px', fontWeight: 600, color: BENCH_VERDICT_COLOR[t.verdict] || 'var(--text)' }}>{t.verdict || '—'}</td>
+                                <td style={{ padding: '3px 6px' }}>{t.run_attempts != null ? t.run_attempts : '—'}</td>
+                                <td style={{ padding: '3px 6px' }}>{t.tool_calls != null ? t.tool_calls : '—'}</td>
+                                <td style={{ padding: '3px 6px' }}>{t.wall_s != null ? `${Math.round(t.wall_s)}s` : '—'}</td>
+                                <td style={{ padding: '3px 6px', fontFamily: 'var(--mono)' }}>{fmtTok((t.tokens || {}).total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
    Editor Area — tabs + content
    ────────────────────────────────────────────────────────────── */
 function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLines, running, execMode, headless, runProgress, onOpenCmd, onRun, runSingle, drawerH, setDrawerH, onClearLog, openResultsTab, toast, checkedCount, history, trend, onCreateBug, openTab, openCoverageTab, openReviewTab }) {
@@ -2952,6 +3148,17 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
               </div>
             );
           }
+          if (t.kind === 'bench') {
+            return (
+              <div key={t.id} className={`tab${isActive ? ' active' : ''}`} onClick={() => setActiveTab(t.id)}>
+                <I.Zap size={12} className="ic" style={{ color: 'var(--accent)' }} />
+                <span>Benchmark</span>
+                <button className="close" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>
+                  <I.X size={10} />
+                </button>
+              </div>
+            );
+          }
           const tc = MODULES.flatMap(m => m.tests).find(x => x.id === t.id);
           if (!tc) return null;
           return (
@@ -2997,6 +3204,9 @@ function EditorArea({ tabs, activeTab, setActiveTab, closeTab, setTabView, logLi
         )}
         {active && active.kind === 'jira' && (
           <JiraModal tcId={active.tcId} flowId={active.flowId} description={active.description} initialType={active.jiraType} onClose={() => closeTab(active.id)} toast={toast} isTab={true} />
+        )}
+        {active && active.kind === 'bench' && (
+          <BenchPanel toast={toast} />
         )}
       </div>
 

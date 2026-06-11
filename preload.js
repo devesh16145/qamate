@@ -8,6 +8,16 @@ contextBridge.exposeInMainWorld('ats', {
   manualInputRespond: (opts) => ipcRenderer.invoke('manual-input-respond', opts), // {responsePath, value} | {responsePath, cancel:true}
   onLog: (callback) => ipcRenderer.on('test-log', (_, data) => callback(data)),
   getHistory: () => ipcRenderer.invoke('get-run-history'),
+  // ── Authoring benchmark (engine/agent_bench.py) ──
+  benchRun: (opts) => ipcRenderer.invoke('bench-run', opts),        // {provider, only?}
+  benchStop: () => ipcRenderer.invoke('bench-stop'),
+  benchStatus: () => ipcRenderer.invoke('bench-status'),
+  benchResults: () => ipcRenderer.invoke('bench-results'),          // [{id, provider, scorecard, tasks, folder}]
+  onBenchEvent: (cb) => {
+    const h = (_e, data) => cb(data);
+    ipcRenderer.on('bench-event', h);
+    return () => ipcRenderer.removeListener('bench-event', h);
+  },
   openReport: (path) => ipcRenderer.invoke('open-report', path),
   openFolder: (path) => ipcRenderer.invoke('open-folder', path),
   openFile: (path) => ipcRenderer.invoke('open-file', path),
