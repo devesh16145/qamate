@@ -85,6 +85,11 @@ def disambiguate(models):
     return adjusted
 
 
+# Framework artifacts that leak into accessible names (Next.js flight data,
+# hydration payloads) — never useful to act on, pure percept noise.
+_JUNK_NAME_RE = re.compile(r"self\.__next_f|__NEXT_DATA__|^\s*[\[{]\s*\d")
+
+
 def compact_elements(models, limit=40, include_hidden=False):
     """Build observe()'s token-light element list from full element models.
 
@@ -107,6 +112,8 @@ def compact_elements(models, limit=40, include_hidden=False):
             if not include_hidden:
                 continue
         name = (m.get("name") or "")[:60]
+        if _JUNK_NAME_RE.search(name):
+            continue   # hydration/script payload leaked into the accessible name
         key = (m.get("role") or m.get("tag"), _norm(name), m.get("container") or "")
         if visible and key[1] and key in groups:
             groups[key]["repeats"] = groups[key].get("repeats", 1) + 1

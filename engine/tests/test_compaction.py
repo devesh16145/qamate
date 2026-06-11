@@ -94,3 +94,29 @@ def test_compaction_actually_saves_tokens():
         return total
     # 5 of 8 percepts are old enough to compact -> roughly halves the payload
     assert size(ac._compact_history(msgs)) < size(msgs) * 0.55
+
+# -- TurnCompactingModel: within-turn context dieting --------------------------
+
+def test_turn_compacting_model_shrinks_outgoing_only():
+    from pydantic_ai.models.test import TestModel
+    import agent_chat as ac
+
+    big = "x" * 5000
+    msgs = []
+    for i in range(10):
+        msgs.append(ModelResponse(parts=[ToolCallPart(tool_name="observe", args={},
+                                                      tool_call_id=f"c{i}")]))
+        msgs.append(ModelRequest(parts=[ToolReturnPart(tool_name="observe", content=big,
+                                                       tool_call_id=f"c{i}")]))
+    model = ac.TurnCompactingModel(TestModel())
+    out = model.prepare_messages(list(msgs))
+    # old tool returns shrunk, recent (last 12 messages = 6 exchanges) intact
+    old_returns = [p for m in out[:8] for p in getattr(m, "parts", [])
+                   if isinstance(p, ToolReturnPart)]
+    new_returns = [p for m in out[-12:] for p in getattr(m, "parts", [])
+                   if isinstance(p, ToolReturnPart)]
+    assert old_returns and all(len(str(p.content)) < 1000 for p in old_returns)
+    assert new_returns and all(len(str(p.content)) >= 5000 for p in new_returns)
+    # the ORIGINAL list is untouched (runner history must never mutate)
+    assert all(len(str(p.content)) >= 5000 for m in msgs for p in m.parts
+               if isinstance(p, ToolReturnPart))

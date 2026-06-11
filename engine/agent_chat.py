@@ -78,6 +78,7 @@ from pydantic_ai import Agent, RunContext, capture_run_messages, BinaryContent, 
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 
@@ -163,6 +164,20 @@ def _compact_history(messages, keep_recent=_COMPACT_KEEP_RECENT,
             parts.append(p)
         out.append(dataclasses.replace(m, parts=parts) if changed else m)
     return out
+
+
+class TurnCompactingModel(WrapperModel):
+    """Caps WITHIN-TURN context growth. Every model request re-sends the whole
+    turn transcript, so long authoring turns grow quadratically — run-5
+    BENCH-005 hit 9.0M tokens at 142 calls (~64k/request) and the bloat also
+    slows every round (run-4/5 BENCH-007 wall-clock timeouts). prepare_messages
+    shrinks STALE tool returns in the OUTGOING copy only (same _compact_history
+    used between turns: structure intact, recent messages verbatim); the
+    runner's own history is never mutated."""
+
+    def prepare_messages(self, messages):
+        return super().prepare_messages(
+            _compact_history(messages, keep_recent=12, max_chars=600))
 
 
 def _trim_dangling_tool_calls(messages):
@@ -2002,17 +2017,26 @@ class BrowserSession:
             return {"ok": False, "error": "text is required"}
         # SPAs usually scroll an inner pane, not the window — find the largest
         # scrollable container and step IT; window scrolling is the fallback.
+        # When a dialog/overlay is OPEN, only ITS scrollables count: run-6
+        # BENCH-007 scrolled the catalog BEHIND the Create Product modal and
+        # reported "end of scrollable area" while Submit sat below the modal fold.
         _SCROLL_JS = """() => {
             const ok = (el) => el.scrollHeight > el.clientHeight + 10 &&
                 ['auto','scroll','overlay'].includes(getComputedStyle(el).overflowY);
+            const dlg = Array.from(document.querySelectorAll('[role=dialog], dialog'))
+                .filter(d => { const r = d.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+                .pop();   // topmost rendered dialog
+            const scope = dlg || document;
             let best = null, bestArea = 0;
-            for (const el of document.querySelectorAll('div,main,section,ul')) {
+            const cands = [...(dlg && ok(dlg) ? [dlg] : []), ...scope.querySelectorAll('div,main,section,ul')];
+            for (const el of cands) {
                 if (!ok(el)) continue;
                 const r = el.getBoundingClientRect();
                 if (r.width * r.height > bestArea) { best = el; bestArea = r.width * r.height; }
             }
             const step = Math.round(window.innerHeight * 0.8);
             if (best) { const b = best.scrollTop; best.scrollTop += step; return best.scrollTop !== b; }
+            if (dlg) return false;   // dialog open but nothing scrollable in it — never scroll the page behind it
             const y = window.scrollY; window.scrollBy(0, step); return window.scrollY !== y;
         }"""
         found, scrolls, loc, stuck = False, 0, None, 0
@@ -3960,7 +3984,7 @@ class AgentRuntime:
 
         prov_cfg = ((self.config.get("llm", {}) or {}).get("providers", {}) or {}).get(pname, {}) or {}
         self.max_tokens = int(prov_cfg.get("max_tokens") or AGENT_MAX_TOKENS)
-        self.agent = build_agent(model, self.max_tokens)
+        self.agent = build_agent(TurnCompactingModel(model), self.max_tokens)
         # Tool budget: from init command > env var default. 0 = unlimited (no pause between turns).
         _tb = cmd.get("tool_budget")
         if _tb is not None:

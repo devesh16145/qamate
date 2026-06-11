@@ -399,3 +399,10 @@ def test_record_strategy_unique_element_unchanged():
     s.page = None
     strat, loc_str, warn, nth = s._record_strategy(_model("save", name="Save"))
     assert nth is None and ".nth(" not in loc_str
+
+
+def test_compact_filters_framework_junk_names():
+    models = [_m("junk", name='self.__next_f.push([1,"25:..'),
+              _m("real", name="Request Product")]
+    items, _ = compact_elements(models, limit=40)
+    assert [i["name"] for i in items] == ["Request Product"]
