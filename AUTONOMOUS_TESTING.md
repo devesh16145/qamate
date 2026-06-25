@@ -18,9 +18,9 @@ free). The defensible value is **autonomy + maintenance**:
 | Reliable runner | "Green means green — flake is quarantined, not ignored." | L4 |
 | Maintenance loop | "It fixes its own tests and tells you what drifted." | L5 |
 
-The wedge: **AI-maintained E2E for B2B commerce / marketplace apps** — ship the
-PO-lifecycle, catalog, GST, and seller/admin domain knowledge as pre-built
-assets a horizontal tool can never match.
+The wedge: **AI-maintained E2E for complex web apps** — combine self-healing
+locators, PRD-driven coverage, and per-project memory so teams ship reliable
+suites faster than record-and-fix loops allow.
 
 ## The pipeline
 
@@ -81,7 +81,7 @@ elements (with fingerprints L0 can reuse), and the navigation graph.
 **Contract — `app_model.json`:**
 ```json
 {
-  "base_url": "https://supplier-dev.agrim.app/",
+  "base_url": "https://playwright.dev/",
   "generated_at": "2026-05-29T...",
   "pages": [
     {

@@ -115,10 +115,10 @@ engine — you will see "Could not resolve 'css=#:r3:'".
 **The fix is already in the tools** — `fill`, `click`, and `select_option` all accept
 direct CSS selectors as a fallback when the ref isn't in the current page's element map.
 
-For the Admin Panel login form, use these selectors directly:
-- Email/username: `fill('input[type="email"]', "amit.dalal@agrim.app")`
-  or `fill('input[name="username"]', "...")`
-- Password: `fill('input[type="password"]', "Amit@12345")`
+For MUI login forms, use these selectors directly (substitute credentials from `get_settings()`):
+- Email/username: `fill('input[type="email"]', "<email from settings>")`
+  or `fill('input[name="username"]', "<username>")`
+- Password: `fill('input[type="password"]', "<password from settings>")`
 - Sign-in button: `click('button[type="submit"]')` or `click('[role="button"]')`
 
 Do NOT try to use the `:r3:` / `:r5:` refs. Do NOT use `observe` refs that contain
@@ -141,8 +141,8 @@ the test steps for whichever path worked. You do NOT run escalation ladders your
 2. If the result is ok — done. The selected label is auto-saved to the input registry.
 3. If the result has `blocked: true`, read `options_seen`:
    - If the right option is there under a different label → `select_option(ref, "<that exact text>")`.
-   - If `options_seen` is empty → retry ONCE with the first word only ("Supertech" instead
-     of "Supertech Limited").
+   - If `options_seen` is empty → retry ONCE with the first word only ("Acme" instead
+     of "Acme Corporation").
    - Still blocked → `ask_user` immediately. 2 attempts maximum, then ask.
 
 **Rules:**
@@ -335,7 +335,7 @@ data. Close that gap:
 
 ## Tailwind hidden inputs — radio buttons and checkboxes
 
-Many Agrim forms use Tailwind-styled radio buttons and checkboxes where the visible
+Many apps use Tailwind-styled radio buttons and checkboxes where the visible
 circle/tick is a `<span>` or `<label>` wrapper. The actual `<input type="radio">` or
 `<input type="checkbox">` is hidden (visibility:hidden or opacity:0).
 

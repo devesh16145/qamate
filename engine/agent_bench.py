@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Agrim ATS - Agent AUTHORING Benchmark
+QAmate - Agent AUTHORING Benchmark
 =====================================
 
 agent_eval.py answers "are the tests the agent ALREADY delivered reliable?".
@@ -44,9 +44,8 @@ Usage
     venv\\Scripts\\python engine\\agent_bench.py --provider anthropic --verify-runs 3
     venv\\Scripts\\python engine\\agent_bench.py --strict             # CI: non-zero exit unless all reliable
 
-The target env must be reachable and the project must have a captured login.
-On env=dev the seller account defaults to index 1 (index 0 is stale) unless
-ATS_SELLER_USER_INDEX is already set.
+The target env must be reachable for live benchmark tasks (public demo site or your configured app).
+Set ATS_SELLER_USER_INDEX / ATS_ADMIN_USER_INDEX when your config has multiple platform users.
 """
 
 import os
@@ -338,9 +337,10 @@ def _child_env(ats_root, env_name):
     e = {"ATS_ROOT": ats_root, "PYTHONPATH": ats_root,
          "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
          "ATS_ENV": env_name}
-    # dev seller index 0 is a stale account - default to 1 unless the caller chose
-    if env_name == "dev" and "ATS_SELLER_USER_INDEX" not in os.environ:
-        e["ATS_SELLER_USER_INDEX"] = "1"
+    if "ATS_SELLER_USER_INDEX" in os.environ:
+        e["ATS_SELLER_USER_INDEX"] = os.environ["ATS_SELLER_USER_INDEX"]
+    if "ATS_ADMIN_USER_INDEX" in os.environ:
+        e["ATS_ADMIN_USER_INDEX"] = os.environ["ATS_ADMIN_USER_INDEX"]
     return e
 
 

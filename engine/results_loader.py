@@ -1,5 +1,5 @@
 """
-Agrim ATS — Canonical Run Results
+QAmate — Canonical Run Results
 =================================
 
 Builds ONE authoritative, self-contained record for a run by treating the

@@ -77,7 +77,7 @@ class PlaywrightMCPClient:
         resp = self._call("__init__", "initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "agrim-ats", "version": "1.0"},
+            "clientInfo": {"name": "qamate", "version": "1.0"},
         }, timeout=20)
         if resp is None or "error" in resp:
             return {"ok": False, "error": f"MCP init failed: {resp}"}

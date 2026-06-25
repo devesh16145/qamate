@@ -10,7 +10,23 @@ let pythonProcess = null;
 const VENV_PYTHON = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
 const RUNNER_SCRIPT = path.join(__dirname, 'engine', 'runner.py');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
+const CONFIG_EXAMPLE_PATH = path.join(__dirname, 'config.example.json');
 const RESULTS_DIR = path.join(__dirname, 'results');
+
+function ensureConfig() {
+  if (fs.existsSync(CONFIG_PATH)) return CONFIG_PATH;
+  if (fs.existsSync(CONFIG_EXAMPLE_PATH)) {
+    fs.copyFileSync(CONFIG_EXAMPLE_PATH, CONFIG_PATH);
+    console.log('[QAmate] Created config.json from config.example.json — configure URLs and credentials in Settings.');
+  }
+  return CONFIG_PATH;
+}
+
+function loadConfig() {
+  ensureConfig();
+  if (!fs.existsSync(CONFIG_PATH)) return {};
+  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -28,7 +44,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: "Agrim ATS - Automated Testing System",
+    title: "QAmate — Automated Testing System",
     backgroundColor: '#ffffff',
   });
 
@@ -229,7 +245,7 @@ ipcMain.handle('stop-tests', async () => {
 // IPC: Config
 // ──────────────────────────────────────
 ipcMain.handle('get-config', async () => {
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  return loadConfig();
 });
 
 ipcMain.handle('save-config', async (event, config) => {
@@ -289,7 +305,7 @@ const PROJECT_STORE = path.join(__dirname, 'engine', 'project_store.py');
 // ── App-level project scoping ────────────────────────────────────────────────
 // The ACTIVE project (projects/_index.json) scopes the whole app: each project
 // owns its own tests (projects/<id>/tests) so a new project starts fresh.
-// No active project = the legacy built-in Agrim suite (<ats_root>/tests).
+// No active project = the legacy built-in suite (<ats_root>/tests).
 // Path convention mirrored in engine/project_store.py tests_root() — keep in sync.
 function _activeProjectId() {
   try {
@@ -369,7 +385,7 @@ function createAgentWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'Agrim ATS — AI Agent',
+    title: 'QAmate — AI Agent',
     backgroundColor: '#0f0f1a',
   });
   agentWindow.loadFile(path.join(__dirname, 'src', 'agent.html'));
@@ -391,7 +407,7 @@ function createHistoryWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'Agrim ATS — History',
+    title: 'QAmate — History',
     backgroundColor: '#ffffff',
   });
   historyWindow.loadFile(path.join(__dirname, 'src', 'history.html'));
@@ -410,7 +426,7 @@ function createBugManagerWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'Agrim ATS — Bug & Story Manager',
+    title: 'QAmate — Bug & Story Manager',
     backgroundColor: '#ffffff',
   });
   bugManagerWindow.loadFile(path.join(__dirname, 'src', 'bugs.html'));
@@ -1154,19 +1170,23 @@ ipcMain.handle('get-run-network', async (event, runId) => {
 ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, platform }) => {
   return new Promise((resolve, reject) => {
     try {
-      const configPath = path.join(__dirname, 'config.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      
-      let baseUrl = 'https://supplier-dev.agrim.app/';
+      const config = loadConfig();
+
+      let baseUrl = '';
       let loginPath = 'login';
-      
+
       if (platform && config.platforms && config.platforms[platform]) {
-          baseUrl = config.platforms[platform].urls[env] || baseUrl;
+          baseUrl = config.platforms[platform].urls?.[env] || '';
           loginPath = config.platforms[platform].login_path || loginPath;
-      } else if (config.environments[env]?.base_url) {
+      } else if (config.environments?.[env]?.base_url) {
           baseUrl = config.environments[env].base_url;
       }
-      
+
+      if (!baseUrl) {
+          resolve({ status: 'error', error: 'No base URL configured. Add platform URLs in Settings (config.json).' });
+          return;
+      }
+
       if (!baseUrl.endsWith('/')) baseUrl += '/';
       if (loginPath.startsWith('/')) loginPath = loginPath.substring(1);
       
@@ -1786,7 +1806,7 @@ ipcMain.handle('list-templates', async () => {
 
 function _getJiraConfig() {
   try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    const config = loadConfig();
     const jira = config.jira || {};
     const apiKey = process.env.JIRA_API_KEY || jira.apiToken || '';
     // Strip any path from URL — Jira REST API only needs the origin
@@ -1800,10 +1820,10 @@ function _getJiraConfig() {
       url: rawUrl,
       email: jira.email || '',
       apiKey,
-      projectKey: jira.projectKey || 'PM',
+      projectKey: jira.projectKey || '',
     };
   } catch (e) {
-    return { url: '', email: '', apiKey: '', projectKey: 'PM' };
+    return { url: '', email: '', apiKey: '', projectKey: '' };
   }
 }
 
@@ -1883,7 +1903,7 @@ function _buildBugDescription(tcId, description, errors, runFolder) {
   let text = `Test Case: ${tcId}\n`;
   text += `Status: FAILED\n`;
   text += `Environment: Dev\n`;
-  text += `Detected by: Agrim ATS (automated)\n`;
+  text += `Detected by: QAmate (automated)\n`;
   if (description) text += `Description: ${description}\n`;
   text += `\n`;
   if (errors && errors.length) {
@@ -1912,7 +1932,7 @@ function _buildBugDescription(tcId, description, errors, runFolder) {
     } catch (e) { /* ignore */ }
   }
   text += `--- Steps to Reproduce ---\n`;
-  text += `1. Open Agrim ATS\n`;
+  text += `1. Open QAmate\n`;
   text += `2. Select test case ${tcId}\n`;
   text += `3. Click Run\n`;
   text += `4. Observe failure\n`;
@@ -1936,7 +1956,7 @@ function _buildStoryDescription(userStory) {
 // ── Save Jira config ──
 ipcMain.handle('save-jira-config', async (event, jiraConfig) => {
   try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    const config = loadConfig();
     config.jira = jiraConfig;
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
     return { success: true };

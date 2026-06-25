@@ -1,5 +1,5 @@
 """
-Agrim ATS — Pytest Configuration (conftest.py)
+QAmate — Pytest Configuration (conftest.py)
 
 Multi-platform architecture:
 - Platforms (seller, admin) each have their own URL and user list in config.json
@@ -28,8 +28,7 @@ import project_store
 
 # ── Project mode (general-purpose) ───────────────────────────────────────────
 # A run targets a Project only when the runner explicitly sets ATS_PROJECT_ID.
-# Without it we stay in legacy mode (Agrim's config.json `platforms`), so all
-# existing Agrim tests behave exactly as before.
+# Without it we stay in legacy mode (config.json `platforms`), so existing
 
 def _ats_root():
     return os.environ.get("ATS_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -61,13 +60,9 @@ def _project_storage_state(project):
 
 # ── Config loading ──
 def _load_config():
-    """Load config.json from the ATS root directory."""
-    ats_root = os.environ.get("ATS_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    config_path = os.path.join(ats_root, "config.json")
-    if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    """Load config.json from the ATS root directory (bootstrap from example if missing)."""
+    from config_loader import load_config
+    return load_config()
 
 
 # ── Register custom marks to suppress warnings ──
@@ -606,14 +601,14 @@ def manual_input(request, results_dir):
 
 @pytest.fixture(scope="session")
 def active_project():
-    """The Project this run targets, or None for legacy (Agrim platforms) mode."""
+    """The Project this run targets, or None for legacy (config platforms) mode."""
     return _active_project()
 
 
 @pytest.fixture(scope="session")
 def seller_url(ats_config, active_project):
     """Base app URL for the active environment. In project mode this is the
-    project's URL; otherwise the Agrim seller-app URL (backward compatible)."""
+    project's URL; otherwise the seller platform URL from config (backward compatible)."""
     if active_project:
         return project_store.resolve_base_url(active_project, os.environ.get("ATS_ENV"))
     return _get_platform_url(ats_config, "seller")

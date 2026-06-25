@@ -1,5 +1,5 @@
 """
-Agrim ATS — Self-Healing Locators
+QAmate — Self-Healing Locators
 ==================================
 
 The foundation that lets generated tests survive UI changes instead of breaking

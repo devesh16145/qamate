@@ -1,5 +1,5 @@
 """
-Agrim ATS — App Explorer (L1)
+QAmate — App Explorer (L1)
 =============================
 
 Crawls a Project's web app and emits an **App Model**: the pages, their

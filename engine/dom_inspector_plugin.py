@@ -1,5 +1,5 @@
 """
-Agrim ATS — Coverage Snapshot pytest Plugin
+QAmate — Coverage Snapshot pytest Plugin
 
 When loaded into a pytest run (via `-p engine.dom_inspector_plugin`), this
 monkey-patches Playwright's sync `Locator` action methods so each user-visible

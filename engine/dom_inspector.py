@@ -1,5 +1,5 @@
 """
-Agrim ATS — DOM Inspector
+QAmate — DOM Inspector
 
 Replays a saved test case (or the live temp_recording.py) in a headless
 Playwright browser and snapshots interactive elements at each step.

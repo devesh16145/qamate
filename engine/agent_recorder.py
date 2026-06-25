@@ -1,5 +1,5 @@
 """
-Agrim ATS — Autonomous Recorder (AI replaces the manual Record step)
+QAmate — Autonomous Recorder (AI replaces the manual Record step)
 ====================================================================
 
 Instead of a human clicking through the app in Playwright codegen, an LLM

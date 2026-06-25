@@ -153,8 +153,8 @@ def test_summarize_empty():
 
 def test_load_shipped_tasks_file():
     tasks, defaults = ab.load_bench_tasks(ab.DEFAULT_TASKS)
-    assert len(tasks) >= 10
-    assert defaults.get("project")
+    assert len(tasks) >= 3
+    assert "project" in defaults
     ids = [t["id"] for t in tasks]
     assert len(ids) == len(set(ids)), "bench task ids must be unique"
     for t in tasks:
@@ -282,10 +282,10 @@ def test_run_task_hang_times_out(tmp_path):
 
 def test_child_env_defaults_dev_seller_index(monkeypatch):
     monkeypatch.delenv("ATS_SELLER_USER_INDEX", raising=False)
-    e = ab._child_env("/r", "dev")
-    assert e["ATS_SELLER_USER_INDEX"] == "1"   # dev index 0 is a stale account
-    monkeypatch.setenv("ATS_SELLER_USER_INDEX", "0")
     assert "ATS_SELLER_USER_INDEX" not in ab._child_env("/r", "dev")
+    monkeypatch.setenv("ATS_SELLER_USER_INDEX", "2")
+    assert ab._child_env("/r", "dev")["ATS_SELLER_USER_INDEX"] == "2"
+    monkeypatch.delenv("ATS_SELLER_USER_INDEX", raising=False)
     assert "ATS_SELLER_USER_INDEX" not in ab._child_env("/r", "staging")
 
 

@@ -1,7 +1,7 @@
 {
-  "name": "agrim-ats",
+  "name": "qamate",
   "version": "1.0.0",
-  "description": "Agrim Seller App - Automated Testing System",
+  "description": "QAmate — AI-assisted E2E testing with self-healing locators",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

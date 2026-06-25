@@ -518,10 +518,10 @@ def test_collect_check_no_match_reported(tmp_path):
 
 def test_leading_nav_synthesized_from_first_step_url():
     steps = [{"id": 1, "type": "fill", "rawLine": 'page.get_by_role("textbox").fill("x")',
-              "url": "https://admin-dev.agrim.app/#/oms/po/all/create"}]
+              "url": "https://app.example.com/#/orders/create"}]
     out = ac._ensure_leading_navigation(steps)
     assert len(out) == 2 and out[0]["type"] == "navigate"
-    assert out[0]["rawLine"] == 'page.goto("https://admin-dev.agrim.app/#/oms/po/all/create")'
+    assert out[0]["rawLine"] == 'page.goto("https://app.example.com/#/orders/create")'
     compile(out[0]["rawLine"], "<rawline>", "exec")
 
 

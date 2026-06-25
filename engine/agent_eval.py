@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Agrim ATS - Agent Reliability Eval Harness
+QAmate - Agent Reliability Eval Harness
 ==========================================
 
 Turns "the agent authors reliable tests" from a CLAIM into a NUMBER.

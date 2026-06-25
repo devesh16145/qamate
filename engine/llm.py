@@ -1,5 +1,5 @@
 """
-Agrim ATS — Pluggable LLM layer
+QAmate — Pluggable LLM layer
 ===============================
 
 Provider-agnostic LLM access for the PRD Extractor (L2) and Test Synthesizer

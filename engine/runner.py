@@ -1,5 +1,5 @@
 """
-Agrim ATS — Test Runner Engine
+QAmate — Test Runner Engine
 
 This script is spawned by the Electron main process as a child process.
 It receives JSON commands on stdin and emits JSON events on stdout.
@@ -126,7 +126,7 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     test_env = os.environ.copy()
     test_env["ATS_ENV"] = env
     # Project mode: when set, conftest targets this project's URL + captured auth
-    # instead of the legacy Agrim platforms config.
+    # instead of the legacy platforms config.
     if project_id:
         test_env["ATS_PROJECT_ID"] = project_id
     test_env["ATS_RESULTS_DIR"] = results_dir

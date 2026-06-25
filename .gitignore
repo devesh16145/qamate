@@ -1,3 +1,6 @@
+# Local secrets — never commit (use config.example.json as template)
+config.json
+
 # Python
 venv/
 __pycache__/
@@ -42,3 +45,34 @@ Desktop.ini
 # Claude session scratch
 _backups/
 scratch/
+
+# Ops / exploration scripts with credentials or Agrim-specific knowledge
+capture_admin_auth.py
+run_explore.py
+run_autonomous.py
+PO_CREATION_FLOW_DISCOVERY.md
+ATS_TEST_PATTERNS.md
+
+# Debug artifacts
+debug_*
+.playwright-mcp/
+admin_bundle.js
+*_exploration_results.json
+last_run.txt
+disassemble.py
+
+# Private product-specific test suites (keep locally; not published)
+tests/flows/catalog/
+tests/flows/orders/
+tests/flows/admin/
+tests/flows/sign_in/
+tests/flows/sign_up/
+tests/flows/dashboard/
+tests/flows/payments/
+tests/flows/returns/
+tests/flows/deductions/
+tests/flows/sor/
+tests/flows/account_statement/
+tests/flows/bench_catalog/
+engine/cart_create_compare.py
+engine/backend_compare.py

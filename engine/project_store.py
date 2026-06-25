@@ -1,10 +1,10 @@
 """
-Agrim ATS — Project Store
+QAmate — Project Store
 =========================
 
 A **Project** is the unit a customer points the tool at: one web app, its
 environments, how to log in, which LLM provider to use, and its PRD. This is the
-generalization that turns the (formerly Agrim-hardcoded) engine into a tool any
+generalization that turns a single-app engine into a tool any
 team can run against their own app.
 
 Layout (all under <ats_root>/projects/):
@@ -79,7 +79,7 @@ def storage_state_path(ats_root, project_id):
 
 # ── Per-project test suite ────────────────────────────────────────────────────
 # Each project owns its OWN tests (projects/<id>/tests/flows/...), so a new
-# project starts empty — the legacy Agrim suite (<ats_root>/tests) is used only
+# project starts empty — the legacy built-in suite (<ats_root>/tests) is used only
 # when no project is targeted. The same flows/<flow>/{test_*.py, test_cases.json,
 # test_data.json} layout applies in both, so every existing tool works unchanged.
 
@@ -159,7 +159,7 @@ def requirements_path(ats_root, project_id):
 
 def context_dir(ats_root, project_id):
     """Managed folder of context files. projects/<id>/context/ — or, when there is
-    no project (legacy Agrim), <ats_root>/.agent_context/."""
+    no project (legacy mode), <ats_root>/.agent_context/."""
     if project_id:
         return os.path.join(project_dir(ats_root, project_id), "context")
     return os.path.join(ats_root, ".agent_context")

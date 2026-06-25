@@ -31,9 +31,9 @@ def test_known_value_exact_normalized():
 
 
 def test_text_containment_for_long_values():
-    texts = [("user-message", "Create a cart for customer Supertech Limited with COD payment")]
-    assert find_provenance("Supertech Limited", texts, []) == "user-message"
-    assert find_provenance("Acme Corp", texts, []) is None
+    texts = [("user-message", "Create a cart for customer Acme Corporation with COD payment")]
+    assert find_provenance("Acme Corporation", texts, []) == "user-message"
+    assert find_provenance("Globex Industries", texts, []) is None
 
 
 def test_short_values_need_word_boundary():
@@ -50,9 +50,9 @@ def test_unknown_value_returns_none():
 
 def test_tracker_accumulates_sources():
     t = ProvenanceTracker()
-    assert t.check("Supertech") is None
-    t.add_text("please use Supertech as the customer", "user-message")
-    assert t.check("Supertech") == "user-message"
+    assert t.check("Acme") is None
+    t.add_text("please use Acme as the customer", "user-message")
+    assert t.check("Acme") == "user-message"
     t.add_value("SKU-99", "page-option")
     assert t.check("sku-99") == "page-option"
 
@@ -84,11 +84,11 @@ def test_gate_passthrough_when_no_tracker():
 
 def test_gate_known_value_passes_in_guided():
     t = ProvenanceTracker()
-    t.add_text("fill the customer with Supertech Limited")
+    t.add_text("fill the customer with Acme Corporation")
     q = asyncio.Queue()                     # must stay untouched
     ctx = _fake_ctx("guided", t, q)
-    out = asyncio.run(ac._value_gate(ctx, "customer", "Supertech Limited", "fill"))
-    assert out == "Supertech Limited"
+    out = asyncio.run(ac._value_gate(ctx, "customer", "Acme Corporation", "fill"))
+    assert out == "Acme Corporation"
     assert q.qsize() == 0
     assert ctx.deps.session.assumptions == []
 

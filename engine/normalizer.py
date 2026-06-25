@@ -157,8 +157,8 @@ def infer_hints(model):
 
 def match_option(options, value):
     """Pick the dropdown option that best matches `value`. Handles decorated
-    option text like 'SUPERTECH LIMITED(9850763440)SUPERTECH INDIA PVT LTD.'
-    when the agent asked for 'SUPERTECH LIMITED'. Returns the option string
+    option text like 'ACME CORP LIMITED(5551234567)ACME CORP INDIA PVT LTD.'
+    when the agent asked for 'ACME CORP LIMITED'. Returns the option string
     to click, or None."""
     if not options:
         return None

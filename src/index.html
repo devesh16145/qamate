@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Agrim ATS — IDE</title>
+  <title>QAmate — IDE</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -828,7 +828,7 @@ function ArtifactPicker({ tcId, selected, onChange }) {
 function JiraModal({ tcId, flowId, description, initialType, isTab, onClose, toast }) {
   const startType = initialType === 'Story' ? 'Story' : 'Bug';
   const prefix = startType === 'Story' ? 'STORY' : 'BUG';
-  const bugDesc = `Test Case: ${tcId}\nStatus: FAILED\nEnvironment: Dev\nDetected by: Agrim ATS (automated)\n\n${description ? 'Description: ' + description + '\n\n' : ''}--- Steps to Reproduce ---\n1. Open Agrim ATS\n2. Select test case ${tcId}\n3. Click Run\n4. Observe failure`;
+  const bugDesc = `Test Case: ${tcId}\nStatus: FAILED\nEnvironment: Dev\nDetected by: QAmate (automated)\n\n${description ? 'Description: ' + description + '\n\n' : ''}--- Steps to Reproduce ---\n1. Open QAmate\n2. Select test case ${tcId}\n3. Click Run\n4. Observe failure`;
   const storyDesc = `Test Case: ${tcId}\n${description ? 'Summary: ' + description + '\n\n' : ''}--- User Story ---\nAs a <role>\nI want <capability>\nSo that <benefit>\n\n--- Acceptance Criteria ---\n- \n- `;
   const [summary, setSummary] = useState(`${prefix}: ${tcId} - ${description || (startType === 'Story' ? 'New capability' : 'Automated test failure')}`);
   const [desc, setDesc] = useState(startType === 'Story' ? storyDesc : bugDesc);
@@ -1646,7 +1646,7 @@ const nowTs = () => {
 /* ──────────────────────────────────────────────────────────────
    New Project modal — a project gets its OWN settings (URL/env/auth in
    projects/<id>/project.json) and its OWN empty test suite. Nothing is
-   inherited from the built-in Agrim suite.
+   inherited from the built-in default suite.
    ────────────────────────────────────────────────────────────── */
 function NewProjectModal({ onClose, onCreated, toast }) {
   const [name, setName] = useState('');
@@ -1901,7 +1901,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
         {projOpen && (
           <div className="dd-menu" style={{ minWidth: 230, top: 'calc(100% + 4px)' }}>
             <button onClick={() => switchProject(null)}>
-              <span style={{ fontWeight: !activeProj ? 700 : 400 }}>ATS (built-in suite)</span>
+              <span style={{ fontWeight: !activeProj ? 700 : 400 }}>QAmate (built-in suite)</span>
               {!activeProj && <span className="sub">active</span>}
             </button>
             {projects.length > 0 && <div className="div"></div>}
@@ -4840,10 +4840,10 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
 
           <div className="sheet-section">
             <h3>Jira Integration</h3>
-            <div className="field"><label>Jira URL</label><input value={config.jira?.url || ''} onChange={e => updateJira('url', e.target.value)} placeholder="https://agrim.atlassian.net" /></div>
-            <div className="field"><label>Email</label><input value={config.jira?.email || ''} onChange={e => updateJira('email', e.target.value)} placeholder="you@agrim.com" /></div>
+            <div className="field"><label>Jira URL</label><input value={config.jira?.url || ''} onChange={e => updateJira('url', e.target.value)} placeholder="https://your-org.atlassian.net" /></div>
+            <div className="field"><label>Email</label><input value={config.jira?.email || ''} onChange={e => updateJira('email', e.target.value)} placeholder="you@example.com" /></div>
             <div className="field"><label>API token</label><input type="password" value={config.jira?.apiToken || ''} onChange={e => updateJira('apiToken', e.target.value)} placeholder="••••••••••••••" /></div>
-            <div className="field"><label>Project key</label><input value={config.jira?.projectKey || ''} onChange={e => updateJira('projectKey', e.target.value)} placeholder="PM" /></div>
+            <div className="field"><label>Project key</label><input value={config.jira?.projectKey || ''} onChange={e => updateJira('projectKey', e.target.value)} placeholder="PROJ" /></div>
             <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
               <button className="editor-action" style={{ height: 26 }} onClick={testJira}><I.RefreshCw size={11} /> Test connection</button>
               {jiraStatus && <span style={{ fontSize: 11, color: jiraStatusColor }}>{jiraStatus}</span>}

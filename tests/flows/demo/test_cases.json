@@ -1,0 +1,37 @@
+[
+  {
+    "tc_id": "TC-DEMO-001",
+    "module": "Demo",
+    "description": "Playwright docs homepage loads with primary navigation",
+    "preconditions": "Internet access to playwright.dev",
+    "checkpoints": [
+      "Navigate to https://playwright.dev/",
+      "Verify Get started link is visible"
+    ],
+    "expected_result": "Homepage loads and the Get started call-to-action is visible"
+  },
+  {
+    "tc_id": "TC-DEMO-002",
+    "module": "Demo",
+    "description": "Get started link opens the documentation section",
+    "preconditions": "Internet access to playwright.dev",
+    "checkpoints": [
+      "Open Playwright docs homepage",
+      "Click Get started",
+      "Verify URL navigates to the docs section"
+    ],
+    "expected_result": "User reaches the Playwright documentation pages"
+  },
+  {
+    "tc_id": "TC-DEMO-003",
+    "module": "Demo",
+    "description": "Docs search input is reachable from the intro page",
+    "preconditions": "Internet access to playwright.dev",
+    "checkpoints": [
+      "Navigate to Playwright docs intro",
+      "Verify page heading is visible",
+      "Verify search input is present"
+    ],
+    "expected_result": "Documentation intro page renders with heading and search"
+  }
+]

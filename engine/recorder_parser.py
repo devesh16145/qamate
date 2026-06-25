@@ -1,5 +1,5 @@
 """
-Agrim ATS - Recording Parser
+QAmate - Recording Parser
 Parses Playwright codegen output into structured steps and generates
 test code with user-defined assertions. No coding required from user.
 """
@@ -883,7 +883,7 @@ def generate_from_review(payload, ats_root, tests_dir=None):
                     # Strip the leading slash from the extracted path —
                     # admin_url / base_url already end with `/` (per conftest's
                     # _get_platform_url), so naive concatenation produces a
-                    # double slash like `https://admin-dev.agrim.app//#/login`.
+                    # double slash like `https://app.example.com//#/login`.
                     # Some hosting layers (S3 / CloudFront on admin-dev) reject
                     # double-slash paths with AccessDenied.
                     path = path_match.group(1).lstrip("/")
@@ -1152,11 +1152,12 @@ def generate_from_review(payload, ats_root, tests_dir=None):
     _records_login = ("password" in _flow_blob.lower()) or bool(re.search(r"goto\([^)]*login", _flow_blob))
     if _records_login:
         page_fixture = "page"
-    elif ("admin-dev" in _flow_blob or "admin-staging" in _flow_blob
-          or "admin_url" in _flow_blob or "//admin" in _flow_blob):
+    elif re.search(r"\badmin_page\b", _flow_blob) or "admin_url" in _flow_blob:
         page_fixture = "admin_page"
-    else:
+    elif re.search(r"\bseller_page\b", _flow_blob) or "seller_url" in _flow_blob:
         page_fixture = "seller_page"
+    else:
+        page_fixture = "page"
 
     func_code = f'\n\n@pytest.mark.tc("{tc_id}")\n'
     _extra_fixtures = ", manual_input" if uses_manual_input else ""

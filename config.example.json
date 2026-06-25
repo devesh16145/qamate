@@ -1,0 +1,95 @@
+{
+  "_comment": "QAmate local configuration. Copy to config.json on first run (or let the app do it automatically). Never commit config.json — it may contain credentials.",
+  "environments": {
+    "dev": {
+      "name": "Development",
+      "is_default": true
+    },
+    "staging": {
+      "name": "Staging"
+    }
+  },
+  "platforms": {
+    "app": {
+      "name": "Application",
+      "urls": {
+        "dev": "https://playwright.dev/",
+        "staging": "https://playwright.dev/"
+      },
+      "login_path": "login",
+      "users": []
+    }
+  },
+  "browser_backend": "native",
+  "_browser_backend_comment": "Browser layer: 'native' (Python Playwright, default) or 'mcp' (Playwright MCP server, experimental).",
+  "browser": {
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "device_scale_factor": 1
+  },
+  "execution": {
+    "default_mode": "headed",
+    "parallel_workers": 2,
+    "slow_motion_ms": 0,
+    "browser": "chromium",
+    "timeout_ms": 30000
+  },
+  "video": {
+    "enabled": true,
+    "resolution": {
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "screenshots": {
+    "on_every_step": true,
+    "on_failure": true
+  },
+  "tracing": {
+    "mode": "retain-on-failure"
+  },
+  "network": {
+    "capture": true,
+    "api_only": true,
+    "max_body_kb": 20
+  },
+  "pass_criteria": {
+    "mode": "critical_only",
+    "threshold_pct": 90,
+    "treat_skipped_as": "ignore",
+    "default_severity": "critical",
+    "retries": 1,
+    "flaky_label": true
+  },
+  "llm": {
+    "default_provider": "mock",
+    "providers": {
+      "mock": {},
+      "anthropic": {
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ATS_ANTHROPIC_KEY",
+        "max_tokens": 4096
+      },
+      "openai": {
+        "model": "gpt-4o",
+        "api_key_env": "ATS_OPENAI_KEY",
+        "max_tokens": 4096
+      },
+      "ollama": {
+        "model": "llama3.1",
+        "base_url": "http://localhost:11434",
+        "max_tokens": 4096
+      }
+    },
+    "_comment": "API keys are NEVER stored here — only env-var names. Set keys in QAmate Settings or your shell environment."
+  },
+  "jira": {
+    "url": "",
+    "email": "",
+    "apiToken": "",
+    "projectKey": ""
+  },
+  "default_environment": "dev"
+}

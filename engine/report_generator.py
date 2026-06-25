@@ -28,7 +28,7 @@ def generate_report(results_dir):
     ws_summary.title = "Execution Summary"
     
     ws_summary.merge_cells("A1:E1")
-    ws_summary["A1"] = "Agrim Seller App - Test Execution Report"
+    ws_summary["A1"] = "QAmate - Test Execution Report"
     ws_summary["A1"].font = Font(bold=True, size=16, color="2F5496")
     ws_summary["A1"].alignment = Alignment(horizontal="center")
 

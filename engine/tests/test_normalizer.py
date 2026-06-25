@@ -103,11 +103,11 @@ def test_hidden_text_input_gets_no_force_hint():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# match_option — decorated portal option labels (SUPERTECH case)
+# match_option — decorated portal option labels (ACME CORP case)
 # ──────────────────────────────────────────────────────────────────────────────
 
 OPTIONS = [
-    "SUPERTECH LIMITED(9850763440)SUPERTECH INDIA PVT LTD.",
+    "ACME CORP LIMITED(9850763440)ACME CORP INDIA PVT LTD.",
     "Acme Traders",
     "Test Brand",
 ]
@@ -118,7 +118,7 @@ def test_match_exact_case_insensitive():
 
 
 def test_match_value_inside_decorated_option():
-    assert match_option(OPTIONS, "SUPERTECH LIMITED") == OPTIONS[0]
+    assert match_option(OPTIONS, "ACME CORP LIMITED") == OPTIONS[0]
 
 
 def test_match_prefers_exact_over_contains():
@@ -127,11 +127,11 @@ def test_match_prefers_exact_over_contains():
 
 
 def test_match_option_inside_value():
-    assert match_option(["Supertech"], "Supertech Limited") == "Supertech"
+    assert match_option(["Acme"], "Acme Limited") == "Acme"
 
 
 def test_match_token_overlap():
-    assert match_option(["LIMITED SUPERTECH co."], "supertech limited") == "LIMITED SUPERTECH co."
+    assert match_option(["LIMITED ACME CORP co."], "acme corp limited") == "LIMITED ACME CORP co."
 
 
 def test_match_none_when_unrelated():
@@ -189,9 +189,9 @@ def test_model_input_named_from_associated_label():
 
 def test_empty_state_options_filtered():
     s = _bare_session()
-    opts = ['No customers found for "Supertech"Try a different search term',
-            "Please wait...", "Loading...", "SUPERTECH LIMITED(985)IND"]
-    assert s._real_options(opts) == ["SUPERTECH LIMITED(985)IND"]
+    opts = ['No customers found for "Acme"Try a different search term',
+            "Please wait...", "Loading...", "ACME CORP LIMITED(985)IND"]
+    assert s._real_options(opts) == ["ACME CORP LIMITED(985)IND"]
 
 
 def test_loading_re_subset_of_empty_state():
@@ -254,10 +254,10 @@ def _bare_session():
 
 def test_record_option_click_role_option_rawline():
     s = _bare_session()
-    s._record_option_click("SUPERTECH LIMITED", "role-option")
+    s._record_option_click("ACME CORP LIMITED", "role-option")
     assert len(s.steps) == 1
     raw = s.steps[0]["rawLine"]
-    assert raw == 'page.get_by_role("option").filter(has_text="SUPERTECH LIMITED").first.click()'
+    assert raw == 'page.get_by_role("option").filter(has_text="ACME CORP LIMITED").first.click()'
     assert s.steps[0]["type"] == "click"
 
 

@@ -1,125 +1,33 @@
 {
-  "_note": "Authoring benchmark for the conversational agent (engine/agent_bench.py). Each task is a fixed prompt the agent must turn into a delivered, passing test case. tc_id/flow_id are DICTATED so scoring and cleanup are deterministic; every flow is prefixed bench_ (the bench only ever deletes flows/bench_*). Difficulty spread: easy = sanity floor (should stay ~100%), medium = real user flows, hard = the known failure modes (scroll-to-find, modals end-to-end, admin MUI autocomplete, vague wording). Run: venv\\Scripts\\python engine\\agent_bench.py",
+  "_note": "Authoring benchmark for the conversational agent (engine/agent_bench.py). Each task is a fixed prompt the agent must turn into a delivered, passing test case. flow_id must start with bench_. Run: venv\\Scripts\\python engine\\agent_bench.py",
   "defaults": {
-    "project": "test",
+    "project": null,
     "env": "dev"
   },
   "tasks": [
     {
       "id": "BENCH-001",
       "tc_id": "TC-BENCH-001",
-      "flow_id": "bench_catalog",
-      "app": "seller",
+      "flow_id": "bench_demo",
       "difficulty": "easy",
-      "probe": "baseline navigation + visibility assertion",
-      "prompt": "Create a test that verifies the Catalog page loads correctly: product cards are visible and the search bar is present. Save it as test case TC-BENCH-001 in flow bench_catalog, verify it passes, then stop."
+      "probe": "public site navigation + visibility assertion",
+      "prompt": "Go to https://playwright.dev/ and create a test that verifies the homepage loads and the 'Get started' link is visible. Save it as test case TC-BENCH-001 in flow bench_demo, verify it passes, then stop."
     },
     {
       "id": "BENCH-002",
       "tc_id": "TC-BENCH-002",
-      "flow_id": "bench_orders",
-      "app": "seller",
-      "difficulty": "easy",
-      "probe": "second page surface, stats assertion",
-      "prompt": "Create a test that opens the Orders page and verifies it loads with the order stats summary visible at the top. Save it as test case TC-BENCH-002 in flow bench_orders, verify it passes, then stop."
+      "flow_id": "bench_demo",
+      "difficulty": "medium",
+      "probe": "click navigation + URL assertion",
+      "prompt": "Create a test on https://playwright.dev/: open the homepage, click 'Get started', and verify the browser navigates to a /docs/ page. Save it as test case TC-BENCH-002 in flow bench_demo, verify it passes, then stop."
     },
     {
       "id": "BENCH-003",
       "tc_id": "TC-BENCH-003",
-      "flow_id": "bench_catalog",
-      "app": "seller",
+      "flow_id": "bench_demo",
       "difficulty": "medium",
-      "probe": "data-drift resilience: test data must come from the live page, not a hardcoded guess",
-      "prompt": "Create a test for catalog search: it should pick a product that actually exists (use a name you can see on the catalog page), search for part of that name, and verify matching products appear in the results. Save it as test case TC-BENCH-003 in flow bench_catalog, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-004",
-      "tc_id": "TC-BENCH-004",
-      "flow_id": "bench_catalog",
-      "app": "seller",
-      "difficulty": "medium",
-      "probe": "dropdown ladder on seller app (open, search within, select, assert effect)",
-      "prompt": "Create a test that filters the catalog by Super Category: open the Super Category dropdown, choose one of the available options, and verify the product list updates to the filtered state. Save it as test case TC-BENCH-004 in flow bench_catalog, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-005",
-      "tc_id": "TC-BENCH-005",
-      "flow_id": "bench_orders",
-      "app": "seller",
-      "difficulty": "medium",
-      "probe": "multi-step flow: filter then drill into detail, assertion must survive data changes",
-      "prompt": "Create a test that filters the Orders page by one of the status tabs, opens the first order in the filtered list, and verifies the order detail view shows that same status. Save it as test case TC-BENCH-005 in flow bench_orders, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-006",
-      "tc_id": "TC-BENCH-006",
-      "flow_id": "bench_catalog",
-      "app": "seller",
-      "difficulty": "medium",
-      "probe": "negative path: form must NOT submit when empty",
-      "prompt": "Create a negative test for the Request Product form: open the Request Product modal and try to submit it without filling anything, then verify the form does not submit successfully (validation errors appear or the modal stays open). Save it as test case TC-BENCH-006 in flow bench_catalog, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-007",
-      "tc_id": "TC-BENCH-007",
-      "flow_id": "bench_catalog",
-      "app": "seller",
-      "difficulty": "hard",
-      "probe": "scroll-to-find: the button is below the viewport (~every 10th card)",
-      "prompt": "Somewhere in the catalog list there is a 'Create New Product' card (it appears between product cards as you scroll). Create a test that scrolls until it finds that card, opens the Create New Product modal from it, verifies the modal's form fields are present, and closes the modal without submitting. Save it as test case TC-BENCH-007 in flow bench_catalog, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-008",
-      "tc_id": "TC-BENCH-008",
-      "flow_id": "bench_catalog",
-      "app": "seller",
-      "difficulty": "hard",
-      "probe": "full modal flow end-to-end with submit + success assertion",
-      "prompt": "Create a test for the full Incorrect Product flow: from a product card, open the Incorrect Product modal, select an issue type, add a short comment, submit, and verify the submission succeeds. Save it as test case TC-BENCH-008 in flow bench_catalog, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-009",
-      "tc_id": "TC-BENCH-009",
-      "flow_id": "bench_admin",
-      "app": "admin",
-      "difficulty": "hard",
-      "tags": [
-        "admin"
-      ],
-      "probe": "admin panel MUI autocomplete + dependent-field assertion, idempotent (no save)",
-      "prompt": "On the admin panel, create a test that starts creating a new Purchase Order: open the new PO form, select a vendor using the vendor autocomplete, and verify the billing/shipping address fields auto-populate from the vendor profile. Do NOT save the PO - the test must end without creating anything. Save it as test case TC-BENCH-009 in flow bench_admin, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-010",
-      "tc_id": "TC-BENCH-010",
-      "flow_id": "bench_catalog",
-      "app": "seller",
-      "difficulty": "hard",
-      "probe": "adaptability: the prompt uses wrong control names ('product finder box') and demands an empty-state oracle; the agent must observe the real UI and map intent to it",
-      "prompt": "Using the product finder box at the top of the catalog, create a test that looks up the nonsense term 'zzqxv123' and verifies the catalog shows its empty/no-results state instead of product cards. Save it as test case TC-BENCH-010 in flow bench_catalog, verify it passes, then stop."
-    },
-    {
-      "id": "BENCH-011",
-      "tc_id": "TC-BENCH-011",
-      "flow_id": "bench_cart",
-      "app": "admin",
-      "difficulty": "epic",
-      "tags": ["admin"],
-      "timeout_s": 3300,
-      "probe": "PRD-driven negotiated-cart epic: create+close a SUPPLY negotiation ticket, thread its number into the cart, customer/SKU/seller autocompletes, master-pack qty validation, Credit payment, save-as-draft",
-      "prompt": "The complete cart-to-dispatch business flow is documented in the context file COMPLETE_LLM_FLOW_CART_TO_DISPATCH.md - read PHASE 1 (cart creation), especially Step 7 (negotiation tickets), before driving anything. This is a TWO-PART flow on the admin panel.\n\nPART A - Supply negotiation ticket: open the Negotiations module and create a SUPPLY negotiation ticket with: customer 'SUPERTECH LIMITED', SKU 'Testing Ajay Seeds Nantes Testing Ajay Seeds 1.5 Ltr Printed 1.2LTR', and seller 'M&M_Brand1' (the supplier for the special negotiated cost). Fill any required amounts with reasonable values. NOTE THE TICKET NUMBER the system assigns, then CLOSE the ticket - the cart only accepts closed tickets.\n\nPART B - Cart with the ticket: open the cart creation form (OMS > Carts > create); select customer 'SUPERTECH LIMITED' via the customer autocomplete; provide a shipping address (saved one if available, else add new); add the SKU 'Testing Ajay Seeds Nantes Testing Ajay Seeds 1.5 Ltr Printed 1.2LTR' with a quantity that satisfies the master-pack multiple rule (read and react to any quantity validation error); in the negotiation/discount section enter the ticket number from PART A and apply it - verify the supply discount is applied; select the CREDIT payment method; save the cart as Draft and verify it reaches Draft status. Do NOT send the cart to the customer - that triggers a real SMS/OTP.\n\nSave it as test case TC-BENCH-011 in flow bench_cart, verify it passes, then stop. NOTE: each authoring run creates a FRESH ticket; the recorded test will carry the ticket number captured during authoring - if the replay rejects ticket reuse, report that honestly rather than hiding it.",
-      "_feasibility": "phases 2-4 of the doc (customer OTP, payment, finance approval) are NOT unattended-automatable; this covers the directed admin half incl. the negotiation-ticket dependency. Dynamic data caveat: the ticket number is generated per run - replay validity depends on the app's closed-ticket reuse rules; if reuse is rejected this epic exposes the capture-and-reuse codegen gap (a known product-level limitation worth measuring)."
-    },
-    {
-      "id": "BENCH-012",
-      "tc_id": "TC-BENCH-012",
-      "flow_id": "bench_po",
-      "app": "seller",
-      "difficulty": "epic",
-      "timeout_s": 3000,
-      "probe": "PRD-driven stateful lifecycle epic: PO accept -> pack with file upload; each run CONSUMES an Issued PO, so the test must be authored generically (first PO in the Issued tab)",
-      "prompt": "Read PHASE 6 (purchase order lifecycle) of the context file COMPLETE_LLM_FLOW_CART_TO_DISPATCH.md before driving anything. On the Seller App, create a test for the PO accept-and-pack lifecycle slice: open Purchase Orders, switch to the 'Issued' status tab, open the FIRST issued PO's detail page, click Accept and confirm in the dialog, verify the order timeline marks Accepted; then click 'Mark as Packed' and complete the pack form - it requires a ready-proof image, use the upload_file tool with the standard test image - and verify the PO status becomes Packed. IMPORTANT: accepting a PO consumes it (it leaves the Issued tab), so author the test against the FIRST PO in the Issued tab generically, never a hardcoded PO number. If NO issued PO exists on dev right now, say so and deliver a test covering the deepest step that is reachable. Save it as test case TC-BENCH-012 in flow bench_po, verify it passes, then stop.",
-      "_feasibility": "data-dependent: needs Issued POs on dev (the orders suite and admin runs create them). State-mutating by nature - exactly the hard reality this epic tier measures."
+      "probe": "direct URL + search UI assertion",
+      "prompt": "Create a test that opens https://playwright.dev/docs/intro and verifies the page has a visible heading and a search input. Save it as test case TC-BENCH-003 in flow bench_demo, verify it passes, then stop."
     }
   ]
 }

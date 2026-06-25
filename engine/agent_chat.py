@@ -1,5 +1,5 @@
 """
-Agrim ATS — Conversational Agent (Pydantic AI)
+QAmate — Conversational Agent (Pydantic AI)
 ==============================================
 
 The autonomous explorer/test-author turned into a real **agent you can chat
@@ -2508,7 +2508,7 @@ class Deps:
 # ── System prompt ──────────────────────────────────────────────────────────
 
 _SYSTEM = (
-    "You are Agrim ATS's autonomous QA engineer. You operate a REAL Chromium browser "
+    "You are QAmate's autonomous QA engineer. You operate a REAL Chromium browser "
     "through tools to drive an app and author COMPLETE, runnable end-to-end test cases — "
     "full flows, not fragments.\n\n"
     "Operating loop:\n"

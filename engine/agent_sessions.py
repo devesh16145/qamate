@@ -1,5 +1,5 @@
 """
-Agrim ATS — Agent Sessions
+QAmate — Agent Sessions
 ==========================
 Persistent, resumable conversation sessions for the chat agent (engine/agent_chat.py).
 
@@ -14,7 +14,7 @@ Layout (under the project, mirroring project_store's context/memory split):
         messages.json    -> pydantic-ai model history (the authoritative memory restored on
                             resume) — written from result.all_messages()
         transcript.jsonl -> append-only UI bubbles for redraw (user/assistant/tool/...)
-No-project fallback (legacy Agrim): <ats_root>/.agent_context/agent_sessions/<sid>/
+No-project fallback (legacy mode): <ats_root>/.agent_context/agent_sessions/<sid>/
 
 Ownership split (same pattern as project_store.py + main.js):
   * Python (this module + agent_chat) owns messages.json — pydantic-ai (de)serialization —
@@ -53,7 +53,7 @@ SESSIONS_DIRNAME = "agent_sessions"
 
 def sessions_dir(ats_root, project_id):
     """Folder holding a project's sessions. projects/<id>/agent_sessions/ — or, when there
-    is no project (legacy Agrim), <ats_root>/.agent_context/agent_sessions/."""
+    is no project (legacy mode), <ats_root>/.agent_context/agent_sessions/."""
     if project_id:
         return os.path.join(project_store.project_dir(ats_root, project_id), SESSIONS_DIRNAME)
     return os.path.join(ats_root, ".agent_context", SESSIONS_DIRNAME)

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-Agrim ATS — self-check / doctor
+QAmate — self-check / doctor
 ===============================
 
 Verifies the self-healing locator engine and Playwright trace recording work
-end-to-end, headless, with NO dependency on the Agrim app or any login. Run it
-any time (and in CI) to confirm the new infrastructure is healthy:
+end-to-end, headless, with NO dependency on a specific app or login. Run it
+any time (and in CI) to confirm the infrastructure is healthy:
 
     venv\\Scripts\\python tools\\selfcheck.py        (Windows)
     venv/bin/python tools/selfcheck.py              (mac/Linux)
@@ -103,7 +103,7 @@ def main():
 
         browser.close()
 
-    print("\n=== Agrim ATS self-check ===")
+    print("\n=== QAmate self-check ===")
     all_ok = True
     for name, passed, detail in _results:
         suffix = f"  -- {detail}" if (detail and not passed) else ""
