@@ -364,6 +364,19 @@ function _llmEnv() {
   return env;
 }
 
+function _providerNeedsKey(providerId, cfg) {
+  if (!providerId || providerId === 'mock' || providerId === 'ollama') return false;
+  const p = cfg?.llm?.providers?.[providerId];
+  return !!(p && p.api_key_env);
+}
+
+function _isProviderConfigured(providerId, cfg) {
+  if (!_providerNeedsKey(providerId, cfg)) return true;
+  const env = cfg.llm.providers[providerId].api_key_env;
+  const secrets = _readSecrets();
+  return !!(secrets[env] || process.env[env]);
+}
+
 // ── Conversational AI Agent (engine/agent_chat.py) — concurrent persisted sessions ─
 // Each session is its own PERSISTENT child process driving its own browser, addressed by
 // a sessionId. We keep a Map<sessionId,{proc,buf,projectId}>; every stdout {event:...} line
@@ -540,6 +553,12 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
   }
   if (agentProcs.size >= AGENT_MAX_SESSIONS) {
     return { status: 'error', message: `Too many concurrent sessions (max ${AGENT_MAX_SESSIONS}). Stop one before starting another.` };
+  }
+  const cfg = loadConfig();
+  const prov = opts.provider || cfg.llm?.default_provider || 'mock';
+  if (!_isProviderConfigured(prov, cfg)) {
+    const env = cfg.llm?.providers?.[prov]?.api_key_env || prov;
+    return { status: 'error', message: `Add your ${prov} API key in Settings → AI / LLM (${env}), or set the ${env} environment variable.` };
   }
   try {
     _spawnAgent(sessionId, opts.projectId || null, {
@@ -856,9 +875,15 @@ ipcMain.handle('set-secret', async (e, { key, value }) => {
   catch (err) { return { status: 'error', message: err.message }; }
 });
 ipcMain.handle('get-secret-status', async () => {
+  const cfg = loadConfig();
   const s = _readSecrets();
   const keys = {};
   for (const k of Object.keys(s)) keys[k] = !!s[k];
+  const provs = cfg?.llm?.providers || {};
+  for (const p of Object.values(provs)) {
+    const env = p && p.api_key_env;
+    if (env && process.env[env]) keys[env] = true;
+  }
   return { status: 'success', keys, available: safeStorage.isEncryptionAvailable() };
 });
 

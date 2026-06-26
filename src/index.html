@@ -15,6 +15,7 @@
   
   <!-- Icons -->
   <script src="vendor/icons.js"></script>
+  <script src="llm_providers.js"></script>
 
   <!-- Shared AI Agent UI (same module as the agent window; rendered docked in the right panel) -->
   <script type="text/babel" src="agent_ui.js"></script>
@@ -4673,6 +4674,11 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
     providers[provider] = { ...(providers[provider] || {}), model };
     return { ...prev, llm: { ...llm, providers } };
   });
+  const updateLlmField = (provider, field, value) => setConfig(prev => {
+    const llm = prev.llm || {}; const providers = { ...(llm.providers || {}) };
+    providers[provider] = { ...(providers[provider] || {}), [field]: value };
+    return { ...prev, llm: { ...llm, providers } };
+  });
   const updatePassCriteria = (k, v) => setConfig(prev => ({ ...prev, pass_criteria: { ...(prev.pass_criteria || {}), [k]: v } }));
 
   useEffect(() => {
@@ -4880,51 +4886,35 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
           </div>
 
           <div className="sheet-section">
-            <h3>AI / LLM <span style={{ marginLeft: 6, fontSize: 9.5, color: 'var(--accent)', background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)', fontWeight: 600 }}>NEW</span></h3>
+            <h3>AI / LLM <span style={{ marginLeft: 6, fontSize: 9.5, color: 'var(--accent)', background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)', fontWeight: 600 }}>BYOK</span></h3>
             <div className="field">
               <label>Default provider</label>
-              <select value={config.llm?.default_provider || 'mimo'} onChange={e => updateLlm('default_provider', e.target.value)}>
-                <option value="mimo">Xiaomi MiMo (v2.5-pro)</option>
-                <option value="mimo-ultraspeed">Xiaomi MiMo Ultraspeed (reasoning)</option>
-                <option value="anthropic">Claude (Anthropic)</option>
-                <option value="openai">OpenAI</option>
-                <option value="ollama">Local (Ollama)</option>
-                <option value="mock">None — deterministic scaffold</option>
+              <select value={config.llm?.default_provider || (window.LlmProviders ? window.LlmProviders.defaultFromConfig(config) : 'mock')} onChange={e => updateLlm('default_provider', e.target.value)}>
+                {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).map(p => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
               </select>
             </div>
-            <div className="field"><label>MiMo model</label><input value={config.llm?.providers?.mimo?.model || ''} onChange={e => updateLlmModel('mimo', e.target.value)} placeholder="mimo-v2.5-pro" /></div>
-            <div className="field"><label>MiMo Ultraspeed model</label><input value={config.llm?.providers?.['mimo-ultraspeed']?.model || ''} onChange={e => updateLlmModel('mimo-ultraspeed', e.target.value)} placeholder="mimo-v2.5-pro-ultraspeed" /></div>
-            <div className="field">
-              <label>MiMo API key {secretStatus.MIMO_API_KEY && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input type="password" value={keyDraft.MIMO_API_KEY || ''} onChange={e => setKeyDraft(d => ({ ...d, MIMO_API_KEY: e.target.value }))} placeholder={secretStatus.MIMO_API_KEY ? '•••••••• (stored)' : 'from MIMO_API_KEY env or paste here'} />
-                <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey('MIMO_API_KEY')}>Save</button>
+            {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).map(p => (
+              <div key={p.id}>
+                {p.id !== 'mock' && (
+                  <div className="field"><label>{p.label} model</label><input value={config.llm?.providers?.[p.id]?.model || ''} onChange={e => updateLlmModel(p.id, e.target.value)} placeholder={p.model || p.id} /></div>
+                )}
+                {p.id === 'ollama' && (
+                  <div className="field"><label>Ollama base URL</label><input value={config.llm?.providers?.ollama?.base_url || ''} onChange={e => updateLlmField('ollama', 'base_url', e.target.value)} placeholder="http://localhost:11434/v1" /></div>
+                )}
               </div>
-            </div>
-            <div className="field">
-              <label>MiMo Ultraspeed key (separate plan) {secretStatus.MIMO_API_KEY2 && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input type="password" value={keyDraft.MIMO_API_KEY2 || ''} onChange={e => setKeyDraft(d => ({ ...d, MIMO_API_KEY2: e.target.value }))} placeholder={secretStatus.MIMO_API_KEY2 ? '•••••••• (stored)' : 'from MIMO_API_KEY2 env or paste here'} />
-                <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey('MIMO_API_KEY2')}>Save</button>
+            ))}
+            {(window.LlmProviders ? window.LlmProviders.keyFieldsFromConfig(config) : []).map(({ env, usedBy }) => (
+              <div className="field" key={env}>
+                <label>{usedBy.join(' / ')} API key ({env}) {secretStatus[env] && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input type="password" value={keyDraft[env] || ''} onChange={e => setKeyDraft(d => ({ ...d, [env]: e.target.value }))} placeholder={secretStatus[env] ? '•••••••• (stored)' : `paste key or set ${env} in your environment`} />
+                  <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey(env)}>Save</button>
+                </div>
               </div>
-            </div>
-            <div className="field"><label>Claude model</label><input value={config.llm?.providers?.anthropic?.model || ''} onChange={e => updateLlmModel('anthropic', e.target.value)} placeholder="claude-opus-4-8" /></div>
-            <div className="field">
-              <label>Claude API key {secretStatus.ATS_ANTHROPIC_KEY && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input type="password" value={keyDraft.ATS_ANTHROPIC_KEY || ''} onChange={e => setKeyDraft(d => ({ ...d, ATS_ANTHROPIC_KEY: e.target.value }))} placeholder={secretStatus.ATS_ANTHROPIC_KEY ? '•••••••• (stored)' : 'sk-ant-…'} />
-                <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey('ATS_ANTHROPIC_KEY')}>Save</button>
-              </div>
-            </div>
-            <div className="field"><label>OpenAI model</label><input value={config.llm?.providers?.openai?.model || ''} onChange={e => updateLlmModel('openai', e.target.value)} placeholder="gpt-4o" /></div>
-            <div className="field">
-              <label>OpenAI API key {secretStatus.ATS_OPENAI_KEY && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input type="password" value={keyDraft.ATS_OPENAI_KEY || ''} onChange={e => setKeyDraft(d => ({ ...d, ATS_OPENAI_KEY: e.target.value }))} placeholder={secretStatus.ATS_OPENAI_KEY ? '•••••••• (stored)' : 'sk-…'} />
-                <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey('ATS_OPENAI_KEY')}>Save</button>
-              </div>
-            </div>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 6 }}>Keys are encrypted in your OS keychain — never written to config or the repo. Used by PRD extraction &amp; test synthesis.</p>
+            ))}
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 6 }}>Bring your own key — encrypted in your OS keychain, never written to config or the repo. Default <code style={{ fontFamily: 'var(--mono)' }}>mock</code> works offline with no key. Cloud providers need a key here or via the matching env var.</p>
           </div>
 
           <div className="sheet-section">

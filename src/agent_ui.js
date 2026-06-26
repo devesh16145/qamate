@@ -496,16 +496,18 @@
     );
   }
   /* Session setup controls — identical everywhere a session can be (re)started. */
-  function SetupBar({ provider, setProvider, headed, setHeaded, toolBudget, setToolBudget, mode, onToggleMode, children }) {
+  function SetupBar({ provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget, mode, onToggleMode, children }) {
+    const LP = window.LlmProviders;
+    const list = providerList || (LP && llmConfig ? LP.listFromConfig(llmConfig) : []);
+    const configured = !LP || !llmConfig || LP.isConfigured(provider, llmConfig, secretKeys || {});
     return (
       <React.Fragment>
-        <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider for this session" style={{ fontSize: 11, padding: '3px 6px' }}>
-          <option value="mimo">Xiaomi MiMo</option>
-          <option value="mimo-ultraspeed">MiMo Ultraspeed</option>
-          <option value="anthropic">Claude (Anthropic)</option>
-          <option value="openai">OpenAI</option>
-          <option value="ollama">Local (Ollama)</option>
+        <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider for this session" style={{ fontSize: 11, padding: '3px 6px', borderColor: configured ? undefined : 'var(--fail, #dc2626)' }}>
+          {list.map((p) => <option key={p.id} value={p.id}>{p.label}{p.needsKey && secretKeys && !LP.isConfigured(p.id, llmConfig, secretKeys) ? ' (key needed)' : ''}</option>)}
         </select>
+        {!configured && LP && (
+          <span title={LP.missingKeyMessage(provider, llmConfig)} style={{ fontSize: 10, color: 'var(--fail, #dc2626)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Key required</span>
+        )}
         <ModeChip mode={mode} onToggle={onToggleMode} />
         <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Show the automation browser window while the agent works">
           <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
@@ -629,7 +631,7 @@
 
   /* ── Active session chat (ALWAYS rendered with a real session — no conditional
      hooks; the "no session" case is handled by AgentApp, never here) ────────── */
-  function SessionChat({ session, rt, provider, setProvider, headed, setHeaded, toolBudget, setToolBudget,
+  function SessionChat({ session, rt, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
                          startMode, setStartMode, onStart, onStartAuto, onSend, onStop, onReset, onOpenBrowser,
                          onToggleMode, setInput, setAttachments, projectId, toast, onBack }) {
     const scrollRef = useRef(null);
@@ -926,7 +928,8 @@
                 onConfirm={(msg) => { setAutoOpen(false); onStartAuto(msg, []); }} />
             )}
             <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '12px 14px' }}>
-              <SetupBar provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+              <SetupBar provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
+                headed={headed} setHeaded={setHeaded}
                 toolBudget={toolBudget} setToolBudget={setToolBudget}
                 mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
                 {onStartAuto && (
@@ -991,7 +994,7 @@
 
   /* ── Root ────────────────────────────────────────────────────────────────── */
   /* ── Chat initiator: compose a first message to start a brand-new session ──── */
-  function StartComposer({ onStart, provider, setProvider, headed, setHeaded, toolBudget, setToolBudget,
+  function StartComposer({ onStart, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
                            startMode, setStartMode, onOpenBrowser, projectId }) {
     const [text, setText] = useState('');
     const [atts, setAtts] = useState([]);
@@ -1022,7 +1025,8 @@
         <div className="ses-init-bar">
           <button className="rv-cta sm" onClick={addFiles} title="Attach documents or images"><Ic.Upload size={13} /></button>
           <button className="rv-cta sm" onClick={onOpenBrowser} title="Open the app under test in your browser"><Ic.ExternalLink size={13} /></button>
-          <SetupBar provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+          <SetupBar provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
+            headed={headed} setHeaded={setHeaded}
             toolBudget={toolBudget} setToolBudget={setToolBudget}
             mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
             <button className="rv-cta sm" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised">
@@ -1219,7 +1223,13 @@
     const [sessions, setSessions] = useState([]);
     const [activeId, setActiveId] = useState(null);
     const [runtime, setRuntime] = useState({});
-    const [provider, setProvider] = useState('mimo');
+    const [provider, setProvider] = useState('mock');
+    const [llmConfig, setLlmConfig] = useState(null);
+    const [secretKeys, setSecretKeys] = useState({});
+    const providerList = useMemo(() => {
+      const LP = window.LlmProviders;
+      return LP && llmConfig ? LP.listFromConfig(llmConfig) : [];
+    }, [llmConfig]);
     const [startMode, setStartMode] = useState('auto');   // initial GUIDED/AUTO for new sessions
     const [headed, setHeaded] = useState(false);
     const [toolBudget, setToolBudget] = useState(30);
@@ -1249,7 +1259,26 @@
         setProjects((r && r.projects) || []);
         if (r && r.active) setProjectId(r.active);
       }).catch(() => {});
+      Promise.all([window.ats.getConfig(), window.ats.getSecretStatus()]).then(([cfg, st]) => {
+        const c = cfg || {};
+        setLlmConfig(c);
+        const keys = (st && st.keys) || {};
+        setSecretKeys(keys);
+        const LP = window.LlmProviders;
+        if (LP) setProvider(LP.defaultFromConfig(c));
+      }).catch(() => {});
     }, []);
+
+    const ensureProviderKey = useCallback(async () => {
+      const LP = window.LlmProviders;
+      if (!LP || !llmConfig) return true;
+      const st = await window.ats.getSecretStatus().catch(() => null);
+      const keys = (st && st.keys) || secretKeys;
+      setSecretKeys(keys);
+      if (LP.isConfigured(provider, llmConfig, keys)) return true;
+      toast(LP.missingKeyMessage(provider, llmConfig));
+      return false;
+    }, [provider, llmConfig, secretKeys]);
 
     useEffect(() => { refreshSessions(projectId); }, [projectId, refreshSessions]);
 
@@ -1302,6 +1331,7 @@
     };
     const onStart = async () => {
       const sid = activeId; if (!sid) return;
+      if (!(await ensureProviderKey())) return;
       const sess = sessions.find((s) => s.id === sid) || {};
       patchRt(sid, (cur) => ({ status: 'starting', messages: [...cur.messages, { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' }] }));
       const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: sess.title || '' });
@@ -1309,6 +1339,7 @@
     };
     // Compose-to-start: create a session, start it, and queue the first message (sent on 'ready').
     const startWithMessage = async (text, atts) => {
+      if (!(await ensureProviderKey())) return;
       const r = await window.ats.agentNewSession({ projectId, title: '' });
       if (!r || !r.session) { toast('Could not start a session'); return; }
       const sid = r.session.id;
@@ -1381,7 +1412,8 @@
     const activeRt = activeId ? (runtime[activeId] || emptyRuntime()) : null;
     const renderChat = (onBack) => (
       <SessionChat session={activeSession} rt={activeRt}
-        provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+        provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
+        headed={headed} setHeaded={setHeaded}
         toolBudget={toolBudget} setToolBudget={setToolBudget}
         startMode={startMode} setStartMode={setStartMode}
         onStart={onStart} onStartAuto={startWithMessage} onSend={onSend} onStop={onStop} onReset={onReset}
@@ -1391,7 +1423,8 @@
         projectId={projectId} toast={toast} onBack={onBack} />
     );
     const initiator = <StartComposer onStart={startWithMessage}
-      provider={provider} setProvider={setProvider} headed={headed} setHeaded={setHeaded}
+      provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
+      headed={headed} setHeaded={setHeaded}
       toolBudget={toolBudget} setToolBudget={setToolBudget}
       startMode={startMode} setStartMode={setStartMode}
       onOpenBrowser={openBrowser} projectId={projectId} />;

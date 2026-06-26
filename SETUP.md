@@ -2,7 +2,7 @@
 
 ## First run
 
-1. Install dependencies (see root `run_ats.bat` or README).
+1. Install dependencies (see [README](README.md#install)).
 2. On first launch, QAmate copies `config.example.json` → `config.json` if `config.json` is missing.
 3. Open **Settings** and configure:
    - Platform URLs and test users
@@ -24,6 +24,20 @@ Product-specific flows (catalog, orders, admin, etc.) are **gitignored**. Clone 
 ```bat
 venv\Scripts\pytest tests\flows\demo\ -v
 ```
+
+## AI agent (BYOK)
+
+QAmate is **bring-your-own-key** for cloud LLMs:
+
+1. Open **Settings → AI / LLM**
+2. Pick a **default provider** (`mock` works offline with no key)
+3. For Anthropic, OpenAI, or other cloud providers: paste your API key and click **Save**
+
+Keys are encrypted with your OS keychain (`safeStorage`) and stored in `%APPDATA%/qamate/ats_secrets.json` (or the Electron app userData path). They are **never** written to `config.json` or committed to git.
+
+Alternatively, set the env var named in `config.example.json` (e.g. `ATS_ANTHROPIC_KEY`, `ATS_OPENAI_KEY`) before launching QAmate.
+
+The agent UI blocks session start if the selected provider needs a key that is not configured. You can override the default per session from the provider dropdown in the agent panel.
 
 ## Environment variables
 

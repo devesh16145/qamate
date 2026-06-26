@@ -42,7 +42,7 @@ class LLMNotConfigured(LLMError):
 
 
 DEFAULT_LLM_CONFIG = {
-    "default_provider": "mimo",
+    "default_provider": "mock",
     "providers": {
         # Xiaomi MiMo — OpenAI-compatible (api.xiaomimimo.com/v1, Bearer auth).
         # Current default for explorer/synthesis testing.

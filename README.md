@@ -1,43 +1,117 @@
 # QAmate
 
-AI-assisted E2E testing desktop app with self-healing locators, checkpoint-based tests, and an autonomous agent that authors and verifies Playwright suites.
+**AI-assisted E2E testing** — an Electron desktop IDE with self-healing Playwright tests, checkpoint-based flows, and an autonomous agent that authors and verifies suites in a live browser.
 
-## Features
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-- **Electron IDE** — browse flows, record tests, run suites, review artifacts, Jira integration
-- **Self-healing locators** — three-tier recovery when the UI drifts
-- **AI agent** — drives a live browser, authors tests, verify-and-fix loop
-- **Projects** — per-app URLs, auth, context files, and optional private test suites
-- **Demo suite** — `tests/flows/demo/` against [playwright.dev](https://playwright.dev/) (no login)
+---
+
+## Why QAmate
+
+Manual test maintenance breaks when the UI drifts. QAmate combines:
+
+- **Record & run** — Playwright-backed tests with video, traces, network capture, and JUnit results
+- **Self-healing locators** — three-tier recovery when selectors stop matching
+- **AI agent** — drives your app, writes tests, and re-runs until they pass (verify-and-fix loop)
+- **Projects** — per-app URLs, credentials, context files, and optional private suites
+- **BYOK** — bring your own LLM key; secrets stay in the OS keychain, never in git
+
+The public repo ships a **demo suite** against [playwright.dev](https://playwright.dev/) — no login, no proprietary app required.
+
+---
 
 ## Quick start
 
-See [SETUP.md](SETUP.md).
+### Prerequisites
+
+- **Node.js** 18+ (for Electron)
+- **Python** 3.11+ (3.12 recommended)
+- **Windows** is the primary target; core engine is cross-platform Python
+
+### Install
+
+```bat
+git clone https://github.com/devesh16145/ATS.git
+cd ATS
+
+python -m venv venv
+venv\Scripts\python -m pip install -r requirements.txt
+venv\Scripts\playwright install chromium
+
+npm install
+```
+
+On first launch, QAmate copies `config.example.json` → `config.json` if missing.
+
+### Run the app
+
+```bat
+run_qamate.bat
+```
+
+Or:
 
 ```bat
 npx electron .
-venv\Scripts\pytest tests\flows\demo\ -v
-run_engine_tests.bat
 ```
 
-From the parent workspace folder you can also use `run_qamate.bat`.
+### Run the demo tests
+
+```bat
+venv\Scripts\pytest tests\flows\demo\ -v
+```
+
+### AI agent (optional)
+
+1. Open **Settings → AI / LLM**
+2. Default provider is **`mock`** (offline, no API key)
+3. For Claude or OpenAI: paste your key and click **Save**, or set `ATS_ANTHROPIC_KEY` / `ATS_OPENAI_KEY` in your environment
+
+See [SETUP.md](SETUP.md) for full configuration.
+
+---
+
+## Features
+
+| Area | What you get |
+|------|----------------|
+| **Test IDE** | Flow tree, recorder, coverage view, results + history, Jira bug/story export |
+| **Checkpoints** | Milestone-based tests that keep running after a failure |
+| **Self-heal** | Primary → fallback → fingerprint scan; heals logged per run |
+| **Agent** | GUIDED / AUTO modes, context folder, session persistence, autonomous flow authoring |
+| **Engine quality** | ~218 offline unit tests — `run_engine_tests.bat` |
+
+---
+
+## Project layout
+
+```
+main.js             Electron main process + IPC
+engine/             Python runner, agent, self-heal, normalizer
+src/                IDE + agent UI (React via babel-standalone)
+tests/flows/demo/   Public demo tests
+projects/           Per-project suites (gitignored when local)
+config.example.json Tracked template — copy to config.json locally
+```
+
+Add your own flows under `tests/flows/<module>/` or `projects/<id>/tests/`. See [tests/flows/README.md](tests/flows/README.md).
+
+---
 
 ## Architecture
 
-See [AUTONOMOUS_TESTING.md](AUTONOMOUS_TESTING.md) for the layered pipeline (L0–L5).
+Layered autonomous pipeline (PRD → explore → synthesize → self-heal): [AUTONOMOUS_TESTING.md](AUTONOMOUS_TESTING.md).
+
+---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Run `run_engine_tests.bat` before opening a PR.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md). **Do not commit `config.json`.**
+**Never commit `config.json`.** Keys belong in Settings or environment variables. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE)
-
-## Maintainers — publishing
-
-See [docs/PUBLISHING.md](docs/PUBLISHING.md) for history scrub and GitHub release checklist.
+[MIT](LICENSE) — Copyright (c) QAmate contributors.
