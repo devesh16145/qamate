@@ -6,6 +6,13 @@
 
 ---
 
+<img width="1919" height="1004" alt="image" src="https://github.com/user-attachments/assets/4a327530-59bc-4847-a0c1-1e28836d7017" />
+
+<img width="1919" height="1003" alt="image" src="https://github.com/user-attachments/assets/29e39d79-e0dd-44fe-bb75-3ac9a9f5673f" />
+
+<img width="1919" height="1008" alt="image" src="https://github.com/user-attachments/assets/a123fb3b-7abd-41c7-ac71-25523f693d78" />
+
+
 ## Why QAmate
 
 Manual test maintenance breaks when the UI drifts. QAmate combines:
