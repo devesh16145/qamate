@@ -4,6 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+**Website:** [qamate.vercel.app](https://qamate.vercel.app/) (Vercel — root directory `website/`)
+
 ---
 
 <img width="1919" height="1004" alt="image" src="https://github.com/user-attachments/assets/4a327530-59bc-4847-a0c1-1e28836d7017" />
@@ -38,8 +40,8 @@ The public repo ships a **demo suite** against [playwright.dev](https://playwrig
 ### Install
 
 ```bat
-git clone https://github.com/devesh16145/ATS.git
-cd ATS
+git clone https://github.com/devesh16145/qamate.git
+cd qamate
 
 python -m venv venv
 venv\Scripts\python -m pip install -r requirements.txt

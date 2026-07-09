@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 88" fill="none" role="img" aria-label="QAmate - AI E2E Testing">
+  <title>QAmate - AI E2E Testing</title>
+  <defs>
+    <symbol id="qamate-mark" viewBox="0 0 64 64">
+      <g fill="none">
+        <rect x="6.5" y="7.5" width="43" height="44" rx="8" fill="#FFFFFF"/>
+        <path d="M6.5 18.5 L6.5 15.5 A8 8 0 0 1 14.5 7.5 L41.5 7.5 A8 8 0 0 1 49.5 15.5 L49.5 18.5 Z" fill="#1D4ED8"/>
+        <circle cx="12" cy="13" r="1.6" fill="#FFFFFF"/>
+        <circle cx="17" cy="13" r="1.6" fill="#FFFFFF"/>
+        <circle cx="22" cy="13" r="1.6" fill="#FFFFFF"/>
+        <path d="M24 29 L18 35 L24 41" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M26.7 42 L29.3 28" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M32 29 L38 35 L32 41" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="50" cy="50" r="11.25" fill="#FFFFFF"/>
+        <circle cx="50" cy="50" r="10" fill="#1D4ED8"/>
+        <path d="M45.5 50 L48.5 53 L54.5 46.5" stroke="#FFFFFF" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+    </symbol>
+    <style>
+      .qm-word { font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif; font-size: 38px; font-weight: 700; letter-spacing: -0.02em; }
+      .qm-tag  { font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.22em; }
+    </style>
+  </defs>
+
+  <use href="#qamate-mark" x="12" y="16" width="56" height="56"/>
+
+  <!-- Wordmark: QA brightened for dark-bg contrast, mate in surface white -->
+  <text x="86" y="46" class="qm-word"><tspan fill="#3B82F6">QA</tspan><tspan fill="#F8FAFC">mate</tspan></text>
+
+  <line x1="88" y1="63" x2="104" y2="63" stroke="#334155" stroke-width="1"/>
+  <text x="112" y="67" class="qm-tag" fill="#94A3B8">AI E2E TESTING</text>
+  <line x1="236" y1="63" x2="252" y2="63" stroke="#334155" stroke-width="1"/>
+</svg>
