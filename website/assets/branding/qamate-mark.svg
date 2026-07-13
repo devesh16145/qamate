@@ -1,36 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="QAmate">
   <title>QAmate</title>
   <!--
-    QAmate primary mark — browser window + </> + pass badge.
-    Geometry snapped to a half-pixel grid on the 64 unit canvas for crisp rendering.
-    Reuse elsewhere via:  <use href="qamate-mark.svg#qamate-mark" />
+    Canonical mark — browser window + </> + pass badge.
+    Integer grid on 64 canvas; reuse via <use href="qamate-mark.svg#qamate-mark"/>.
   -->
   <defs>
     <symbol id="qamate-mark" viewBox="0 0 64 64">
-      <g id="mark" fill="none">
-        <!-- Browser window body -->
-        <rect x="6.5" y="7.5" width="43" height="44" rx="8" fill="#FFFFFF"/>
-
-        <!-- Blue title bar (11px tall, rounded top corners only) -->
-        <path d="M6.5 18.5 L6.5 15.5 A8 8 0 0 1 14.5 7.5 L41.5 7.5 A8 8 0 0 1 49.5 15.5 L49.5 18.5 Z" fill="#1D4ED8"/>
-
-        <!-- Three window dots -->
-        <circle cx="12" cy="13" r="1.6" fill="#FFFFFF"/>
-        <circle cx="17" cy="13" r="1.6" fill="#FFFFFF"/>
-        <circle cx="22" cy="13" r="1.6" fill="#FFFFFF"/>
-
-        <!-- Code symbol </> as bold vector paths (not text) -->
-        <path d="M24 29 L18 35 L24 41" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M26.7 42 L29.3 28" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M32 29 L38 35 L32 41" stroke="#0F172A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-
-        <!-- Pass badge overlapping bottom-right, with hairline white keyline -->
-        <circle cx="50" cy="50" r="11.25" fill="#FFFFFF"/>
-        <circle cx="50" cy="50" r="10" fill="#1D4ED8"/>
-        <path d="M45.5 50 L48.5 53 L54.5 46.5" stroke="#FFFFFF" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+      <g id="mark">
+        <!-- Blue window chrome (single shell, no seam between title bar and frame) -->
+        <path
+          fill="#1D4ED8"
+          d="M16 8h32a8 8 0 0 1 8 8v32a8 8 0 0 1-8 8H16a8 8 0 0 1-8-8V16a8 8 0 0 1 8-8z"
+        />
+        <!-- White content panel (flat top, rounded bottom — sits below 11px title bar) -->
+        <path
+          fill="#FFFFFF"
+          d="M9 19h46v32a6 6 0 0 1-6 6H15a6 6 0 0 1-6-6V19z"
+        />
+        <!-- Window controls -->
+        <circle cx="14" cy="14" r="1.5" fill="#FFFFFF"/>
+        <circle cx="18" cy="14" r="1.5" fill="#FFFFFF"/>
+        <circle cx="22" cy="14" r="1.5" fill="#FFFFFF"/>
+        <!-- </> — balanced stroke weight, optically centered in content area -->
+        <g fill="none" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 34l-4 3.5 4 3.5"/>
+          <path d="M27 33l2 8"/>
+          <path d="M32 34l4 3.5-4 3.5"/>
+        </g>
+        <!-- Pass badge — white ring separates from window, check optically centered -->
+        <circle cx="49" cy="49" r="10" fill="#1D4ED8" stroke="#FFFFFF" stroke-width="1.75"/>
+        <path
+          d="M44.25 49l3 3 7.75-7.75"
+          stroke="#FFFFFF"
+          stroke-width="2.25"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
       </g>
     </symbol>
   </defs>
-
   <use href="#qamate-mark" width="64" height="64"/>
 </svg>
