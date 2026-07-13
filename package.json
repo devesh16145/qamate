@@ -3,16 +3,106 @@
   "version": "1.0.0",
   "description": "QAmate — AI-assisted E2E testing with self-healing locators",
   "main": "main.js",
+  "author": "QAmate contributors",
+  "license": "MIT",
+  "homepage": "https://github.com/devesh16145/qamate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devesh16145/qamate.git"
+  },
   "scripts": {
     "start": "electron .",
+    "icon": "node scripts/generate-icon.js",
+    "prepare:python": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-bundle.ps1",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir",
+    "screenshots": "venv\\Scripts\\python scripts\\capture-website-screenshots.py",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "MIT",
+  "keywords": [
+    "playwright",
+    "e2e",
+    "testing",
+    "electron",
+    "self-healing",
+    "ai-agent"
+  ],
+  "build": {
+    "appId": "com.qamate.app",
+    "productName": "QAmate",
+    "copyright": "Copyright © QAmate contributors",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "bootstrap.js",
+      "package.json",
+      "engine/**/*",
+      "src/**/*",
+      "assets/**/*",
+      "requirements.txt",
+      "config.example.json",
+      "run_qamate.bat",
+      "run_engine_tests.bat",
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/flows/README.md",
+      "tests/flows/demo/**/*",
+      "!**/__pycache__/**",
+      "!**/*.pyc",
+      "!**/*.pyo",
+      "!**/.pytest_cache/**",
+      "!engine/tests/**",
+      "!engine/cart_create_compare.py",
+      "!engine/backend_compare.py"
+    ],
+    "extraResources": [
+      {
+        "from": "build/pybundle",
+        "to": "pybundle",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/branding/qamate-mark.ico",
+      "artifactName": "QAmate-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "QAmate",
+      "installerIcon": "assets/branding/qamate-mark.ico",
+      "uninstallerIcon": "assets/branding/qamate-mark.ico",
+      "deleteAppDataOnUninstall": false
+    }
+  },
   "dependencies": {
     "@babel/core": "^7.29.7",
-    "@babel/preset-react": "^7.29.7",
-    "electron": "^31.0.0"
+    "@babel/preset-react": "^7.29.7"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.33.5"
   }
 }

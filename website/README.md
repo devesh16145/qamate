@@ -63,6 +63,7 @@ After adding a custom domain, update `canonical` and `og:url` in `index.html`.
 | `index.html` | Landing page |
 | `styles.css` | Brand styles |
 | `assets/branding/*.svg` | Logos (copies of repo `assets/branding/`) |
+| `assets/screenshots/*.png` | Real IDE screenshots (regenerate with `npm run screenshots` from repo root) |
 | `favicon.svg` | Tab icon |
 | `og-image.svg` | Social preview (1200×630) |
 | `vercel.json` | Vercel headers + clean URLs |

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>QAmate — IDE</title>
+  <link rel="icon" href="../assets/branding/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -1863,6 +1864,7 @@ function TitleBar({ theme, setTheme, onOpenCmd, onOpenSettings, env, setEnv, lef
 
   return (
     <div className="titlebar">
+      <img src="../assets/branding/qamate-mark.svg" alt="" className="tb-logo" width={20} height={20} />
       <div ref={menuRef} style={{ position: 'relative' }}>
         <button className="tb-icon-btn" title="Main menu" onClick={() => setMenuOpen(o => !o)}>
           <I.Menu size={16} />

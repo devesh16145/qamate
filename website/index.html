@@ -89,58 +89,15 @@
         </div>
       </div>
 
-      <div class="ide reveal reveal-d6" role="img" aria-label="QAmate IDE preview">
-        <div class="ide-title">
-          <img src="assets/branding/qamate-mark.svg" alt="">
-          <span class="tb-word"><span class="qa">QA</span><span class="mate">mate</span></span>
-          <span class="tb-chip">dev · GUIDED</span>
-          <span class="tb-run">▶ RUN</span>
-        </div>
-        <div class="ide-body">
-          <aside class="ide-side">
-            <div class="ide-side-label">FLOWS</div>
-            <div class="tree-item active"><span class="ok">✓</span> demo/</div>
-            <div class="tree-item">TC-DEMO-001</div>
-            <div class="tree-item">TC-DEMO-002</div>
-            <div class="tree-item">TC-DEMO-003</div>
-          </aside>
-          <div class="ide-main">
-            <div class="ide-tabs">
-              <span class="ide-tab active">Agent</span>
-              <span class="ide-tab">Editor</span>
-              <span class="ide-tab">Coverage</span>
-            </div>
-            <div class="ide-code">
-              <span class="cmt"># verify-and-fix loop</span><br>
-              <span class="kw">async def</span> <span class="fn">test_TC_DEMO_001</span>(page, checkpoints):<br>
-              &nbsp;&nbsp;checkpoints.<span class="fn">run</span>(<span class="str">"Navigate to docs"</span>, …)<br>
-              &nbsp;&nbsp;heal(page, <span class="str">'get_by_role("link")'</span>).<span class="fn">click</span>()<br>
-              &nbsp;&nbsp;checkpoints.<span class="fn">finalize</span>()
-            </div>
-            <div class="ide-drawer">
-              <div class="ide-pane">
-                <div class="ide-pane-title">AGENT LOG</div>
-                <div class="log-line">&gt; observe()</div>
-                <div class="log-line">&gt; create_test_case</div>
-                <div class="log-line ok">&gt; run_test_case ✓ passed</div>
-              </div>
-              <div class="ide-pane">
-                <div class="ide-pane-title">CHECKPOINTS</div>
-                <div class="log-line ok">✓ Navigate to docs</div>
-                <div class="log-line ok">✓ Search visible</div>
-                <div class="log-line warn">○ Assert title (minor)</div>
-              </div>
-            </div>
-          </div>
-          <aside class="ide-right">
-            <div class="result-bar"><span class="tag">PASS</span> 3/3 critical</div>
-            <div class="metric"><span>Duration</span><strong>12.4s</strong></div>
-            <div class="metric"><span>Heals</span><strong>1</strong></div>
-            <div class="metric"><span>Mode</span><strong>GUIDED</strong></div>
-            <div class="bar"><i></i></div>
-          </aside>
-        </div>
-      </div>
+      <figure class="screenshot-frame hero-shot reveal reveal-d6">
+        <img
+          src="assets/screenshots/hero-ide.png"
+          alt="QAmate IDE with test explorer, editor, live log, and AI agent"
+          width="1536"
+          height="1024"
+          loading="eager"
+          decoding="async">
+      </figure>
     </div>
   </header>
 
@@ -235,47 +192,15 @@
             </li>
           </ul>
         </div>
-        <div class="ide flat reveal reveal-d4" role="img" aria-label="QAmate workspace layout">
-          <div class="ide-title">
-            <img src="assets/branding/qamate-mark.svg" alt="">
-            <span class="tb-word"><span class="qa">QA</span><span class="mate">mate</span></span>
-            <span class="tb-chip">catalog · orders · demo</span>
-          </div>
-          <div class="ide-body">
-            <aside class="ide-side">
-              <div class="ide-side-label">EXPLORER</div>
-              <div class="tree-item"><span class="ok">✓</span> catalog/</div>
-              <div class="tree-item"><span class="ok">✓</span> orders/</div>
-              <div class="tree-item active"><span class="ok">✓</span> demo/</div>
-              <div class="ide-side-label" style="margin-top:14px">RECORD</div>
-              <div class="tree-item" style="color:#F87171">● REC</div>
-            </aside>
-            <div class="ide-main">
-              <div class="ide-tabs">
-                <span class="ide-tab">Editor</span>
-                <span class="ide-tab active">Results</span>
-                <span class="ide-tab">History</span>
-              </div>
-              <div class="ide-code">
-                <div class="result-bar" style="margin-bottom:10px"><span class="tag">PASSED</span> TC-DEMO-002 · 14.2s</div>
-                <div class="log-line">checkpoints: 4/4 critical ✓</div>
-                <div class="log-line">heals: primary → fallback (1)</div>
-                <div class="log-line">video: TC-DEMO-002.webm</div>
-                <div class="log-line ok">junit: 1 passed, 0 failed</div>
-              </div>
-              <div class="ide-drawer">
-                <div class="ide-pane">
-                  <div class="ide-pane-title">TEST DATA</div>
-                  <div class="log-line">{ "variant": "positive" }</div>
-                </div>
-                <div class="ide-pane">
-                  <div class="ide-pane-title">USER STORY</div>
-                  <div class="log-line">As a seller, I want to…</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <figure class="screenshot-frame flat reveal reveal-d4">
+          <img
+            src="assets/screenshots/app-results.png"
+            alt="QAmate results view with run summary, pass rate, and live log"
+            width="1440"
+            height="900"
+            loading="lazy"
+            decoding="async">
+        </figure>
       </div>
     </section>
 

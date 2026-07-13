@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, shell, safeStorage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, safeStorage, dialog, nativeImage } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const https = require('https');
+const bootstrap = require('./bootstrap');
 
 let mainWindow;
 let pythonProcess = null;
@@ -28,6 +29,30 @@ function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 }
 
+/** OS window/taskbar icon. Windows needs .ico/.png — export assets/branding/qamate-mark-32.png from the brand sheet. */
+function resolveAppIcon() {
+  const branding = path.join(__dirname, 'assets', 'branding');
+  const png = path.join(branding, 'qamate-mark-32.png');
+  if (fs.existsSync(png)) {
+    const img = nativeImage.createFromPath(png);
+    if (!img.isEmpty()) return img;
+  }
+  const svg = path.join(branding, 'qamate-mark.svg');
+  if (fs.existsSync(svg)) {
+    try {
+      const img = nativeImage.createFromPath(svg);
+      if (!img.isEmpty()) return img;
+    } catch (_) { /* SVG often unsupported as native window icon on Windows */ }
+  }
+  return undefined;
+}
+
+const APP_ICON = resolveAppIcon();
+
+/** Marketing website capture: `electron . --capture-screenshots` */
+const CAPTURE_SCREENSHOTS = process.argv.includes('--capture-screenshots');
+const SCREENSHOT_DIR = path.join(__dirname, 'website', 'assets', 'screenshots');
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -46,10 +71,88 @@ function createWindow() {
     },
     title: "QAmate — Automated Testing System",
     backgroundColor: '#ffffff',
+    ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-  mainWindow.webContents.openDevTools();
+  if (!CAPTURE_SCREENSHOTS) mainWindow.webContents.openDevTools();
+  if (CAPTURE_SCREENSHOTS) scheduleWebsiteCaptures(mainWindow);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function writeScreenshot(win, filename) {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  const image = await win.webContents.capturePage();
+  const out = path.join(SCREENSHOT_DIR, filename);
+  fs.writeFileSync(out, image.toPNG());
+  console.log('[QAmate] Screenshot saved:', out);
+}
+
+async function clickInRenderer(win, fnBody) {
+  try {
+    await win.webContents.executeJavaScript(`(() => { ${fnBody} })()`);
+  } catch (e) {
+    console.warn('[QAmate] capture click skipped:', e && e.message);
+  }
+}
+
+/** After the IDE loads, grab PNGs for website/assets/screenshots/ and quit. */
+async function waitForIdeReady(win, timeoutMs = 120000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const ready = await win.webContents.executeJavaScript(`
+        !!document.querySelector('.titlebar') &&
+        !!document.querySelector('.main-grid') &&
+        !document.body.innerText.includes('Loading IDE...')
+      `);
+      if (ready) {
+        await delay(1500);
+        return;
+      }
+    } catch (_) { /* renderer not ready yet */ }
+    await delay(500);
+  }
+  throw new Error('IDE did not finish loading within timeout');
+}
+
+async function scheduleWebsiteCaptures(win) {
+  win.webContents.once('did-finish-load', async () => {
+    try {
+      win.webContents.closeDevTools();
+      win.setContentSize(1440, 900);
+      win.center();
+      await waitForIdeReady(win);
+
+      await writeScreenshot(win, 'app-main.png');
+
+      // Results workspace tab (titlebar window control)
+      await clickInRenderer(win, `
+        const btn = [...document.querySelectorAll('.tb-window-btn, button, [title]')]
+          .find(el => (el.getAttribute('title') || '').toLowerCase() === 'results');
+        if (btn) btn.click();
+      `);
+      await delay(2000);
+      await writeScreenshot(win, 'app-results.png');
+
+      // History inner-right panel
+      await clickInRenderer(win, `
+        const btn = [...document.querySelectorAll('.tb-window-btn, button, [title]')]
+          .find(el => (el.getAttribute('title') || '').toLowerCase().startsWith('history'));
+        if (btn) btn.click();
+      `);
+      await delay(1500);
+      await writeScreenshot(win, 'app-history.png');
+    } catch (e) {
+      console.error('[QAmate] Screenshot capture failed:', e && e.message);
+      process.exitCode = 1;
+    } finally {
+      app.quit();
+    }
+  });
 }
 
 // Recolor the native window-control overlay (min/max/close) when the app theme flips,
@@ -64,7 +167,20 @@ ipcMain.handle('set-titlebar-theme', (e, { theme } = {}) => {
   } catch (_) { return false; }
 });
 
-app.whenReady().then(createWindow);
+// First-run bootstrap: a packaged install ships without the Python engine
+// environment (venv + Playwright + Chromium). Provision it once, behind a
+// progress splash, before opening the IDE. A dev checkout with an existing venv
+// is detected as ready and skips this. See bootstrap.js.
+app.whenReady().then(async () => {
+  try {
+    if (!bootstrap.pythonReady()) {
+      await bootstrap.runFirstRunSetup(APP_ICON);
+    }
+  } catch (e) {
+    console.error('[QAmate] First-run setup error:', e && e.message);
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   killPython();
@@ -121,7 +237,7 @@ ipcMain.handle('run-tests', async (event, options) => {
   killPython(); // Kill any previous run
 
   if (!fs.existsSync(VENV_PYTHON)) {
-    sendToRenderer('test-log', `ERROR: Python not found at ${VENV_PYTHON}`);
+    sendToRenderer('test-log', `ERROR: Python environment not ready (${VENV_PYTHON}). Restart QAmate to finish first-run setup, or ensure Python 3.11+ is installed and on PATH.`);
     return;
   }
 
@@ -400,6 +516,7 @@ function createAgentWindow() {
     },
     title: 'QAmate — AI Agent',
     backgroundColor: '#0f0f1a',
+    ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
   agentWindow.loadFile(path.join(__dirname, 'src', 'agent.html'));
   // Closing the Agent window does NOT stop its sessions — they keep running (persisted +
@@ -422,6 +539,7 @@ function createHistoryWindow() {
     },
     title: 'QAmate — History',
     backgroundColor: '#ffffff',
+    ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
   historyWindow.loadFile(path.join(__dirname, 'src', 'history.html'));
   historyWindow.on('closed', () => { historyWindow = null; });
@@ -441,6 +559,7 @@ function createBugManagerWindow() {
     },
     title: 'QAmate — Bug & Story Manager',
     backgroundColor: '#ffffff',
+    ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
   bugManagerWindow.loadFile(path.join(__dirname, 'src', 'bugs.html'));
   bugManagerWindow.on('closed', () => { bugManagerWindow = null; });

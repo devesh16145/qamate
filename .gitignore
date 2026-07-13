@@ -14,6 +14,11 @@ test-results/
 *.png
 *.webm
 
+# ...but keep the generated brand marks tracked (built from SVG by `npm run icon`)
+!assets/branding/qamate-mark-32.png
+!assets/branding/qamate-mark-256.png
+!website/assets/screenshots/*.png
+
 # Recording session auth (saved cookies/localStorage — reused across recordings)
 .auth/
 temp_recording.py
@@ -23,6 +28,13 @@ projects/
 
 # Node
 node_modules/
+
+# Installer / packaging build outputs
+dist/
+release/
+out/
+# Staged offline Python runtime (build artifact — recreated by scripts/prepare-bundle.ps1)
+build/pybundle/python/
 
 # ATS runtime artifacts
 results/

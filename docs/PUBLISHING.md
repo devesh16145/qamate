@@ -49,7 +49,7 @@ scripts\scrub-git-history.bat
 Then re-add your remote:
 
 ```bat
-git remote add origin https://github.com/devesh16145/ATS.git
+git remote add origin https://github.com/devesh16145/qamate.git
 ```
 
 ## 4. Force-push (only after rotation)
