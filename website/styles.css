@@ -205,8 +205,6 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
 .pill-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pass); box-shadow: 0 0 8px var(--pass); animation: pulse 2.4s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 
-.hero-lockup { height: 68px; width: auto; margin-bottom: 28px; }
-
 .hero h1 {
   font-size: clamp(40px, 5.4vw, 60px); font-weight: 700; line-height: 1.04;
   margin-bottom: 20px; color: var(--d-text);
