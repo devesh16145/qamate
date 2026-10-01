@@ -60,15 +60,16 @@ def _locator_str(primary):
     the recorded step (generate_from_review consumes this)."""
     by = primary.get("by")
     v = primary.get("value", "")
+    exact = f', exact={bool(primary["exact"])}' if "exact" in primary else ""
     if by == "role":
         name = primary.get("name")
-        return f'page.get_by_role("{primary.get("role")}", name="{_q(name)}")' if name else f'page.get_by_role("{primary.get("role")}")'
+        return f'page.get_by_role("{primary.get("role")}", name="{_q(name)}"{exact})' if name else f'page.get_by_role("{primary.get("role")}"{exact})'
     if by == "text":
-        return f'page.get_by_text("{_q(v)}")'
+        return f'page.get_by_text("{_q(v)}"{exact})'
     if by == "placeholder":
         return f'page.get_by_placeholder("{_q(v)}")'
     if by == "label":
-        return f'page.get_by_label("{_q(v)}")'
+        return f'page.get_by_label("{_q(v)}"{exact})'
     if by == "test_id":
         return f'page.get_by_test_id("{_q(v)}")'
     return f'page.locator("{_q(v)}")'

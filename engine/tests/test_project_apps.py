@@ -5,6 +5,7 @@ resolution, project creation, and the agent credential priority chain.
 """
 
 import os
+import pytest
 
 import project_store as ps
 import agent_chat as ac
@@ -75,3 +76,34 @@ def test_credentials_priority_auth_then_config():
     cfg = {"platforms": {"seller": {"users": [{"email": "cfg@x.y", "password": "cfg-pw"}]}}}
     assert ac._resolve_credentials(None, cfg) == ("cfg@x.y", "cfg-pw")
     assert ac._resolve_credentials(None, {}) == (None, None)
+
+
+def test_app_ids_survive_reorder_rename_and_url_edit(tmp_path):
+    project = ps.create_project(str(tmp_path), "Ids", "", apps=[
+        {"url": "https://a.test", "actors": ["seller", "admin"]}, {"url": "https://b.test"}])
+    first, second = project["apps"]
+    assert first["id"] != second["id"]
+    changed = {**first, "label": "Renamed", "url": "https://new.test"}
+    updated = ps.update_project(str(tmp_path), project["id"], {"apps": [second, changed]})
+    assert [a["id"] for a in updated["apps"]] == [second["id"], first["id"]]
+    assert updated["apps"][1]["actors"] == ["seller", "admin"]
+
+
+def test_legacy_save_and_old_client_preserve_identity(tmp_path):
+    project = ps.create_project(str(tmp_path), "Ids", "", apps=[{"url": "https://a.test", "actors": ["seller"]}])
+    saved = ps.update_project(str(tmp_path), project["id"], {"apps": [{"url": "https://a.test", "label": "Edited"}]})
+    assert saved["apps"][0]["id"] == project["apps"][0]["id"]
+    assert saved["apps"][0]["actors"] == ["seller"]
+
+
+@pytest.mark.parametrize("patch", [
+    [{"id": "same", "url": "https://a.test"}, {"id": "same", "url": "https://b.test"}],
+    [{"url": "https://a.test", "actors": []}],
+    [{"url": "https://a.test", "actors": ["seller", "seller"]}],
+    [{"url": "https://a.test", "actors": ["../admin"]}],
+])
+def test_bad_binding_settings_do_not_modify_project(tmp_path, patch):
+    project = ps.create_project(str(tmp_path), "Ids", "https://a.test")
+    with pytest.raises(ValueError):
+        ps.update_project(str(tmp_path), project["id"], {"apps": patch})
+    assert ps.get_project(str(tmp_path), project["id"]) == project

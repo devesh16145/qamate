@@ -636,11 +636,11 @@ def base_url(seller_url):
 
 
 @pytest.fixture(autouse=True)
-def _project_auth(page, active_project, seller_url):
+def _project_auth(page, active_project, seller_url, request):
     """In project mode, apply the project's captured login (storage_state) to the
     page so synthesized/explored tests run authenticated. No-op in legacy mode
     or when the project has no captured auth."""
-    if active_project:
+    if active_project and "multi_app_replay" not in request.fixturenames:
         state = _project_storage_state(active_project)
         if state.get("cookies") or state.get("origins"):
             try:
@@ -648,6 +648,16 @@ def _project_auth(page, active_project, seller_url):
             except Exception as e:
                 print(f"[PROJECT AUTH] failed: {e}", flush=True)
     yield
+
+
+@pytest.fixture
+def multi_app_replay(browser, active_project):
+    """Opt-in replay: project bindings, fresh actor contexts, no shared auth."""
+    from project_workflow import ProjectReplay
+    if not active_project:
+        raise ValueError("Set ATS_PROJECT_ID for multi-app replay")
+    with ProjectReplay(browser, active_project) as replay:
+        yield replay
 
 
 @pytest.fixture(scope="session")

@@ -29,10 +29,13 @@ import json
 import base64
 import urllib.request
 import urllib.error
+from model_profiles import resolve_profile, ProfileError
 
 
 class LLMError(Exception):
-    pass
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class LLMNotConfigured(LLMError):
@@ -46,7 +49,7 @@ DEFAULT_LLM_CONFIG = {
     "providers": {
         # Xiaomi MiMo — OpenAI-compatible (api.xiaomimimo.com/v1, Bearer auth).
         # Current default for explorer/synthesis testing.
-        "mimo": {"model": "mimo-v2.5-pro", "base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 4096},
+        "mimo": {"model": "mimo-v2.6-flash", "base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 4096},
         # Xiaomi MiMo Ultraspeed — reasoning model (o1-style), faster inference.
         # Uses max_completion_tokens + no temperature. Same MIMO_API_KEY.
         "mimo-ultraspeed": {"model": "mimo-v2.5-pro-ultraspeed", "base_url": "https://api.xiaomimimo.com/v1", "api_key_env": "MIMO_API_KEY", "max_tokens": 8192},
@@ -69,7 +72,7 @@ def _http_post_json(url, headers, payload, timeout=120):
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "ignore")[:600]
-        raise LLMError(f"HTTP {e.code} from {url}: {body}")
+        raise LLMError(f"HTTP {e.code} from {url}: {body}", status_code=e.code)
     except urllib.error.URLError as e:
         raise LLMError(f"could not reach {url}: {e.reason}")
     except Exception as e:
@@ -82,6 +85,7 @@ class BaseProvider:
     def __init__(self, name, cfg):
         self.name = name
         self.cfg = cfg or {}
+        self.last_usage = None
 
     def _key(self):
         env = self.cfg.get("api_key_env", "")
@@ -115,8 +119,13 @@ class AnthropicProvider(BaseProvider):
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user}],
         }
+        if not self.cfg.get("supports_temperature", True):
+            payload.pop("temperature", None)
         headers = {"x-api-key": self._key(), "anthropic-version": "2023-06-01"}
-        resp = _http_post_json("https://api.anthropic.com/v1/messages", headers, payload)
+        base = (self.cfg.get("base_url") or "https://api.anthropic.com").rstrip("/")
+        endpoint = base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+        resp = _http_post_json(endpoint, headers, payload, timeout=self.cfg.get("timeout", 60))
+        self.last_usage = resp.get("usage")
         return "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
 
 
@@ -128,20 +137,27 @@ class OpenAIProvider(BaseProvider):
             "temperature": temperature,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
-        base = self.cfg.get("base_url", "https://api.openai.com/v1")
+        token_parameter = self.cfg.get("token_parameter", "max_tokens")
+        if token_parameter not in {"max_tokens", "max_completion_tokens"}:
+            raise LLMError("Unsupported token_parameter")
+        payload[token_parameter] = payload.pop("max_tokens")
+        if not self.cfg.get("supports_temperature", True):
+            payload.pop("temperature", None)
+        base = (self.cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
         headers = {"Authorization": f"Bearer {self._key()}"}
-        resp = _http_post_json(f"{base}/chat/completions", headers, payload)
+        resp = _http_post_json(f"{base}/chat/completions", headers, payload, timeout=self.cfg.get("timeout", 60))
+        self.last_usage = resp.get("usage")
         return resp["choices"][0]["message"]["content"]
 
 
 class MimoProvider(BaseProvider):
-    """Xiaomi MiMo — reasoning model (o1-style), covers both v2.5-pro and ultraspeed.
+    """Legacy Xiaomi MiMo helper; the configured model remains replaceable.
     - Uses max_completion_tokens (not max_tokens)
     - Omits temperature (not supported by reasoning models)
     - Returns final answer only; thinking tokens stay server-side in non-streaming mode"""
     def complete(self, system, user, max_tokens=None, temperature=0.2):
         payload = {
-            "model": self.cfg.get("model", "mimo-v2.5-pro"),
+            "model": self.cfg.get("model", "mimo-v2.6-flash"),
             "max_completion_tokens": max_tokens or self.cfg.get("max_tokens", 8192),
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
@@ -154,34 +170,39 @@ class MimoProvider(BaseProvider):
 class OllamaProvider(BaseProvider):
     """Local models — no key required."""
     def complete(self, system, user, max_tokens=None, temperature=0.2):
-        base = self.cfg.get("base_url", "http://localhost:11434")
+        base = (self.cfg.get("base_url") or "http://localhost:11434").rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
         payload = {
             "model": self.cfg.get("model", "llama3.1"),
             "stream": False,
             "options": {"temperature": temperature},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
-        resp = _http_post_json(f"{base}/api/chat", {}, payload)
+        resp = _http_post_json(f"{base}/api/chat", {}, payload, timeout=self.cfg.get("timeout", 60))
+        if "prompt_eval_count" in resp or "eval_count" in resp:
+            self.last_usage = {"input_tokens": resp.get("prompt_eval_count"), "output_tokens": resp.get("eval_count")}
         return (resp.get("message") or {}).get("content", "")
 
 
 _PROVIDERS = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
-    "mimo": MimoProvider,               # Xiaomi MiMo v2.5-pro (reasoning)
+    "mimo": MimoProvider,               # Xiaomi MiMo (configured model)
     "mimo-ultraspeed": MimoProvider,    # Xiaomi MiMo v2.5-pro-ultraspeed (faster reasoning)
     "ollama": OllamaProvider,
     "mock": MockProvider,
 }
 
 
-def make_provider(config, name=None):
+def make_provider(config, name=None, role="extraction"):
     """Build a provider from config['llm']. `name` overrides the default."""
-    llm_cfg = (config or {}).get("llm") or DEFAULT_LLM_CONFIG
-    name = name or os.environ.get("ATS_LLM_PROVIDER") or llm_cfg.get("default_provider", "anthropic")
-    providers = llm_cfg.get("providers", {})
-    cfg = providers.get(name, {})
-    cls = _PROVIDERS.get(name)
+    effective = config if (config or {}).get("llm") else {"llm": DEFAULT_LLM_CONFIG}
+    try:
+        name, cfg = resolve_profile(effective, name, role)
+    except ProfileError as exc:
+        raise LLMError(str(exc)) from exc
+    cls = _PROVIDERS.get(cfg["protocol"])
     if not cls:
         raise LLMError(f"unknown LLM provider '{name}' (have: {', '.join(_PROVIDERS)})")
     return cls(name, cfg)
@@ -236,17 +257,35 @@ def call_vision_oracle(vision_cfg: dict, screenshot_bytes: bytes, question: str,
     """One-shot multimodal call to a vision-capable model (OpenAI-compatible).
     vision_cfg: {model, base_url, api_key_env, max_tokens}
     Returns the model's text description of the screenshot."""
+    from model_profiles import require_capability
+    require_capability(vision_cfg, "vision")
+    protocol = vision_cfg.get("protocol", "openai")
+    if protocol not in {"openai", "anthropic", "ollama"}:
+        raise LLMError(f"Vision is unsupported for protocol {protocol}")
     model = vision_cfg.get("model", "")
     base_url = (vision_cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
     api_key_env = vision_cfg.get("api_key_env", "OPENAI_API_KEY")
     max_tokens = int(vision_cfg.get("max_tokens", 512))
     api_key = os.environ.get(api_key_env, "")
-    if not api_key:
+    if not api_key and protocol != "ollama":
         raise LLMNotConfigured(
             f"Vision oracle key not set (env {api_key_env!r}). "
             f"Add it to Settings or set the env var."
         )
     img_b64 = base64.b64encode(screenshot_bytes).decode()
+    timeout = min(timeout, vision_cfg.get("timeout", timeout))
+    if protocol == "anthropic":
+        base = (vision_cfg.get("base_url") or "https://api.anthropic.com").rstrip("/")
+        endpoint = base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+        payload = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}},
+            {"type": "text", "text": question}]}]}
+        response = _http_post_json(endpoint, {"x-api-key": api_key, "anthropic-version": "2023-06-01"}, payload, timeout=timeout)
+        return "".join(block.get("text", "") for block in response.get("content", []) if block.get("type") == "text")
+    if protocol == "ollama":
+        base_url = (vision_cfg.get("base_url") or "http://localhost:11434").rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url += "/v1"
     payload = {
         "model": model,
         "max_tokens": max_tokens,
@@ -258,7 +297,11 @@ def call_vision_oracle(vision_cfg: dict, screenshot_bytes: bytes, question: str,
             ]
         }]
     }
-    headers = {"Authorization": f"Bearer {api_key}"}
+    token_parameter = vision_cfg.get("token_parameter", "max_tokens")
+    if token_parameter not in {"max_tokens", "max_completion_tokens"}:
+        raise LLMError("Unsupported token_parameter")
+    payload[token_parameter] = payload.pop("max_tokens")
+    headers = {"Authorization": f"Bearer {api_key or 'ollama'}"}
     resp = _http_post_json(f"{base_url}/chat/completions", headers, payload, timeout=timeout)
     return resp["choices"][0]["message"]["content"]
 

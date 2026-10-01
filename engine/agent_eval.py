@@ -117,6 +117,10 @@ def run_test_once(flow_dir, tc_id, env=None, cwd=None, timeout=300):
     """Run ONE test once through pytest. Returns (passed: bool, summary: str).
     passed is True only on a clean exit 0 with a test actually collected (rc 5 / 'no
     tests ran' => not passed)."""
+    import tempfile
+    from contextlib import nullcontext
+    from verification import verified_junit
+    flow_dir = os.path.abspath(flow_dir)
     underscored = tc_id.replace("-", "_")
     cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
            "-q", "--no-header", "-p", "no:cacheprovider", "--tb=line"]
@@ -124,14 +128,28 @@ def run_test_once(flow_dir, tc_id, env=None, cwd=None, timeout=300):
     if env:
         e.update(env)
     try:
-        p = subprocess.run(cmd, cwd=cwd, env=e, capture_output=True, text=True, timeout=timeout)
+        # Explicit run directories retain authoritative evidence. Unique children
+        # prevent a failed run from reading an earlier run's green JUnit file.
+        retained = (env or {}).get("ATS_RESULTS_DIR")
+        if retained:
+            os.makedirs(retained, exist_ok=True)
+            artifact_context = nullcontext(tempfile.mkdtemp(prefix="verification-", dir=retained))
+        else:
+            artifact_context = tempfile.TemporaryDirectory(prefix="qamate-verify-")
+        with artifact_context as artifacts:
+            junit = os.path.join(artifacts, "junit.xml")
+            p = subprocess.run(cmd + [f"--junitxml={junit}"], cwd=cwd or flow_dir,
+                               env=e, capture_output=True, text=True, timeout=timeout,
+                               stdin=subprocess.DEVNULL, close_fds=True,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            verified = verified_junit(junit, tc_id)
     except subprocess.TimeoutExpired:
         return False, f"timed out after {timeout}s"
     except Exception as ex:
         return False, f"could not start pytest: {str(ex)[:160]}"
     out = (p.stdout or "") + (p.stderr or "")
     no_tests = (p.returncode == 5) or ("no tests ran" in out.lower())
-    return (p.returncode == 0 and not no_tests), _summary(out)
+    return (p.returncode == 0 and not no_tests and verified), _summary(out)
 
 
 def evaluate(ats_root, tasks, runs=2, env_name="dev", timeout=300, progress=None):

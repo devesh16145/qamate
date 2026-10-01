@@ -22,9 +22,12 @@
     const map = providersMap(cfg);
     return Object.keys(map).map((id) => {
       const p = map[id] || {};
-      const needsKey = id !== 'mock' && id !== 'ollama' && !!p.api_key_env;
+      const protocol = p.protocol || ({anthropic:'anthropic', ollama:'ollama', mock:'mock'}[id] || 'openai');
+      const needsKey = protocol !== 'mock' && protocol !== 'ollama';
       return {
         id,
+        protocol,
+        canPlan: !['typesafe', 'openrouter_decisions'].includes(protocol) && p.capabilities?.tools !== false,
         label: label(id),
         api_key_env: p.api_key_env || '',
         needsKey,
@@ -35,8 +38,8 @@
   }
 
   function defaultFromConfig(cfg) {
-    const d = cfg && cfg.llm && cfg.llm.default_provider;
-    const ids = listFromConfig(cfg).map((p) => p.id);
+    const d = cfg && cfg.llm && (cfg.llm.roles?.planner || cfg.llm.roles?.primary || cfg.llm.default_provider);
+    const ids = listFromConfig(cfg).filter(p => p.canPlan).map((p) => p.id);
     if (d && ids.includes(d)) return d;
     if (ids.includes('mock')) return 'mock';
     return ids[0] || 'mock';
@@ -48,7 +51,9 @@
   }
 
   function isConfigured(id, cfg, secretKeys) {
-    if (!id || id === 'mock' || id === 'ollama') return true;
+    const profile = listFromConfig(cfg).find(p => p.id === id);
+    if (!profile) return false;
+    if (!profile.needsKey) return true;
     const env = keyEnv(id, cfg);
     if (!env) return false;
     return !!(secretKeys && secretKeys[env]);

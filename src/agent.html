@@ -30,20 +30,19 @@
     function AgentWindowRoot() {
       const dock    = () => { try { window.ats.agentDock(); } catch (e) {} };
       const history = () => { try { window.ats.openMainWindow(); } catch (e) {} };
-      const btnStyle = { position: 'fixed', top: 8, zIndex: 90 };
       return (
-        <div style={{ position: 'relative', height: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--border)' }}>
           <button className="rv-cta" onClick={history}
-            title="Open test run history and results in the main window"
-            style={{ ...btnStyle, right: 76 }}>
+            title="Open test run history and results in the main window">
             <window.I.History size={12} /> Results
           </button>
           <button className="rv-cta" onClick={dock}
-            title="Dock into the main window's right panel"
-            style={{ ...btnStyle, right: 12 }}>
+            title="Dock into the main window's right panel">
             <window.I.PanelRight size={12} /> Dock
           </button>
-          <window.AgentApp />
+          </div>
+          <div style={{ flex: 1, minHeight: 0 }}><window.AgentApp /></div>
         </div>
       );
     }

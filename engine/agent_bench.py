@@ -59,6 +59,7 @@ import argparse
 import datetime
 import threading
 import subprocess
+import uuid
 
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 ATS_ROOT_DEFAULT = os.path.dirname(ENGINE_DIR)
@@ -111,6 +112,7 @@ def score_events(events):
          "run_attempts": 0, "tool_calls": 0, "asks": 0, "assumed_values": 0,
          "manual_gate": False, "flaky_seen": False,
          "tokens": {"input": 0, "output": 0, "total": 0},
+         "usage_incomplete": True,
          "errors": [], "final_text": ""}
     for ev in events or []:
         kind = ev.get("event")
@@ -121,7 +123,7 @@ def score_events(events):
         elif kind == "tool_result":
             r = parse_tool_summary(ev.get("summary"))
             tool = ev.get("tool")
-            if tool == "create_test_case":
+            if tool in {"create_test_case", "multi_app_create_test"}:
                 if r.get("status") == "success" or "path" in r:
                     s["created"] = True
                     s["assumed_values"] = len(r.get("assumed_values") or [])
@@ -137,6 +139,18 @@ def score_events(events):
         elif kind == "usage":
             # cumulative per session - keep the latest snapshot
             s["tokens"] = {k: int(ev.get(k, 0) or 0) for k in ("input", "output", "total")}
+            s["tokens_estimated"] = bool(ev.get("estimated"))
+            s["usage_incomplete"] = bool(ev.get("usage_incomplete"))
+        elif kind == "model_usage":
+            role = ev.get("role", "unknown")
+            entry = s.setdefault("role_usage", {}).setdefault(role, {"input": 0, "output": 0, "requests": 0, "incomplete": False, "duration_ms": 0})
+            entry["requests"] += 1
+            entry["duration_ms"] += ev.get("duration_ms", 0) or 0
+            for field in ("input", "output"):
+                if ev.get(field) is None:
+                    entry["incomplete"] = True
+                else:
+                    entry[field] += int(ev[field])
         elif kind == "usage_est":
             # per-request INPUT-side estimate emitted by the model wrapper; the
             # ONLY cost signal that survives a killed/timed-out turn (provider
@@ -145,8 +159,13 @@ def score_events(events):
             s["requests"] = int(ev.get("requests", 0) or 0)
         elif kind == "error":
             s["errors"].append(str(ev.get("message", ""))[:200])
+            if ev.get("terminal"):
+                s["terminal_error"] = True
+                s["completed"] = True
         elif kind == "turn_complete":
             s["completed"] = True
+            if ev.get("status") == "error":
+                s["terminal_error"] = True
             s["final_text"] = str(ev.get("text", ""))[:500]
     return s
 
@@ -159,6 +178,8 @@ def task_verdict(result):
         return "skipped"
     if result.get("infra_error"):
         return "infra_error"
+    if result.get("terminal_error"):
+        return "model_error"
     if not result.get("completed"):
         return "timeout"
     if not result.get("created"):
@@ -346,7 +367,7 @@ def _child_env(ats_root, env_name):
 
 def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80,
              ready_timeout=240, turn_timeout=1500, reply=DEFAULT_REPLY,
-             agent_script=None, events_path=None, stderr_path=None, video_dir=None):
+             agent_script=None, events_path=None, stderr_path=None, video_dir=None, on_event=None):
     """Run ONE bench task in a FRESH agent process. Returns the task result dict
     (verdict-ready except for the independent verification leg). When video_dir
     is set, the agent's OWN navigation is recorded there (.webm, finalized when
@@ -358,9 +379,26 @@ def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80
               "difficulty": task.get("difficulty", ""), "app": task.get("app", ""),
               "session_id": None, "infra_error": None}
 
+    # Persist before callbacks so interruption retains the actual event stream.
+    if events_path:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(events_path)), exist_ok=True)
+            with open(events_path, "w", encoding="utf-8"):
+                pass
+        except OSError as exc:
+            result["infra_error"] = f"could not initialize events: {exc}"
+            result.update(score_events(events))
+            result["wall_s"] = round(time.monotonic() - t0, 1)
+            return result
+
     def record(ev):
         ev["_ts"] = round(time.monotonic() - t0, 2)
         events.append(ev)
+        if events_path:
+            with open(events_path, "a", encoding="utf-8") as stream:
+                stream.write(json.dumps(ev, ensure_ascii=True, default=str) + "\n")
+        if on_event is not None:
+            on_event(ev)
 
     child_env = _child_env(ats_root, env_name)
     if video_dir:
@@ -428,6 +466,8 @@ def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80
                     ap.send({"action": "chat", "message": reply})
                 elif ev.get("event") == "turn_complete":
                     break
+                elif ev.get("event") == "error" and ev.get("terminal"):
+                    break
     finally:
         ap.shutdown()
 
@@ -437,14 +477,6 @@ def run_task(task, ats_root, project_id, env_name, provider=None, tool_budget=80
         vids = sorted(f for f in os.listdir(video_dir) if f.endswith(".webm"))
         if vids:
             result["videos"] = [os.path.join(video_dir, v) for v in vids]
-    if events_path:
-        try:
-            os.makedirs(os.path.dirname(events_path), exist_ok=True)
-            with open(events_path, "w", encoding="utf-8") as f:
-                for ev in events:
-                    f.write(json.dumps(ev, ensure_ascii=True, default=str) + "\n")
-        except Exception as e:
-            result.setdefault("errors", []).append(f"could not write events: {e}")
     return result
 
 
@@ -459,14 +491,19 @@ def verify_independent(ats_root, tests_root, task, env_name, project_id,
     if project_id:
         benv["ATS_PROJECT_ID"] = project_id
     passes, last = [], ""
-    for _ in range(max(1, int(runs))):
+    replay_root = os.path.join(ats_root, "results", "independent", uuid.uuid4().hex)
+    evidence = []
+    for index in range(max(1, int(runs))):
+        benv["ATS_RESULTS_DIR"] = os.path.join(replay_root, str(index + 1))
         ok, summ = agent_eval.run_test_once(flow_dir, task["tc_id"], env=benv,
                                             cwd=ats_root, timeout=timeout)
+        evidence.append(benv["ATS_RESULTS_DIR"])
         passes.append(ok)
         last = summ or last
         if not ok:
             break
-    return {"runs": passes, "verdict": agent_eval.classify(passes), "summary": last}
+    return {"runs": passes, "verdict": agent_eval.classify(passes), "summary": last,
+            "artifact_dirs": evidence}
 
 
 def keep_awake(on):

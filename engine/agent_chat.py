@@ -58,6 +58,7 @@ import datetime
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -73,6 +74,11 @@ import llm as _llm
 from smart_locator import smart_locator, SelfHealError, to_locator
 from recorder_parser import generate_from_review
 from agent_recorder import _locator_str, _q  # reuse the proven codegen helpers
+from goal_controller import GoalAction, execute_bounded
+from decision import ChoiceDecider
+from action_guard import ActionGuard, GoalHandoffGuard
+from recording_history import RecordingHistory, clear_recording as clear_saved_recording
+from interaction_context import attach_interaction_context, decision_page
 
 from pydantic_ai import Agent, RunContext, capture_run_messages, BinaryContent, ToolReturn
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -126,15 +132,59 @@ def _read_json_file(path, default=None):
 
 _COMPACT_KEEP_RECENT = 12     # most recent messages stay verbatim (current task context)
 _COMPACT_MAX_CHARS = 1200     # what an OLD tool result may keep
+_PERCEPT_TOOLS = {"observe", "execute_goal", "multi_app_observe"}
+
+
+def _is_percept(part):
+    return isinstance(part, ToolReturnPart) and (part.tool_name in _PERCEPT_TOOLS or
+        (part.tool_name in {"multi_app_execute_goal", "multi_app_act", "multi_app_check"} and isinstance(part.content, dict)
+         and isinstance(part.content.get("observation"), dict)))
+
+
+def _multi_app_prompt(messages):
+    import dataclasses
+    from planner_policy import HYBRID_SYSTEM, MULTI_APP_SYSTEM
+    return [dataclasses.replace(m, parts=[dataclasses.replace(p, content=MULTI_APP_SYSTEM)
+            if getattr(p, "part_kind", "") == "system-prompt" and p.content == HYBRID_SYSTEM else p
+            for p in m.parts]) for m in messages]
+
+
+def _plan_snapshot(part):
+    return (isinstance(part, ToolReturnPart) and part.tool_name in {"set_plan", "update_plan"}
+            and isinstance(part.content, dict) and part.content.get("ok") is True
+            and (isinstance(part.content.get("plan"), list)
+                 or (part.tool_name == "set_plan" and isinstance(part.content.get("steps"), int))))
+
+
+def _plan_failure(part):
+    # Keep past blocked/skipped milestones even when a newer plan no longer lists them.
+    return (isinstance(part, ToolReturnPart) and part.tool_name in {"set_plan", "update_plan"}
+            and (not isinstance(part.content, dict) or part.content.get("ok") is not True
+                 or any(tag in str(part.content.get("plan", [])) for tag in ("[failed]", "[skipped]"))))
+
+
+def _compact_plans(messages):
+    """Superseded successful checklist snapshots only; preserve calls and originals."""
+    import dataclasses
+    latest = next((p for m in reversed(messages) for p in reversed(m.parts) if _plan_snapshot(p)), None)
+    out = []
+    for message in messages:
+        parts = [dataclasses.replace(p, content={"ok": True, "superseded_plan": True})
+                 if _plan_snapshot(p) and p is not latest and not _plan_failure(p) else p for p in message.parts]
+        out.append(dataclasses.replace(message, parts=parts))
+    return out
 
 
 def _compact_history(messages, keep_recent=_COMPACT_KEEP_RECENT,
-                     max_chars=_COMPACT_MAX_CHARS):
+                     max_chars=_COMPACT_MAX_CHARS, preserve_last_percept=False):
     """Shrink stale tool results in the model history. Structure is never touched
     (tool_call_id pairing stays intact) — only the CONTENT of old ToolReturnParts
     is truncated, with a hint to re-call the tool for fresh data. Idempotent."""
     import dataclasses
     msgs = list(messages)
+    last_percept = next((p for m in reversed(msgs) for p in reversed(getattr(m, "parts", []))
+                         if _is_percept(p)), None) if preserve_last_percept else None
+    last_plan = next((p for m in reversed(msgs) for p in reversed(m.parts) if _plan_snapshot(p)), None) if preserve_last_percept else None
     if len(msgs) <= keep_recent:
         return msgs
     cutoff = len(msgs) - keep_recent
@@ -145,7 +195,9 @@ def _compact_history(messages, keep_recent=_COMPACT_KEEP_RECENT,
             continue
         parts, changed = [], False
         for p in getattr(m, "parts", []):
-            if isinstance(p, ToolReturnPart):
+            if (isinstance(p, ToolReturnPart) and p is not last_percept and p is not last_plan
+                    and not (preserve_last_percept and (_plan_failure(p) or
+                        isinstance(p.content, dict) and p.content.get("stale_observation")))):
                 c = p.content
                 if isinstance(c, str):
                     s = c
@@ -166,6 +218,31 @@ def _compact_history(messages, keep_recent=_COMPACT_KEEP_RECENT,
     return out
 
 
+def _compact_percepts(messages):
+    """Keep the latest observation intact; obsolete refs must not dominate context."""
+    import dataclasses
+    latest = None
+    for i, m in enumerate(messages):
+        for j, p in enumerate(getattr(m, "parts", [])):
+            if _is_percept(p):
+                latest = (i, j)
+    out = []
+    for i, m in enumerate(messages):
+        parts = []
+        changed = False
+        for j, p in enumerate(getattr(m, "parts", [])):
+            if _is_percept(p) and (i, j) != latest:
+                content = p.content
+                summary = {"stale_observation": True, "note": "Use the latest observation for refs"}
+                if isinstance(content, dict):
+                    summary.update({k: content[k] for k in ("ok", "status", "url", "app", "actor", "checkpoints", "checks", "trace", "error", "detail", "note", "tainted", "verified", "execution_state", "attempted_actions", "completed_actions", "capture", "op", "recorded_steps") if k in content})
+                p = dataclasses.replace(p, content=summary)
+                changed = True
+            parts.append(p)
+        out.append(dataclasses.replace(m, parts=parts) if changed else m)
+    return out
+
+
 class TurnCompactingModel(WrapperModel):
     """Caps WITHIN-TURN context growth. Every model request re-sends the whole
     turn transcript, so long authoring turns grow quadratically — run-5
@@ -180,8 +257,31 @@ class TurnCompactingModel(WrapperModel):
     # AGENT_MEMORY (~2.8k) + framing — measured 2026-06-11.
     _SYS_OVERHEAD_EST = 15000
 
+    def __init__(self, wrapped, *, compact=False, multi_app_active=None):
+        super().__init__(wrapped)
+        self.compact = compact
+        self.multi_app_active = multi_app_active
+
+    def _report_context(self, messages, parameters):
+        from prompt_metrics import context_metrics
+        emit({"event": "planner_context", **context_metrics(messages, parameters)})
+
+    async def request(self, messages, model_settings, model_request_parameters):
+        self._report_context(messages, model_request_parameters)
+        return await super().request(messages, model_settings, model_request_parameters)
+
+    @asynccontextmanager
+    async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
+        self._report_context(messages, model_request_parameters)
+        async with super().request_stream(messages, model_settings, model_request_parameters, run_context) as stream:
+            yield stream
+
     def prepare_messages(self, messages):
-        out = _compact_history(messages, keep_recent=12, max_chars=600)
+        if self.compact and self.multi_app_active is not None and self.multi_app_active():
+            messages = _multi_app_prompt(messages)
+        out = _compact_plans(_compact_percepts(messages)) if self.compact else messages
+        out = _compact_history(out, keep_recent=4 if self.compact else 12, max_chars=600,
+                               preserve_last_percept=self.compact)
         # Cost telemetry that SURVIVES killed turns: provider usage only lands when
         # a turn completes, so 40-minute timeout tasks reported ZERO tokens (nine
         # such tasks hid an estimated 100M+ real spend). Estimate the outgoing
@@ -460,8 +560,13 @@ _BROWSER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
 
 async def _bro(fn, *args, **kwargs):
     """Run a (sync) Playwright operation on the pinned browser thread."""
+    def execute():
+        owner = getattr(fn, "__self__", None)
+        if getattr(owner, "_multi_app_recording", None) is not None and getattr(fn, "__name__", "") != "close":
+            return {"ok": False, "status": "multi_app_active", "note": "Use the isolated multi_app_* recording tools"}
+        return fn(*args, **kwargs)
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_BROWSER, lambda: fn(*args, **kwargs))
+    return await loop.run_in_executor(_BROWSER, execute)
 
 
 _VISION_PROMPT = (
@@ -479,7 +584,19 @@ async def _call_vision_oracle(config: dict, screenshot_bytes: bytes,
     """Async wrapper: dispatches a one-shot vision call to the configured vision model
     on the default executor (NOT the browser thread). Returns a text description.
     Falls back to a clear error string so callers can always include it in results."""
+    from model_profiles import vision_unavailable_reason
+    unavailable = vision_unavailable_reason(config)
+    if unavailable:
+        return f"(vision unavailable: {unavailable})"
     oracle_cfg = (config.get("vision_oracle") or {})
+    vision_profile = ((config.get("llm") or {}).get("roles") or {}).get("vision")
+    if vision_profile:
+        from model_profiles import resolve_profile, require_capability
+        try:
+            _, oracle_cfg = resolve_profile(config, vision_profile, "vision")
+            require_capability(oracle_cfg, "vision")
+        except ValueError as exc:
+            return f"(vision profile unavailable: {exc})"
     if not oracle_cfg or not oracle_cfg.get("model"):
         return ("(vision oracle not configured — add 'vision_oracle' block with "
                 "'model','base_url','api_key_env' to config.json)")
@@ -491,6 +608,8 @@ async def _call_vision_oracle(config: dict, screenshot_bytes: bytes,
     except _llm.LLMNotConfigured as e:
         return f"(vision oracle key missing: {e})"
     except Exception as e:
+        if getattr(e, "status_code", None) in {400, 401, 402, 403, 404, 422}:
+            config["_vision_runtime_unavailable"] = True
         return f"(vision oracle error: {type(e).__name__}: {str(e)[:200]})"
 
 
@@ -683,12 +802,15 @@ class BrowserSession:
         self.context = None
         self.page = None
         self.by_ref = {}        # ref -> element model (from last inspect)
+        self._action_guard = ActionGuard()
         self.steps = []         # recorded steps -> generate_from_review
         self.assertions = []    # recorded checkpoints
         self.step_id = 0
         self.input_counter = 0
         self.assumptions = []   # auto-mode values with no provenance (review queue)
         self.skips = []         # explicit skip_step events (auditable)
+        self.recording_history = RecordingHistory()
+        self._multi_app_recording = None
         self.issues = []        # breakage: console errors / JS exceptions / failed requests
         self._auth_failures = []  # 401/403 responses since last navigate (reset each navigate)
         self._api_errors = []   # 400-499 non-auth responses since last navigate (reset each navigate)
@@ -773,7 +895,7 @@ class BrowserSession:
                     continue
                 ls_json = json.dumps(ls_items, ensure_ascii=True)
                 script = (
-                    f"if (window.location.hostname === {json.dumps(hostname)}) {{"
+                    f"if (window.location.origin === {json.dumps(origin)}) {{"
                     f"  try {{ const _i={ls_json};"
                     f"  _i.forEach(function(x){{localStorage.setItem(x.name,x.value);}});"
                     f"  }} catch(e) {{}} }}"
@@ -835,6 +957,9 @@ class BrowserSession:
         return {"url": self._url(), "title": self._title(), "authed": authed}
 
     def close(self):
+        if self._multi_app_recording is not None:
+            self._multi_app_recording.close()
+            self._multi_app_recording = None
         for fn in (lambda: self.context and self.context.close(),
                    lambda: self.browser and self.browser.close(),
                    lambda: self.pw and self.pw.stop()):
@@ -1531,8 +1656,11 @@ class BrowserSession:
         except Exception:
             pass  # aria augmentation optional — native-only result is still valid
 
-        if not models:
-            return {"ok": False, "error": native_err or "no interactive elements found on the page"}
+        if not models and native_err:
+            self.by_ref = {}
+            return {"ok": False, "error": native_err}
+        # A static confirmation/detail page is still an observable page. Zero
+        # interactive controls must not discard its URL and rendered evidence.
 
         # --- Normalizer detectors: fix name collisions (exact=True), compute hints ---
         disambiguate(models)
@@ -1568,7 +1696,7 @@ class BrowserSession:
                 result["validation_errors"] = errs[:8]
         except Exception:
             pass
-        return result
+        return attach_interaction_context(self.page, result, self.by_ref)
 
     def _record_strategy(self, el):
         """Pick the locator to RECORD so the generated test hits exactly the intended element on a
@@ -1585,11 +1713,22 @@ class BrowserSession:
         def _count(strat):
             try:
                 loc = to_locator(self.page, strat)
-                return loc.count() if loc is not None else 0
+                count = loc.count() if loc is not None else 0
+                if count == 1 and el.get("node_id"):
+                    identity = loc.evaluate("el => { const s=window.__qamateNodes; return s && s.document + ':' + s.ids.get(el); }")
+                    # A unique text fallback may locate the LABEL instead of its
+                    # input. Uniqueness alone is not grounding or replay safety.
+                    if identity != el["node_id"]:
+                        return 0
+                return count
             except Exception:
                 return -1
         k = el.get("match_index")
         n = _count(prim)
+        if n == 1 and el.get("tag") == "a" and el.get("node_id"):
+            # Entity links can gain duplicate renderings after asynchronous
+            # activity arrives. Preserve the observed occurrence at replay too.
+            return prim, _locator_str(prim), None, 0
         if n == 0:
             # The primary matches NOTHING live (e.g. Radix/shadcn selects: the
             # visible placeholder is aria-hidden, so the accessible name is empty
@@ -1605,12 +1744,23 @@ class BrowserSession:
         tid = (el.get("test_id") or "").strip()      # ambiguous -> try the element's test-id
         if tid:
             ts = {"by": "test_id", "value": tid}
+            if el.get("test_id_attribute") in {"data-test", "data-test-id", "data-cy"}:
+                escaped = tid.replace("\\", "\\\\").replace('"', '\\"')
+                ts = {"by": "css", "value": f'[{el["test_id_attribute"]}="{escaped}"]'}
             if _count(ts) == 1:
                 return ts, _locator_str(ts), None, None
         if k is not None:
             # nth suffix is appended by act() AFTER refining k against the live
             # locator (snapshot order is only a guess — see _ordinal_by_rect).
             return prim, _locator_str(prim), None, k
+        if n > 1 and el.get("node_id"):
+            try:
+                identities = to_locator(self.page, prim).evaluate_all(
+                    "els => els.map(el => { const s=window.__qamateNodes; return s && s.document + ':' + s.ids.get(el); })")
+                if identities.count(el["node_id"]) == 1:
+                    return prim, _locator_str(prim), None, identities.index(el["node_id"])
+            except Exception:
+                pass
         warn = (f"This locator matches {n} elements on the page, so the test will act on the FIRST "
                 f"one. If that is not the element you meant, pick a more uniquely identifiable element "
                 f"(distinct text/label, or one exposing a test id).")
@@ -1671,6 +1821,35 @@ class BrowserSession:
         )
 
     def act(self, kind, ref, value=None):
+        return self._guard_action(kind, ref, value, lambda: self._act_once(kind, ref, value))
+
+    def _action_state(self):
+        try:
+            import hashlib
+            state = self.page.evaluate("""() => JSON.stringify([
+                location.href, document.body?.innerText.slice(0, 20000),
+                Array.from(document.querySelectorAll('input,select,textarea,[aria-expanded],[role=dialog]')).slice(0,200)
+                    .map(el => [el.tagName,el.value,el.checked,el.disabled,el.getAttribute('aria-expanded'),el.getAttribute('aria-hidden')])
+            ])""")
+            return hashlib.sha256(state.encode()).hexdigest()
+        except Exception:
+            return self._url()
+
+    def _guard_action(self, kind, ref, value, run):
+        before = self._action_state()
+        target = (self.by_ref.get(ref) or {}).get("node_id") or ref
+        key = self._action_guard.key(kind, target, value, before)
+        if self._action_guard.blocked(key):
+            return {"ok": False, "blocked": True, "retry_exhausted": True,
+                    "error": "Equivalent action already failed or made no progress twice. Replan or ask the user; do not repeat it."}
+        result = run()
+        progressed = bool(result.get("ok")) and self._action_state() != before
+        self._action_guard.record(key, progressed)
+        if result.get("ok") and not progressed:
+            result["no_progress"] = True
+        return result
+
+    def _act_once(self, kind, ref, value=None):
         el = self.by_ref.get(ref)
 
         # Direct-selector fallback: if ref isn't a known inspect_page ref but looks like a
@@ -1696,7 +1875,10 @@ class BrowserSession:
                 loc = to_locator(self.page, strat)
                 n_live = loc.count()
                 if n_live <= 1:
-                    nth = None                      # unique live — plain locator is right
+                    if el.get("tag") == "a" and n_live == 1:
+                        loc_str = f"{loc_str}.nth(0)"
+                    else:
+                        nth = None                  # unique live — plain locator is right
                     live = loc
                 else:
                     k_live = self._ordinal_by_rect(loc, n_live, el.get("rect") or {})
@@ -1719,6 +1901,11 @@ class BrowserSession:
         pre_url = self._url()   # page this step belongs to (a click may navigate away)
         self.step_id += 1
         try:
+            if el.get("node_id"):
+                identity = live.evaluate("el => { const s=window.__qamateNodes; return s && s.document + ':' + s.ids.get(el); }")
+                if identity != el["node_id"]:
+                    self.step_id -= 1
+                    return {"ok": False, "error": "Target changed or healed to a different DOM node; observe again", "stale_ref": True, "dispatched": False}
             if kind == "fill":
                 val = str(value or "")
                 if "sequential-fill" in hints:
@@ -1770,7 +1957,7 @@ class BrowserSession:
             result["warning"] = warning
         if kind == "click" and self.overlay_opened():
             result["overlay_opened"] = True
-        elif kind == "fill":
+        elif kind == "fill" and (el.get("role") == "combobox" or el.get("autocomplete") in {"list", "both"}):
             # After typing into a field, wait for autocomplete options (API response may be async).
             # If any appear, include them directly so the agent doesn't need another round-trip.
             opts = self.get_options()["options"]
@@ -1874,6 +2061,10 @@ class BrowserSession:
         return [o for o in (opts or []) if not self._EMPTY_STATE_RE.search((o or "").strip())]
 
     def select_from_dropdown(self, ref, value):
+        return self._guard_action("select-dropdown", ref, value,
+                                  lambda: self._select_from_dropdown_once(ref, value))
+
+    def _select_from_dropdown_once(self, ref, value):
         """Intent-level dropdown selection: ONE call runs the whole escalation ladder
         (native select -> type-to-search (full term, then first word) -> wait for
         async options -> option click -> keyboard) and records test steps for
@@ -1887,7 +2078,11 @@ class BrowserSession:
 
         # Tier 0: native <select> — Playwright handles it outright.
         if el is not None and el.get("tag") == "select":
-            r = self.act("select", ref, value)
+            options = el.get("options") or []
+            matches = [o for o in options if not o.get("disabled") and (o.get("value") == value or o.get("label") == value)]
+            if options and len(matches) != 1:
+                return {"ok": False, "error": "Native option must match one enabled label or value exactly", "options": options}
+            r = self.act("select", ref, matches[0]["value"] if matches else value)
             if r.get("ok"):
                 r.update({"selected": value, "via": "native-select"})
             return r
@@ -2207,9 +2402,34 @@ class BrowserSession:
                 "error": "no fill step recorded yet — fill the OTP/code field first, "
                          "then call mark_step_manual"}
 
-    def add_checkpoint(self, name, assert_type, value):
+    def add_checkpoint(self, name, assert_type, value, ref=""):
         after = self.steps[-1]["id"] if self.steps else 0
         v = str(value or "")
+        if assert_type not in {"url_equals", "url_contains", "page_contains_text", "page_not_contains_text", "element_has_value"}:
+            return {"ok": False, "error": "Unsupported checkpoint type"}
+        if (not v.strip() and assert_type != "element_has_value") or not self._alive():
+            return {"ok": False, "error": "Checkpoint requires a nonblank value and a live page"}
+        if assert_type == "element_has_value":
+            el = self.by_ref.get(ref)
+            if not el or not el.get("node_id"):
+                return {"ok": False, "error": "A current DOM-grounded input/select ref is required"}
+            try:
+                strategy, _, _, ordinal = self._record_strategy(el)
+                locator = to_locator(self.page, strategy)
+                if locator is not None and ordinal is not None:
+                    locator = locator.nth(ordinal)
+                if locator is None or locator.count() != 1:
+                    return {"ok": False, "error": "Value checkpoint needs a unique locator"}
+                node = locator.evaluate("el => { const s=window.__qamateNodes; return s && s.document + ':' + s.ids.get(el); }")
+                button_combo = el.get("tag") == "button" and el.get("role") == "combobox"
+                actual_value = locator.inner_text().strip() if button_combo else locator.input_value()
+                if node != el["node_id"] or actual_value != v or button_combo and locator.get_attribute("aria-expanded") == "true":
+                    return {"ok": False, "error": "Value checkpoint is not true on the current grounded element"}
+                self.assertions.append({"type": "locator_has_text" if button_combo else "locator_has_value", "selector": locator._impl_obj._selector, "value": v,
+                                        "afterStep": after, "description": name})
+                return {"ok": True, "checkpoint_count": len(self.assertions)}
+            except Exception:
+                return {"ok": False, "error": "Could not verify the value checkpoint"}
         # Record-time truth gate: a checkpoint asserts the CURRENT state (it
         # replays right after the latest step), so if it isn't true on the
         # SETTLED page now it can never pass at replay. Catching it here costs
@@ -2217,23 +2437,28 @@ class BrowserSession:
         # cycle (run-5 BENCH-009: asserted the vendor name that was only on
         # screen inside the open dropdown).
         try:
-            if assert_type == "page_contains_text" and v and self._alive():
+            if assert_type in {"page_contains_text", "page_not_contains_text"}:
                 self._settle()   # let transient dropdowns/toasts finish
                 body = self.page.inner_text("body") or ""
-                if v.lower() not in body.lower():
+                if assert_type == "page_not_contains_text" and v in body:
+                    return {"ok": False, "error": "checkpoint NOT TRUE right now: text is still present"}
+                if assert_type == "page_contains_text" and v not in body:
                     return {"ok": False,
                             "error": (f"checkpoint NOT TRUE right now: the settled page does not "
                                       f"show {v[:60]!r}. If you saw it inside a dropdown/toast it "
                                       "was transient and will NOT be there at replay - assert a "
                                       "durable outcome instead (heading, field label, URL, count).")}
+            elif assert_type == "url_equals":
+                if self._url() != v:
+                    return {"ok": False, "error": "Current URL does not equal the required URL"}
             elif assert_type == "url_contains" and v:
                 cur = self._url()
-                if cur and v.lower() not in cur.lower():
+                if not cur or v not in cur:
                     return {"ok": False,
                             "error": (f"checkpoint NOT TRUE right now: the current URL "
                                       f"{cur[:80]!r} does not contain {v[:60]!r}.")}
         except Exception:
-            pass   # validation is best-effort; never block recording on a probe error
+            return {"ok": False, "error": "Checkpoint probe failed; no assertion was recorded"}
         self.assertions.append({"type": assert_type, "value": v,
                                 "afterStep": after, "description": name})
         return {"ok": True, "checkpoint_count": len(self.assertions)}
@@ -2241,7 +2466,9 @@ class BrowserSession:
     def recorded_flow(self):
         return {"steps": [{"id": s["id"], "desc": s["targetDescription"]} for s in self.steps],
                 "checkpoints": [a["description"] for a in self.assertions],
-                "issues_found": len(self.issues)}
+                "issues_found": len(self.issues), "snapshots": self.recording_history.summaries(),
+                "next_step": "If required outcomes are covered, create and replay the test. "
+                             "Do not re-record merely to remove recovery steps or expected validation errors."}
 
     @staticmethod
     def _collect_check(ats_root, tests_root, flow_id, tc_id, timeout=90):
@@ -2503,6 +2730,10 @@ class Deps:
     mode: str = "auto"        # "auto" (free) | "guided" (tools pause on unproven values/skips)
     provenance: Optional["ProvenanceTracker"] = None  # legitimate value sources this session
     plan: list = field(default_factory=list)  # live checklist [{step, status, note?}] -> 'plan' events
+    tool_group: str = ""
+    recovery_actions: int = 0
+    controller_active: bool = False
+    goal_handoffs: GoalHandoffGuard = field(default_factory=GoalHandoffGuard)
 
 
 # ── System prompt ──────────────────────────────────────────────────────────
@@ -2649,20 +2880,168 @@ def _load_playbook():
 _PLAYBOOK = _load_playbook()
 
 
-def build_agent(model, max_tokens=None):
+def build_agent(model, max_tokens=None, profile=None, *, hybrid=False, decision_loop=False, decision_workflow=False):
+    from planner_policy import HYBRID_SYSTEM, DECISION_LOOP_SYSTEM, DECISION_WORKFLOW_SYSTEM, GROUPS, GoalCheckpoints, goal_plan_status, prepare_planner_tools, direct_action_allowed
     mt = int(max_tokens if max_tokens is not None else AGENT_MAX_TOKENS)
-    settings = {"temperature": 0.2}
+    profile = profile or {}
+    settings = dict(profile.get("model_settings") or {})
+    if profile.get("supports_temperature", True):
+        settings.setdefault("temperature", 0.2)
     if mt > 0:                       # 0/unset => omit max_tokens so the model uses its own output max
         settings["max_tokens"] = mt
     agent = Agent(
         model,
         deps_type=Deps,
-        system_prompt=_SYSTEM + (("\n\n" + _PLAYBOOK) if _PLAYBOOK else ""),
+        system_prompt=(DECISION_WORKFLOW_SYSTEM if decision_workflow else DECISION_LOOP_SYSTEM if decision_loop else
+                      HYBRID_SYSTEM if hybrid else _SYSTEM + (("\n\n" + _PLAYBOOK) if _PLAYBOOK else "")),
+        prepare_tools=prepare_planner_tools,
         retries=2,
         # Generous so a run_test_case verification (a full pytest run) is not cancelled mid-test.
         tool_timeout=240,
         model_settings=settings,
     )
+    from multi_app_tools import register_multi_app_tools
+    register_multi_app_tools(agent, Deps, _bro, _value_gate, emit)
+    from decision_workflow_tools import register_decision_workflow
+    register_decision_workflow(agent, Deps, _bro, _value_gate, emit)
+    from decision_browser_tools import register_decision_browser
+    register_decision_browser(agent, Deps, _bro, _value_gate, emit)
+
+    async def _prepare_goal(ctx, definition):
+        return definition if (ctx.deps.config.get("agent_execution") or {}).get("hybrid_enabled", False) else None
+
+    @agent.tool(prepare=_prepare_goal, sequential=True)
+    async def execute_goal(ctx: RunContext[Deps], goal: str, actions: list[GoalAction],
+                           checkpoints: GoalCheckpoints | None = None, plan_step: int | None = None) -> dict:
+        """Opt-in inner loop for up to eight already authorized actions on current refs.
+        Concrete input values must be supplied. Stops on navigation, stale targets,
+        no progress or uncertainty. checkpoints is an array of typed outcome objects.
+        Optional plan_step updates that checklist step without extra planning tool calls.
+        Use actions=[] with nonempty checkpoints for a deterministic read-only batch;
+        this does not invoke the decision model or unlock mutation recovery.
+        Still requires run_test_case for independent test verification.
+        """
+        if (ctx.deps.config.get("agent_execution") or {}).get("decision_loop_enabled"):
+            return {"ok": False, "status": "decision_loop_required"}
+        if ctx.deps.session._multi_app_recording is not None:
+            return {"ok": False, "status": "multi_app_active", "note": "Use multi_app_execute_goal for the isolated recorder"}
+        if not (ctx.deps.config.get("agent_execution") or {}).get("hybrid_enabled", False):
+            return {"ok": False, "status": "disabled", "note": "Use regular action tools"}
+        if len(checkpoints or []) > 10:
+            return {"ok": False, "status": "invalid_goal", "error": "At most ten outcome checkpoints"}
+        if plan_step is not None and not 1 <= plan_step <= len(ctx.deps.plan):
+            return {"ok": False, "status": "invalid_goal", "error": "plan_step must identify an existing checklist step"}
+        def goal_progress(status):
+            if plan_step is not None:
+                ctx.deps.plan[plan_step - 1]["status"] = status
+                emit({"event": "plan", "steps": [dict(p) for p in ctx.deps.plan]})
+        async def record_checks():
+            checks = []
+            for cp in checkpoints or []:
+                check = await _bro(ctx.deps.session.add_checkpoint, cp.name, cp.assert_type, cp.value, cp.ref)
+                checks.append({"name": cp.name, **check})
+                if not check.get("ok"):
+                    break
+            return checks
+        if not actions:
+            if not goal.strip() or not checkpoints:
+                return {"ok": False, "status": "invalid_goal", "note": "Supply actions or at least one outcome checkpoint"}
+            checks = await record_checks()
+            passed = len(checks) == len(checkpoints) and all(c.get("ok") is True for c in checks)
+            result = {"ok": passed, "status": "checks_completed" if passed else "checkpoint_failed",
+                      "checkpoints": checks, "trace": [], "verified": False,
+                      "attempted_actions": 0, "completed_actions": 0, "execution_state": "not_attempted",
+                      "note": "Read-only assertions only; no mutation or decision call. Independent replay is still required."}
+            goal_progress(goal_plan_status(result))
+            emit({"event": "goal_execution", "result": result})
+            return {**result, "observation": await _bro(ctx.deps.session.inspect, 40)}
+        def authorized_targets():
+            return {action.ref: ({"node": el["node_id"], "primary": dict(el.get("primary") or {})} if el.get("node_id") else None)
+                    for action in actions for el in [ctx.deps.session.by_ref.get(action.ref, {})]}
+        expected_targets = await _bro(authorized_targets)
+        def snapshot():
+            session = ctx.deps.session
+            page = session.inspect(80)
+            targets = {ref: {"node": el.get("node_id"), "primary": el.get("primary")}
+                       for ref, el in session.by_ref.items()
+                       if el.get("node_id") and el.get("visible", True) and not el.get("disabled")}
+            return {"url": page.get("url"), "document": session.page.evaluate("() => window.__qamateNodes?.document"),
+                    "state_hash": session._action_state(),
+                    "targets": targets, "page": decision_page(page),
+                    "values": {ref: (el.get("value"), el.get("checked")) for ref, el in session.by_ref.items()
+                               if el.get("tag") in {"input", "select", "textarea"}}}
+        async def observe_state():
+            return await _bro(snapshot)
+        async def perform(action):
+            if action.kind == "fill":
+                return await fill(ctx, action.ref, action.value)
+            if action.kind == "select":
+                return await select_option(ctx, action.ref, action.value)
+            result = await click(ctx, action.ref)
+            return result.return_value if isinstance(result, ToolReturn) else result
+        before_goal = await _bro(ctx.deps.session._action_state)
+        goal_key = ctx.deps.goal_handoffs.key(actions)
+        if ctx.deps.goal_handoffs.blocked(before_goal, goal_key):
+            ctx.deps.config.setdefault("agent_execution", {})["hybrid_enabled"] = False
+            ctx.deps.recovery_actions = 0
+            goal_progress("failed")
+            emit({"event": "controller_fallback", "reason": "repeated_handoff"})
+            return {"ok": False, "status": "controller_retry_exhausted",
+                    "note": "Hybrid disabled for this session after repeated unchanged-state handoffs. "
+                            "Use regular tools and preserve required assertions. Report fallback explicitly; do not retry execute_goal."}
+        try:
+            decision_name = ((ctx.deps.config.get("llm") or {}).get("roles") or {}).get("decision")
+            if not decision_name:
+                ctx.deps.config.setdefault("agent_execution", {})["hybrid_enabled"] = False
+                emit({"event": "controller_fallback", "reason": "missing_decision_profile"})
+                goal_progress("failed")
+                return {"ok": False, "status": "not_configured", "terminal": True,
+                        "note": "Hybrid disabled for this session. Bind llm.roles.decision before restarting; regular tools remain available."}
+            goal_progress("active")
+            ctx.deps.controller_active = True
+            try:
+                result = await execute_bounded(goal, actions, observe_state, perform,
+                                               ChoiceDecider(ctx.deps.config, decision_name, usage_sink=emit), expected_targets=expected_targets)
+            finally:
+                ctx.deps.controller_active = False
+            after_goal = await _bro(ctx.deps.session._action_state)
+            ctx.deps.goal_handoffs.record(before_goal, goal_key, after_goal != before_goal)
+            if result.get("ok"):
+                result["checkpoints"] = await record_checks()
+                if any(not c.get("ok") for c in result["checkpoints"]):
+                    result["ok"] = False
+                    result["status"] = "checkpoint_failed"
+            ctx.deps.recovery_actions = 0 if result.get("ok") else 2
+            goal_progress(goal_plan_status(result))
+            emit({"event": "goal_execution", "result": result})
+            result = dict(result)
+            result["trace"] = [{k: row[k] for k in ("kind", "ref", "ok")} for row in result.get("trace", [])]
+            result["observation"] = await _bro(ctx.deps.session.inspect, 40)
+            if result.get("terminal"):
+                ctx.deps.config.setdefault("agent_execution", {})["hybrid_enabled"] = False
+                emit({"event": "controller_fallback", "reason": "terminal_decision_error"})
+                result["note"] = "Decision provider rejected the request. Hybrid disabled for this session; fix its configuration before restarting. Regular tools remain available."
+            return result
+        except Exception as exc:
+            ctx.deps.controller_active = False
+            ctx.deps.recovery_actions = 2
+            ctx.deps.goal_handoffs.record(before_goal, goal_key, False)
+            goal_progress("failed")
+            return {"ok": False, "status": "controller_error", "error": type(exc).__name__}
+
+    @agent.tool
+    async def request_tool_group(ctx: RunContext[Deps], group: str) -> dict:
+        """Load extra tools: context, settings, diagnostics, specialized; browse resets the group.
+        Does not unlock direct click/fill/select recovery or change permissions."""
+        if group != "browse" and group not in GROUPS:
+            return {"ok": False, "groups": ["browse", *GROUPS]}
+        ctx.deps.tool_group = "" if group == "browse" else group
+        from model_profiles import vision_unavailable_reason
+        unavailable = vision_unavailable_reason(ctx.deps.config)
+        tools = GROUPS.get(group, set()) - ({"look", "find_on_screen"} if unavailable else set())
+        return {"ok": True, "group": group, "tools": sorted(tools),
+                "vision_unavailable": unavailable,
+                "note": "Use grounded DOM tools or report the unsupported control; switching groups does not enable vision." if unavailable else ""}
 
     @agent.tool
     async def navigate(ctx: RunContext[Deps], url: str) -> dict:
@@ -2674,6 +3053,8 @@ def build_agent(model, max_tokens=None):
         (expired session). In BOTH cases you MUST follow the steps in that message before
         doing anything else. DO NOT navigate to another URL. DO NOT continue the sequence.
         The sequence is SUSPENDED at this point until authentication is resolved."""
+        if (ctx.deps.config.get("agent_execution") or {}).get("decision_loop_enabled"):
+            return {"ok": False, "status": "decision_loop_required"}
         return await _bro(ctx.deps.session.navigate, url)
 
     @agent.tool
@@ -2711,6 +3092,8 @@ def build_agent(model, max_tokens=None):
         FALLBACK: if a ref is broken (e.g. MUI colon IDs like :r3:), pass a direct CSS selector
         instead — e.g. 'button[type="submit"]' or '[role="button"]'. Direct selectors are
         detected automatically and bypass the ref lookup."""
+        if not direct_action_allowed(ctx.deps):
+            return {"ok": False, "status": "controller_required", "note": "Use execute_goal with grounded refs"}
         result = await _bro(ctx.deps.session.act, "click", ref, None)
         if result.get("overlay_opened"):
             shot = await _bro(ctx.deps.session.screenshot)
@@ -2729,12 +3112,16 @@ def build_agent(model, max_tokens=None):
         - You are about to interact with dynamic content (date-pickers, rich selects, etc.)
         - You are unsure what the page looks like right now
         Returns 'visual_description' — a literal description of what is currently on screen."""
+        from model_profiles import vision_unavailable_reason
+        unavailable = vision_unavailable_reason(ctx.deps.config)
+        if unavailable:
+            return {"ok": False, "status": "vision_unavailable", "reason": unavailable}
         try:
             shot = await _bro(ctx.deps.session.screenshot)
         except Exception as e:
             return {"ok": False, "error": f"screenshot failed: {e}"}
         description = await _call_vision_oracle(ctx.deps.config, shot, question)
-        return {"ok": True, "visual_description": description}
+        return {"ok": bool(description.strip()) and not description.startswith("(vision"), "visual_description": description}
 
     @agent.tool
     async def mouse_click(ctx: RunContext[Deps], x: float, y: float) -> dict:
@@ -2785,6 +3172,10 @@ def build_agent(model, max_tokens=None):
         Returns {ref, role, name} on success — act on the ref like any other.
         Only if the target has NO DOM element (canvas/SVG drawing) you get raw {x, y}
         for mouse_click(). description example: 'the trash icon on the first table row'."""
+        from model_profiles import vision_unavailable_reason
+        unavailable = vision_unavailable_reason(ctx.deps.config)
+        if unavailable:
+            return {"ok": False, "status": "vision_unavailable", "reason": unavailable}
         try:
             shot = await _bro(ctx.deps.session.screenshot)
             dims = await _bro(ctx.deps.session.viewport_size)
@@ -2853,6 +3244,8 @@ def build_agent(model, max_tokens=None):
         Successful fills are automatically saved to the project input registry.
         In GUIDED mode a value that did not come from the user pauses the session
         for their input — this happens automatically, don't try to work around it."""
+        if not direct_action_allowed(ctx.deps):
+            return {"ok": False, "status": "controller_required", "note": "Use execute_goal with grounded refs"}
         value = await _value_gate(ctx, ref, value, "fill")
         result = await _bro(ctx.deps.session.act, "fill", ref, value)
         if ctx.deps.provenance and result.get("autocomplete_options"):
@@ -2927,6 +3320,8 @@ def build_agent(model, max_tokens=None):
         from there, otherwise ask_user. Do NOT improvise other tools for dropdowns.
         In GUIDED mode a value that did not come from the user pauses the session
         for their input — this happens automatically, don't try to work around it."""
+        if not direct_action_allowed(ctx.deps):
+            return {"ok": False, "status": "controller_required", "note": "Use execute_goal with grounded refs"}
         value = await _value_gate(ctx, ref, value, "select in")
         res = await _bro(ctx.deps.session.select_from_dropdown, ref, value)
 
@@ -2992,13 +3387,17 @@ def build_agent(model, max_tokens=None):
         return await _bro(ctx.deps.session.mark_step_manual, prompt)
 
     @agent.tool
-    async def add_checkpoint(ctx: RunContext[Deps], name: str, assert_type: str, value: str) -> dict:
+    async def add_checkpoint(ctx: RunContext[Deps], name: str, assert_type: str, value: str, ref: str = "") -> dict:
         """Record a verification checkpoint after the latest step. assert_type must be
-        'url_contains' or 'page_contains_text'; value is the expected substring. Add these at
-        meaningful results so the generated test verifies outcomes."""
-        if assert_type not in ("url_contains", "page_contains_text"):
-            return {"ok": False, "error": "assert_type must be 'url_contains' or 'page_contains_text'"}
-        return await _bro(ctx.deps.session.add_checkpoint, name, assert_type, value)
+        'url_contains', 'page_contains_text', 'page_not_contains_text' for case-sensitive
+        substrings, or 'element_has_value'
+        with a current ref and exact expected input/select value. A product's presence
+        does not prove sorting: verify the selected option's value explicitly."""
+        if (ctx.deps.config.get("agent_execution") or {}).get("decision_loop_enabled"):
+            return {"ok": False, "status": "decision_loop_required"}
+        if assert_type not in ("url_contains", "page_contains_text", "page_not_contains_text", "element_has_value"):
+            return {"ok": False, "error": "Use url_contains, page_contains_text, page_not_contains_text, or element_has_value (requires ref)"}
+        return await _bro(ctx.deps.session.add_checkpoint, name, assert_type, value, ref)
 
     @agent.tool
     async def get_recorded_flow(ctx: RunContext[Deps]) -> dict:
@@ -3012,6 +3411,9 @@ def build_agent(model, max_tokens=None):
         """Turn the recorded flow (all steps + checkpoints) into a real, runnable test case in flow
         `flow_id` with id `tc_id`. Call this ONCE, after driving the COMPLETE end-to-end flow.
         Returns the created test's flow/path."""
+        if ((ctx.deps.config.get("agent_execution") or {}).get("decision_loop_enabled")
+                and not getattr(ctx.deps, "decision_browser_complete", False)):
+            return {"ok": False, "status": "outcomes_incomplete"}
         return await _bro(ctx.deps.session.create_test, ctx.deps.ats_root, ctx.deps.project,
                           tc_id, flow_id, description, preconditions, expected_result)
 
@@ -3059,6 +3461,8 @@ def build_agent(model, max_tokens=None):
         modal/overlay, an empty state, an error toast), then fix the flow and re-run. Returns
         {passed, flaky?, summary, tail, error_detail?}."""
         ats_root = ctx.deps.ats_root
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", flow_id) or not re.fullmatch(r"TC-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+", tc_id):
+            return {"ok": False, "error": "Invalid flow or test identifier"}
         tests_root = _tests_root_for(ats_root, ctx.deps.project)
         flow_dir = os.path.join(tests_root, "flows", flow_id)
         if not os.path.isdir(tests_root) or not os.path.isdir(flow_dir):
@@ -3075,12 +3479,9 @@ def build_agent(model, max_tokens=None):
         # The verify loop is unattended — a manual_input() gate (OTP) must skip,
         # not hang for its timeout. Detected below and reported honestly.
         base_env["ATS_NO_MANUAL_INPUT"] = "1"
-        verify_root = os.path.join(ats_root, "results", "_agent_verify")
-        try:
-            import shutil
-            shutil.rmtree(verify_root, ignore_errors=True)   # keep only the latest attempt's artifacts
-        except Exception:
-            pass
+        import uuid
+        from verification import verified_junit
+        verify_root = os.path.join(ats_root, "results", "_agent_verify", uuid.uuid4().hex)
 
         # Windows: prevent handle inheritance deadlocks when agent has live Chrome/Playwright.
         # stdin=DEVNULL: pytest must not inherit the agent's stdin (Electron IPC pipe) or it
@@ -3095,10 +3496,12 @@ def build_agent(model, max_tokens=None):
 
         async def _one(idx):
             rdir = os.path.join(verify_root, f"{underscored}_{idx}")
+            os.makedirs(rdir, exist_ok=True)
+            junit = os.path.join(rdir, "junit.xml")
             env = dict(base_env)
             env["ATS_RESULTS_DIR"] = rdir   # known dir so we can find the failure screenshot
             cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
-                   "--tb=short", "-q", "-ra", "-p", "no:cacheprovider", "--tracing=off"]
+                   "--tb=short", "-q", "-ra", "-p", "no:cacheprovider", "--tracing=off", f"--junitxml={junit}"]
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd, cwd=ats_root, env=env,
@@ -3116,7 +3519,7 @@ def build_agent(model, max_tokens=None):
             text = (out or b"").decode("utf-8", "replace")
             rc = proc.returncode
             no_tests = (rc == 5) or ("no tests ran" in text.lower())
-            return {"passed": (rc == 0 and not no_tests), "rc": rc, "text": text, "rdir": rdir, "no_tests": no_tests}
+            return {"passed": (rc == 0 and not no_tests and verified_junit(junit, tc_id)), "rc": rc, "text": text, "rdir": rdir, "no_tests": no_tests}
 
         r1 = await _one(1)
         if r1["no_tests"]:
@@ -3169,8 +3572,13 @@ def build_agent(model, max_tokens=None):
         """Read the GENERATED test code (the test_<flow>.py function) for a test case so you can
         diagnose why run_test_case failed. Read-only. To fix: clear_recording, re-drive the
         corrected flow, and create_test_case again (same tc_id overwrites)."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", flow_id) or not re.fullmatch(r"TC-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+", tc_id):
+            return {"ok": False, "error": "Invalid flow or test identifier"}
         path = os.path.join(_tests_root_for(ctx.deps.ats_root, ctx.deps.project),
                             "flows", flow_id, f"test_{flow_id}.py")
+        if not os.path.isfile(path):
+            path = os.path.join(_tests_root_for(ctx.deps.ats_root, ctx.deps.project),
+                                "flows", flow_id, "test_" + tc_id.lower().replace("-", "_") + ".py")
         if not os.path.isfile(path):
             return {"ok": False, "error": f"test file for flow '{flow_id}' not found"}
         try:
@@ -3178,27 +3586,45 @@ def build_agent(model, max_tokens=None):
                 content = f.read()
         except Exception as e:
             return {"ok": False, "error": str(e)[:160]}
+        extra = {}
+        if os.path.basename(path) == "test_" + tc_id.lower().replace("-", "_") + ".py":
+            workflow_path = os.path.join(os.path.dirname(path), "workflow.json")
+            if os.path.isfile(workflow_path):
+                try:
+                    from multi_app import Workflow
+                    with open(workflow_path, encoding="utf-8") as workflow_file:
+                        raw = workflow_file.read(50001)
+                    extra = ({"workflow": Workflow.model_validate_json(raw).model_dump()} if len(raw) <= 50000
+                             else {"workflow_error": "Workflow exceeds diagnostic read limit"})
+                except Exception:
+                    extra = {"workflow_error": "Workflow is not valid typed replay data"}
         func = "test_" + tc_id.replace("-", "_")
         m = re.search(r'(\n@pytest\.mark\.tc\("' + re.escape(tc_id) + r'"\)\ndef '
                       + re.escape(func) + r'\(.*?)(?=\n@pytest\.mark|\Z)', content, re.DOTALL)
         if m:
-            return {"ok": True, "flow": flow_id, "tc_id": tc_id, "code": m.group(1).strip()[:6000]}
+            return {"ok": True, "flow": flow_id, "tc_id": tc_id, "code": m.group(1).strip()[:6000], **extra}
         return {"ok": True, "flow": flow_id, "tc_id": tc_id, "code": content[:6000],
-                "note": "exact function not found; returning the file head"}
+                "note": "exact function not found; returning the file head", **extra}
 
     @agent.tool
-    async def clear_recording(ctx: RunContext[Deps]) -> dict:
-        """Discard the steps/checkpoints recorded so far (KEEPS our conversation). Call this
-        before re-driving a flow you are fixing, so the new recording doesn't append onto the old
-        one; then create_test_case again with the SAME tc_id to overwrite the failing test."""
-        s = ctx.deps.session
-        s.steps = []
-        s.assertions = []
-        s.step_id = 0
-        s.input_counter = 0
-        s.assumptions = []
-        s.skips = []
-        return {"ok": True, "message": "recorded steps and checkpoints cleared"}
+    async def clear_recording(ctx: RunContext[Deps], reason: str = "") -> dict:
+        """Archive and clear for a concrete defect or different scenario, not cosmetic cleanup.
+        With checkpoints, first create/replay; a restart requires a specific reason (20+ chars).
+        Expected validation errors are test outcomes, not defects. Latest five snapshots are
+        recoverable during this session via restore_recording; browser state is not reset."""
+        result = await _bro(clear_saved_recording, ctx.deps.session, reason)
+        emit({"event": "recording_change", "action": "clear", "ok": result.get("ok"),
+              "snapshot_id": result.get("snapshot_id"), "status": result.get("status")})
+        return result
+
+    @agent.tool
+    async def restore_recording(ctx: RunContext[Deps], snapshot_id: str) -> dict:
+        """Restore a session-local recording snapshot listed by get_recorded_flow or clear_recording.
+        Preserves displaced work. Restores steps, checkpoints and provenance notes, NOT the browser
+        or a pass verdict. Create/replay it to verify. Observe before further browser actions."""
+        result = await _bro(ctx.deps.session.recording_history.restore, ctx.deps.session, snapshot_id)
+        emit({"event": "recording_change", "action": "restore", "ok": result.get("ok")})
+        return result
 
     @agent.tool
     async def delete_test_case(ctx: RunContext[Deps], tc_id: str, flow_id: str) -> dict:
@@ -3217,6 +3643,31 @@ def build_agent(model, max_tokens=None):
         (seller/admin) WITH their login credentials, execution defaults, LLM providers,
         pass criteria, and Jira project. Use this to look up credentials, URLs, or any
         configured option a user would see in Settings (the Jira API token is redacted)."""
+        if (ctx.deps.config.get("agent_execution") or {}).get("decision_loop_enabled"):
+            settings = {"apps": [{"label": a.get("label"), "url": a.get("url")} for a in (ctx.deps.project or {}).get("apps", [])],
+                    "policy": (ctx.deps.config.get("agent_execution") or {}).get("decision_loop_policy", "read_only"),
+                    "public_demo_auth": (ctx.deps.config.get("agent_execution") or {}).get("public_demo_auth") is True,
+                    "policy_note": "Network writes are blocked. session_local_forms admits configured isolated demo interactions. Public demo login requires public_demo_auth=true and task-supplied public credentials; private login is unsupported."}
+            # Bootstrap facts from the already-open page, without choosing or
+            # dispatching navigation. Do not give the compiler action refs,
+            # input values or credentials. The controller still owns browsing.
+            if ctx.deps.session.page is not None:
+                def entry_facts():
+                    from decision_browser import origin
+                    current = ctx.deps.session._url()
+                    if origin(current) not in {origin(a["url"]) for a in settings["apps"] if a.get("url")}:
+                        return {"status": "outside_registered_origin"}
+                    observation = ctx.deps.session.inspect(80)
+                    if not observation.get("ok"):
+                        return {"status": "observation_unavailable"}
+                    controls = [{"name": e.get("name") or e.get("placeholder"), "role": e.get("role"),
+                                 "tag": e.get("tag"), "href": e.get("href")}
+                                for e in ctx.deps.session.by_ref.values() if e.get("visible", True)]
+                    return {"url": current, "title": observation.get("title"), "controls": controls[:80],
+                            "controls_truncated": len(controls) > 80,
+                            "scope": "Already-open entry page only; not proof of deeper pages or body-text assertions"}
+                settings["entry_observation"] = await _bro(entry_facts)
+            return settings
         cfg = _read_json_file(os.path.join(ctx.deps.ats_root, "config.json")) or {}
         cfg = json.loads(json.dumps(cfg, default=str))
         try:
@@ -3806,8 +4257,11 @@ def build_agent(model, max_tokens=None):
         ctx.deps.plan[:] = plan
         emit({"event": "plan", "steps": list(plan)})
         return {"ok": True, "steps": len(plan),
-                "note": "Plan is now visible. Call update_plan(step_number, 'active') when you "
-                        "start a step and 'done'/'failed'/'skipped' when it finishes."}
+                "note": ("Plan is visible. Pass plan_step to execute_goal for automatic progress; "
+                         "batch other updates with useful work." if
+                         (ctx.deps.config.get("agent_execution") or {}).get("hybrid_enabled") else
+                         "Plan is now visible. Call update_plan(step_number, 'active') when you "
+                         "start a step and 'done'/'failed'/'skipped' when it finishes.")}
 
     @agent.tool
     async def update_plan(ctx: RunContext[Deps], step_number: int, status: str,
@@ -3838,7 +4292,27 @@ def build_agent(model, max_tokens=None):
         history): the operating mode, the memory file's contents + a short listing of
         available context files."""
         blocks = []
-        if ctx.deps.mode == "guided":
+        multi_active = getattr(ctx.deps.session, "_multi_app_recording", None) is not None
+        if multi_active:
+            blocks.append("ACTIVE MULTI-APP: isolated app/actor contexts; no shared auth. Reuse returned observations. Report unsupported auth or terminal blockers; never switch to legacy browser tools.")
+        if not multi_active and ((ctx.deps.project or {}).get("auth") or {}).get("type") == "none":
+            blocks.append("PROJECT AUTH: auth.type is none. Do not assume the test runner logs in. "
+                          "If this flow needs login, preserve its recorded login steps so a fresh "
+                          "browser can replay them. A logged-in authoring page is not replay authentication.")
+        decision_owned = bool((ctx.deps.config.get("agent_execution") or {}).get("decision_loop_enabled"))
+        if decision_owned:
+            blocks.append("DECISION-OWNED BROWSING: compile one browse_goal contract with inputs and milestones. No action refs, per-click planning or legacy execute_goal. Readiness probes are deterministic; the decision model owns all browser choices. Do not repeat a failed contract or weaken outcomes.")
+        if not multi_active and not decision_owned and (ctx.deps.config.get("agent_execution") or {}).get("hybrid_enabled", False):
+            blocks.append("HYBRID EXECUTION: Prefer execute_goal for a small group of authorized actions "
+                          "on refs in the current observation. Supply input values explicitly. It hands "
+                          "back control on navigation or uncertainty. actions_completed is NOT success "
+                          "verification: add outcome checkpoints and independently replay the test.")
+        if decision_owned:
+            blocks.append("Use only approved non-secret inputs. Unknown values still follow GUIDED/AUTO provenance. Unsupported or uncertain outcomes remain blocked; do not bypass the controller.")
+        elif multi_active:
+            blocks.append("GUIDED: let unknown-value approval pause; never bypass it." if ctx.deps.mode == "guided" else
+                          "AUTO: user-provided values preferred; assumed values remain recorded. Report blocked or skipped outcomes, never silently omit them.")
+        elif ctx.deps.mode == "guided":
             blocks.append(
                 "OPERATING MODE: GUIDED. The user wants to be consulted. fill/select_option "
                 "automatically pause for the user whenever a value did not come from them — "
@@ -3856,7 +4330,7 @@ def build_agent(model, max_tokens=None):
             if apps:
                 lines = []
                 for a in apps:
-                    cred = a.get("credentials") or {}
+                    cred = {} if multi_active or decision_owned else a.get("credentials") or {}
                     lines.append(f"- {a['label']}: {a['url']}"
                                  + (f"  (login: {cred['email']} / {cred['password']})"
                                     if cred.get("email") else ""))
@@ -3895,28 +4369,8 @@ def build_agent(model, max_tokens=None):
 # ── Model construction (reuses config.json "llm"; OpenAI-compatible providers) ─
 
 def build_model(config, provider_name=None):
-    llm_cfg = (config or {}).get("llm") or {}
-    name = provider_name or os.environ.get("ATS_LLM_PROVIDER") or llm_cfg.get("default_provider", "mimo")
-    cfg = (llm_cfg.get("providers") or {}).get(name, {})
-
-    if name == "ollama":
-        base = (cfg.get("base_url") or "http://localhost:11434").rstrip("/")
-        if not base.endswith("/v1"):
-            base += "/v1"
-        prov = OpenAIProvider(base_url=base, api_key="ollama")
-        return OpenAIChatModel(cfg.get("model", "llama3.1"), provider=prov), name, cfg.get("model", "llama3.1")
-
-    # mimo / openai / any OpenAI-compatible provider (has base_url + api_key_env)
-    key_env = cfg.get("api_key_env", "")
-    api_key = os.environ.get(key_env, "") if key_env else ""
-    if not api_key:
-        raise RuntimeError(
-            f"{name} API key not set (expected env {key_env or '?'}). "
-            f"Set it (Settings / env) or pick another provider.")
-    base_url = cfg.get("base_url") or "https://api.openai.com/v1"
-    model_name = cfg.get("model", "gpt-4o")
-    prov = OpenAIProvider(base_url=base_url, api_key=api_key)
-    return OpenAIChatModel(model_name, provider=prov), name, model_name
+    from model_profiles import build_agent_model
+    return build_agent_model(config, provider_name)
 
 
 def _resolve_credentials(project, config, platform_name="seller", index=0):
@@ -3968,10 +4422,14 @@ async def _stream_handler(ctx, stream):
                 emit({"event": "tool_call", "tool": part.tool_name, "args": args})
             elif kind == "FunctionToolResultEvent":
                 part = ev.part
+                content = getattr(part, "content", "")
+                retry = getattr(part, "part_kind", "") == "retry-prompt"
+                outcome = {"retry": retry, "validation_failed": retry and isinstance(content, list),
+                           "ok": False if retry else (content.get("ok") if isinstance(content, dict) else None)}
                 # 1500 keeps most results parseable JSON for the UI's structured
                 # cards (tables/highlighting); parse failures degrade to plain text.
                 emit({"event": "tool_result", "tool": getattr(part, "tool_name", ""),
-                      "summary": _short(getattr(part, "content", ""), 1500)})
+                      "outcome": outcome, "summary": _short(content, 1500)})
             elif kind == "PartStartEvent":
                 part = ev.part
                 pk = getattr(part, "part_kind", "")
@@ -4026,6 +4484,7 @@ class AgentRuntime:
             emit({"event": "error", "message": str(e)})
             return
         self.model = model
+        self.config["llm"] = {**(self.config.get("llm") or {}), "_session_provider": pname}
 
         project_id = cmd.get("project_id") or project_store.get_active_project_id(self.ats_root)
         project = project_store.get_project(self.ats_root, project_id) if project_id else None
@@ -4094,7 +4553,14 @@ class AgentRuntime:
 
         prov_cfg = ((self.config.get("llm", {}) or {}).get("providers", {}) or {}).get(pname, {}) or {}
         self.max_tokens = int(prov_cfg.get("max_tokens") or AGENT_MAX_TOKENS)
-        self.agent = build_agent(TurnCompactingModel(model), self.max_tokens)
+        from model_profiles import resolve_profile
+        _, resolved_profile = resolve_profile(self.config, pname)
+        hybrid = bool((self.config.get("agent_execution") or {}).get("hybrid_enabled"))
+        self.agent = build_agent(TurnCompactingModel(model, compact=hybrid,
+            multi_app_active=lambda: getattr(self.session, "_multi_app_recording", None) is not None),
+            self.max_tokens, resolved_profile, hybrid=hybrid,
+            decision_loop=bool((self.config.get("agent_execution") or {}).get("decision_loop_enabled")),
+            decision_workflow=bool((self.config.get('agent_execution') or {}).get('multi_app_decision_loop_enabled')))
         # Tool budget: from init command > env var default. 0 = unlimited (no pause between turns).
         _tb = cmd.get("tool_budget")
         if _tb is not None:
@@ -4105,7 +4571,7 @@ class AgentRuntime:
         # Default is OFF — many model endpoints (incl. mimo-v2.5-pro) reject image input with 404.
         # Enable explicitly via ATS_AGENT_VISION=on or per-provider "vision": true in config.json.
         _vis = (os.environ.get("ATS_AGENT_VISION") or "").lower()
-        _prov_vision = bool(prov_cfg.get("vision"))   # opt-in via config.json provider block
+        _prov_vision = bool((prov_cfg.get("capabilities") or {}).get("vision", prov_cfg.get("vision")))
         vision = (_vis == "on") or (_vis != "off" and _prov_vision)
         ctx_dir = project_store.resolve_context_dir(self.ats_root, project_id, project)
         mem_path = project_store.resolve_memory_path(self.ats_root, project_id)
@@ -4138,7 +4604,9 @@ class AgentRuntime:
             _t = (agent_sessions.read_session(self.ats_root, project_id, self.session_id) or {}).get("tokens") or {}
             self.session_tokens = {"input": int(_t.get("input", 0) or 0),
                                    "output": int(_t.get("output", 0) or 0),
-                                   "total": int(_t.get("total", 0) or 0)}
+                                   "total": int(_t.get("total", 0) or 0),
+                                   "estimated": bool(_t.get("estimated")),
+                                   "usage_incomplete": bool(_t.get("usage_incomplete"))}
         else:
             self.session_tokens = {"input": 0, "output": 0, "total": 0}
         try:
@@ -4191,6 +4659,9 @@ class AgentRuntime:
             message or "Use the attached file(s) as context for the app under test.",
             attachments,
             vision=self.deps.vision)
+        # Review uses original user/context text, never the compiler's paraphrase.
+        # Binary-only requirements need explicit context rather than invented text.
+        self.deps.decision_requirement = prompt if isinstance(prompt, str) else None
         hist_before = len(self.history)
         with capture_run_messages() as messages:
             try:
@@ -4232,7 +4703,14 @@ class AgentRuntime:
                         msg += ("  (Hit the model's OWN output-token limit on a single turn — separate from its "
                                 "much larger context window. Break the request into smaller turns, or use a "
                                 "provider/model that allows more output per response.)")
-                emit({"event": "error", "message": msg})
+                if messages:
+                    self.history = _compact_history(_trim_dangling_tool_calls(messages))
+                new_messages = messages[hist_before:] if messages else []
+                self._add_usage(msgs=new_messages, incomplete=True)
+                self._persist_turn(message, attachment_names, new_messages,
+                                   extra_bubbles=[{"role": "assistant", "text": msg}])
+                emit({"event": "error", "message": msg, "terminal": True})
+                emit({"event": "turn_complete", "status": "error", "text": msg})
                 log(traceback.format_exc())
 
     async def show_browser(self, cmd):
@@ -4254,15 +4732,15 @@ class AgentRuntime:
         emit({"event": "ready", **self.ready_info, "resumed": True,
               "transcript": transcript, "tokens": self.session_tokens})
 
-    def _add_usage(self, result=None, msgs=None):
+    def _add_usage(self, result=None, msgs=None, incomplete=False):
         """Accumulate this turn's token usage into the session total and emit a live
         counter ({event:'usage', input, output, total, estimated} — cumulative).
         Counts come from each NEW ModelResponse's provider-reported usage, which
         works for BOTH ways a turn can end: normal completion (result) AND the
         tool-budget stop (msgs — there is no result object on that path; the old
         code skipped usage entirely there, which kept the counter at 0 for every
-        budget-limited agentic turn). Falls back to a rough ~4 chars/token estimate
-        when the provider omits usage."""
+        budget-limited agentic turn). Missing usage is marked incomplete rather
+        than treating prompt/history characters as generated output."""
         if msgs is None and result is not None:
             try:
                 msgs = result.new_messages()
@@ -4275,20 +4753,15 @@ class AgentRuntime:
                 inp += int(getattr(u, "input_tokens", 0) or 0)
                 out += int(getattr(u, "output_tokens", 0) or 0)
         estimated = bool(self.session_tokens.get("estimated"))
-        if inp + out <= 0:
-            chars = 0
-            try:
-                for m in msgs or []:
-                    for pt in getattr(m, "parts", []):
-                        chars += len(str(getattr(pt, "content", "") or ""))
-            except Exception:
-                chars = len(str(getattr(result, "output", "") or ""))
-            out = max(1, chars // 4)
-            estimated = True
+        if inp + out <= 0 or incomplete:
+            # Input/tool history is NOT generated output, particularly after a 401.
+            # Keep usage unknown; the separate usage_est stream carries input estimates.
+            self.session_tokens["usage_incomplete"] = True
         self.session_tokens["input"] += inp
         self.session_tokens["output"] += out
         self.session_tokens["total"] += inp + out
         self.session_tokens["estimated"] = estimated
+        self.session_tokens["usage_source"] = "unavailable_or_partial" if self.session_tokens.get("usage_incomplete") else "provider_reported"
         emit({"event": "usage", **self.session_tokens})
 
     def _persist_turn(self, message, attachment_names, new_msgs, extra_bubbles=None):

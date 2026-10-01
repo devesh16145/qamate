@@ -24,7 +24,7 @@ pytest-playwright==0.7.2
 # Pydantic AI is the harness for the chat agent (engine/agent_chat.py). The
 # [openai] extra covers every OpenAI-compatible provider we use: Xiaomi MiMo
 # (default), OpenAI, and Ollama. API keys come from the environment, never config.
-pydantic-ai-slim[openai]==1.104.0
+pydantic-ai-slim[openai,anthropic]==1.104.0
 
 # ── Attachment / context-file text extraction (AI agent file context) ─────────
 # The agent inlines document text from attachments + the project context folder.

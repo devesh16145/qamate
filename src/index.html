@@ -1730,7 +1730,7 @@ function NewProjectModal({ onClose, onCreated, toast }) {
    ────────────────────────────────────────────────────────────── */
 function ProjectSettingsModal({ project, onClose, toast }) {
   const initApps = (project.apps && project.apps.length)
-    ? project.apps.map(a => ({ label: a.label || '', url: a.url || '', email: (a.credentials || {}).email || '', password: (a.credentials || {}).password || '' }))
+    ? project.apps.map(a => ({ id: a.id, actorsText: (a.actors || ['default']).join(', '), label: a.label || '', url: a.url || '', email: (a.credentials || {}).email || '', password: (a.credentials || {}).password || '' }))
     : [{ label: project.name || '', url: (project.environments ? Object.values(project.environments)[0] : '') || '', email: '', password: '' }];
   const [apps, setApps] = useState(initApps);
   const [envName, setEnvName] = useState(project.default_environment || 'dev');
@@ -1743,7 +1743,7 @@ function ProjectSettingsModal({ project, onClose, toast }) {
     setBusy(true);
     const env = envName.trim() || 'dev';
     const r = await window.ats.updateProject({ projectId: project.id, patch: {
-      apps: valid.map((a, i) => ({ label: a.label.trim() || `App ${i + 1}`, url: a.url.trim(),
+      apps: valid.map((a, i) => ({ id: a.id, actors: (a.actorsText || 'default').split(',').map(v => v.trim()), label: a.label.trim() || `App ${i + 1}`, url: a.url.trim(),
                                    credentials: { email: a.email.trim(), password: a.password } })),
       environments: { [env]: valid[0].url.trim() },
       default_environment: env,
@@ -1783,6 +1783,9 @@ function ProjectSettingsModal({ project, onClose, toast }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <input style={iStyle} value={a.url} onChange={e => patchApp(i, 'url', e.target.value)} placeholder="https://staging.acme.com/" />
+              <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>App ID: {a.id || 'assigned on save'}</div>
+              <label style={{ fontSize: 11, color: 'var(--text-2)' }}>Replay actors (comma-separated IDs; separate sessions)
+                <input style={iStyle} value={a.actorsText ?? 'default'} onChange={e => patchApp(i, 'actorsText', e.target.value)} placeholder="seller, approver" /></label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input style={{ ...iStyle, flex: 1 }} value={a.email} onChange={e => patchApp(i, 'email', e.target.value)} placeholder="Login email (optional)" />
                 <input style={{ ...iStyle, flex: 1 }} type="password" value={a.password} onChange={e => patchApp(i, 'password', e.target.value)} placeholder="Password (optional)" />
@@ -1792,8 +1795,9 @@ function ProjectSettingsModal({ project, onClose, toast }) {
         ))}
         <button className="editor-action" onClick={() => setApps(prev => [...prev, { label: '', url: '', email: '', password: '' }])}>+ Add another app</button>
         <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 8, lineHeight: 1.5 }}>
-          One captured login session covers ALL apps — in the capture browser, log in to each
-          app (navigate between their URLs) before closing it.
+          Capture login above is the legacy shared session used by single-app tests.
+          Typed multi-app replay starts isolated sessions and does not load this capture.
+          Actor IDs identify sessions, not login credentials or permissions.
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
           <button className="editor-action" onClick={onClose}>Cancel</button>
@@ -4655,6 +4659,7 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
   const [jiraStatusColor, setJiraStatusColor] = useState('var(--text-3)');
   const [secretStatus, setSecretStatus] = useState({});
   const [keyDraft, setKeyDraft] = useState({});  // { ATS_ANTHROPIC_KEY: '...' }
+  const [profileDraft, setProfileDraft] = useState('');
 
   useEffect(() => {
     if (window.ats && window.ats.getSecretStatus) {
@@ -4892,21 +4897,66 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
             <div className="field">
               <label>Default provider</label>
               <select value={config.llm?.default_provider || (window.LlmProviders ? window.LlmProviders.defaultFromConfig(config) : 'mock')} onChange={e => updateLlm('default_provider', e.target.value)}>
-                {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).map(p => (
+                {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).filter(p => p.canPlan).map(p => (
                   <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
             </div>
             {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).map(p => (
               <div key={p.id}>
+                <div className="field"><label>{p.label} API protocol</label>
+                  <select value={p.protocol} onChange={e => updateLlmField(p.id, 'protocol', e.target.value)}>
+                    <option value="openai">OpenAI-compatible Chat Completions</option>
+                    <option value="anthropic">Native Anthropic Messages</option>
+                    <option value="ollama">Local Ollama</option>
+                    <option value="typesafe">TypeSafe Jev (decision only)</option>
+                    <option value="openrouter_decisions">OpenRouter Jev (decision only)</option>
+                    <option value="mock">Mock (offline)</option>
+                  </select>
+                </div>
                 {p.id !== 'mock' && (
                   <div className="field"><label>{p.label} model</label><input value={config.llm?.providers?.[p.id]?.model || ''} onChange={e => updateLlmModel(p.id, e.target.value)} placeholder={p.model || p.id} /></div>
                 )}
-                {p.id === 'ollama' && (
-                  <div className="field"><label>Ollama base URL</label><input value={config.llm?.providers?.ollama?.base_url || ''} onChange={e => updateLlmField('ollama', 'base_url', e.target.value)} placeholder="http://localhost:11434/v1" /></div>
+                {p.protocol !== 'mock' && (
+                  <React.Fragment>
+                    <div className="field"><label>{p.label} base URL</label><input value={p.base_url} onChange={e => updateLlmField(p.id, 'base_url', e.target.value)} placeholder={p.protocol === 'typesafe' ? 'https://api.typesafe.ai/v1' : p.protocol === 'openrouter_decisions' ? 'https://openrouter.ai/api/alpha' : 'Provider API base URL'} /></div>
+                    <div className="field"><label>Key environment variable (name only)</label><input value={p.api_key_env} onChange={e => updateLlmField(p.id, 'api_key_env', e.target.value.trim())} placeholder="ATS_MY_MODEL_KEY" /></div>
+                    <div className="field"><label>Output token cap (0 = agent default)</label><input type="number" min="0" value={config.llm?.providers?.[p.id]?.max_tokens || 0} onChange={e => updateLlmField(p.id, 'max_tokens', Math.max(0, Number(e.target.value) || 0))} /></div>
+                    {p.protocol === 'openai' && <div className="field"><label>Output token API parameter</label><select value={config.llm?.providers?.[p.id]?.token_parameter || (['mimo', 'mimo-ultraspeed'].includes(p.id) ? 'max_completion_tokens' : 'max_tokens')} onChange={e => updateLlmField(p.id, 'token_parameter', e.target.value)}><option value="max_tokens">max_tokens</option><option value="max_completion_tokens">max_completion_tokens</option></select></div>}
+                    {!['typesafe', 'openrouter_decisions'].includes(p.protocol) && <label style={{ fontSize: 12 }}><input type="checkbox" checked={config.llm?.providers?.[p.id]?.supports_temperature ?? !['mimo', 'mimo-ultraspeed'].includes(p.id)} onChange={e => updateLlmField(p.id, 'supports_temperature', e.target.checked)} /> Supports temperature parameter</label>}
+                  </React.Fragment>
                 )}
               </div>
             ))}
+            <div className="field"><label>Add model profile</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input value={profileDraft} onChange={e => setProfileDraft(e.target.value)} placeholder="e.g. fast-planner or jev" />
+                <button className="editor-action" disabled={!/^[a-z][a-z0-9_-]*$/.test(profileDraft) || !!config.llm?.providers?.[profileDraft]} onClick={() => {
+                  updateLlm('providers', { ...(config.llm?.providers || {}), [profileDraft]: { protocol: 'openai', model: '', api_key_env: 'ATS_' + profileDraft.toUpperCase().replace(/-/g, '_') + '_KEY' } });
+                  setProfileDraft('');
+                }}>Add</button>
+              </div>
+            </div>
+            {['extraction', 'decision', 'vision'].map(role => (
+              <div className="field" key={role}><label>{role} model profile</label>
+                <select value={config.llm?.roles?.[role] || ''} onChange={e => updateLlm('roles', { ...(config.llm?.roles || {}), [role]: e.target.value })}>
+                  <option value="">{role === 'extraction' ? 'Use default provider' : 'Not configured / legacy settings'}</option>
+                  {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).filter(p => role === 'decision' || !['typesafe', 'openrouter_decisions'].includes(p.protocol)).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </div>
+            ))}
+            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.hybrid_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), hybrid_enabled: e.target.checked } }))} /> Enable experimental bounded decision controller</label>
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>Choose a decision profile above before enabling. Restart the agent after saving. The controller stops on uncertainty; completed actions still require assertions and test replay.</p>
+            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.decision_loop_enabled} disabled={!config.agent_execution?.hybrid_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), decision_loop_enabled: e.target.checked } }))} /> Experimental decision-owned browsing</label>
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>The planner supplies outcomes; the decision profile chooses browser actions. Read-only by default, single application. Local form writes require a separately configured disposable-demo allowlist. Multi-app transitions are not supported in this mode. Restart after saving.</p>
+            <label style={{ fontSize: 12 }}><input type="checkbox" checked={config.agent_execution?.decision_context_format === 'columns'} disabled={!config.agent_execution?.decision_loop_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), decision_context_format: e.target.checked ? 'columns' : 'objects' } }))} /> Compact single-app decision observations (experimental)</label>
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>Lossless column encoding retains every observed element and available candidate. Smaller page evidence does not guarantee lower total cost or faster completion.</p>
+            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.decision_contract_review} disabled={!config.agent_execution?.decision_loop_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), decision_contract_review: e.target.checked } }))} /> Review single-app outcomes before browsing (experimental)</label>
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>The decision profile checks the compiled contract against the original text request before any action. Uncertain reviews stop the attempt. This adds API calls and does not replace coverage checks or replay. Restart after saving.</p>
+            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.multi_app_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), multi_app_enabled: e.target.checked } }))} /> Enable experimental multi-app recording tools</label>
+            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.multi_app_decision_loop_enabled} disabled={!config.agent_execution?.hybrid_enabled || !config.agent_execution?.multi_app_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), multi_app_decision_loop_enabled: e.target.checked } }))} /> Decision-owned cross-app workflows</label>
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>When enabled, this takes priority over single-app browsing. The planner supplies outcomes and the decision profile controls actions, record capture and app switches. Each actor uses a separate session; preconfigured authentication stays local. Restart after saving.</p>
+            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>Save app/actor IDs in Project Settings first, then restart the agent. Separate sessions; data-testid targets only; password/OTP recording unsupported. Enable the bounded decision controller above to route multi-app click/fill through its decision profile. Exported tests still need replay.</p>
             {(window.LlmProviders ? window.LlmProviders.keyFieldsFromConfig(config) : []).map(({ env, usedBy }) => (
               <div className="field" key={env}>
                 <label>{usedBy.join(' / ')} API key ({env}) {secretStatus[env] && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>

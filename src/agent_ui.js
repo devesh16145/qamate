@@ -417,7 +417,33 @@
           ? 'GUIDED mode — the agent will pause for your input on any value you did not provide, and on skips.'
           : 'AUTO mode — the agent proceeds freely; values it makes up are reported as assumptions.' }],
     });
-    if (ev === 'usage') return set({ usage: { input: msg.input || 0, output: msg.output || 0, total: msg.total || 0, estimated: !!msg.estimated } });
+    if (ev === 'usage') return set({ usage: { input: msg.input || 0, output: msg.output || 0, total: msg.total || 0, estimated: !!msg.estimated, usage_incomplete: !!msg.usage_incomplete } });
+    if (ev === 'decision_browser_contract' || ev === 'decision_workflow_contract') return set({ browsing: {
+      total: (msg.contract?.milestones || []).length, completed: 0, steps: 0,
+      scope: ev === 'decision_workflow_contract' ? 'multi_app' : 'single_app', captures: 0,
+      state: 'Browsing', verification: 'Independent replay pending', decisionTokens: 0, usageMissing: false,
+    } });
+    if (ev === 'model_usage' && msg.role === 'decision' && rt.browsing) return set({ browsing: {
+      ...rt.browsing, decisionTokens: rt.browsing.decisionTokens + (msg.input || 0) + (msg.output || 0),
+      usageMissing: rt.browsing.usageMissing || msg.input == null || msg.output == null,
+    } });
+    if (ev === 'decision_browser_step') return set({ browsing: {
+      ...rt.browsing, completed: msg.milestone, steps: msg.step,
+      app: msg.app || rt.browsing?.app, actor: msg.actor || rt.browsing?.actor,
+      captures: (rt.browsing?.captures || 0) + (msg.kind === 'capture' && msg.ok ? 1 : 0),
+      state: msg.ok ? 'Browsing' : 'Action failed', action: msg.kind,
+    } });
+    if (ev === 'decision_browser_confirmation' || ev === 'decision_workflow_confirmation') return set({ browsing: {
+      ...rt.browsing, state: msg.status === 'requested' ? 'Rechecking uncertain decision' : 'Decision confirmed',
+    } });
+    if (ev === 'decision_browser_recovery') return set({ browsing: {
+      ...rt.browsing, state: `Refreshing stale target (${msg.attempt}/${msg.limit})`,
+    } });
+    if (ev === 'decision_browser_complete') return set({ browsing: {
+      ...rt.browsing, completed: msg.result?.milestones_completed || 0,
+      state: msg.result?.ok ? 'Live outcomes observed' : `Stopped: ${msg.result?.status || 'unknown'}`,
+      blocked: !msg.result?.ok, verification: 'Independent replay pending',
+    } });
     if (ev === 'text') {
       const delta = msg.delta || '';
       const last = messages[messages.length - 1];
@@ -498,7 +524,7 @@
   /* Session setup controls — identical everywhere a session can be (re)started. */
   function SetupBar({ provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget, mode, onToggleMode, children }) {
     const LP = window.LlmProviders;
-    const list = providerList || (LP && llmConfig ? LP.listFromConfig(llmConfig) : []);
+    const list = (providerList || (LP && llmConfig ? LP.listFromConfig(llmConfig) : [])).filter(p => p.canPlan !== false);
     const configured = !LP || !llmConfig || LP.isConfigured(provider, llmConfig, secretKeys || {});
     return (
       <React.Fragment>
@@ -833,9 +859,9 @@
               style={{ fontSize: 10.5, color: 'var(--fail, #dc2626)', fontFamily: 'var(--mono)' }}>no auth</span>
           )}
           {connected && (
-            <span title={`Tokens this session${(rt.usage && rt.usage.estimated) ? ' (estimated — the model provider did not report usage)' : ''} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, total ${(rt.usage && rt.usage.total) || 0}`}
+            <span title={`Primary-model tokens this session${rt.usage?.usage_incomplete ? ' (usage missing for some requests; not a complete total)' : ((rt.usage && rt.usage.estimated) ? ' (legacy estimate)' : '')} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, reported total ${(rt.usage && rt.usage.total) || 0}. Decision-model usage is recorded separately in the event log.`}
               style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'var(--mono)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <Ic.Activity size={10} />{(rt.usage && rt.usage.estimated) ? '~' : ''}{fmtTok((rt.usage && rt.usage.total) || 0)} tok
+              <Ic.Activity size={10} />{rt.usage?.usage_incomplete ? (rt.usage.total ? fmtTok(rt.usage.total) + '+?' : '?') : ((rt.usage?.estimated ? '~' : '') + fmtTok(rt.usage?.total || 0))} tok
             </span>
           )}
           <span style={{ flex: 1 }}></span>
@@ -902,6 +928,13 @@
           style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '16px 18px', outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
           <div style={{ maxWidth: 780, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}>
             <PlanCard plan={rt.plan || []} />
+            {rt.browsing && <div role="status" style={{ border: '1px solid var(--border)', padding: 12, borderRadius: 8, fontSize: 12 }}>
+              <strong>{rt.browsing.state}</strong>
+              <div>{rt.browsing.completed || 0}/{rt.browsing.total || '?'} outcome milestones · {rt.browsing.steps || 0} decisions</div>
+              {rt.browsing.scope === 'multi_app' && <div>App: {rt.browsing.app || 'Starting'} · Actor: {rt.browsing.actor || 'Pending'} · Captured records: {rt.browsing.captures || 0}</div>}
+              <div>{rt.browsing.verification}. Live outcomes alone do not verify the exported test.</div>
+              <div style={{ color: 'var(--text-2)' }}>Decision tokens: {fmtTok(rt.browsing.decisionTokens || 0)}{rt.browsing.usageMissing ? ' + unknown usage' : ''}</div>
+            </div>}
             {messages.length === 0 && !connected && (
               <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, fontSize: 12.5, lineHeight: 1.6 }}>
                 {canResume ? 'This session is paused. Resume it to continue from where you left off — its memory is restored.'

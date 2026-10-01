@@ -12,6 +12,12 @@ import pytest
 
 from normalizer import escape_css_id, disambiguate, infer_hints, match_option
 from app_explorer import element_to_model
+
+
+def test_textarea_contents_do_not_replace_associated_label():
+    model = element_to_model({"tag": "textarea", "label_text": "Description",
+                              "text": "Qamate original description", "value": "Qamate original description"})
+    assert model["name"] == "Description"
 import agent_chat as ac
 
 

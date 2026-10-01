@@ -114,13 +114,20 @@ def compact_elements(models, limit=40, include_hidden=False):
         name = (m.get("name") or "")[:60]
         if _JUNK_NAME_RE.search(name):
             continue   # hydration/script payload leaked into the accessible name
-        key = (m.get("role") or m.get("tag"), _norm(name), m.get("container") or "")
+        key = (m.get("role") or m.get("tag"), _norm(name), m.get("container") or "",
+               m.get("test_id") or "", m.get("entity_context") or "")
         if visible and key[1] and key in groups:
             groups[key]["repeats"] = groups[key].get("repeats", 1) + 1
             continue
         if len(items) >= limit:
             continue   # cap new entries, but keep counting repeats of listed groups
         item = {"ref": m["ref"], "role": m.get("role") or m.get("tag"), "name": name}
+        if m.get("test_id"):
+            item["test_id"] = m["test_id"]
+        if m.get("entity_context"):
+            item["entity"] = m["entity_context"]
+        if m.get("options"):
+            item["options"] = m["options"][:50]
         if m.get("input_type"):
             item["type"] = m["input_type"]
         if m.get("container"):

@@ -85,6 +85,29 @@ def test_run_test_once_pass(tmp_path):
     assert "passed" in summary
 
 
+def test_explicit_replay_artifacts_are_retained_and_never_reused(tmp_path):
+    from verification import verified_junit
+    flow_dir = _make_synthetic_flow(tmp_path)
+    evidence = tmp_path / "evidence"
+    env = {"ATS_RESULTS_DIR": str(evidence)}
+    assert ev.run_test_once(flow_dir, "TC-EVAL-PASS", env=env, timeout=120)[0]
+    first = list(evidence.glob("verification-*/junit.xml"))
+    assert len(first) == 1 and verified_junit(first[0], "TC-EVAL-PASS")
+    assert not ev.run_test_once(flow_dir, "TC-EVAL-FAIL", env=env, timeout=120)[0]
+    second = list(evidence.glob("verification-*/junit.xml"))
+    assert len(second) == 2 and verified_junit(first[0], "TC-EVAL-PASS")
+    assert not verified_junit(next(p for p in second if p != first[0]), "TC-EVAL-FAIL")
+
+
+def test_skipped_pytest_exit_zero_is_not_verified(tmp_path):
+    flow_dir = _make_synthetic_flow(tmp_path)
+    with open(os.path.join(flow_dir, "test_skipped.py"), "w", encoding="utf-8") as handle:
+        handle.write("import pytest\ndef test_TC_EVAL_SKIP():\n    pytest.skip('manual input required')\n")
+    ok, summary = ev.run_test_once(flow_dir, "TC-EVAL-SKIP", timeout=120)
+    assert not ok
+    assert "skipped" in summary
+
+
 def test_run_test_once_fail(tmp_path):
     flow_dir = _make_synthetic_flow(tmp_path)
     ok, _summary = ev.run_test_once(flow_dir, "TC-EVAL-FAIL", timeout=120)

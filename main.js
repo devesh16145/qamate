@@ -481,14 +481,15 @@ function _llmEnv() {
 }
 
 function _providerNeedsKey(providerId, cfg) {
-  if (!providerId || providerId === 'mock' || providerId === 'ollama') return false;
   const p = cfg?.llm?.providers?.[providerId];
-  return !!(p && p.api_key_env);
+  const protocol = p?.protocol || providerId;
+  return protocol !== 'mock' && protocol !== 'ollama';
 }
 
 function _isProviderConfigured(providerId, cfg) {
   if (!_providerNeedsKey(providerId, cfg)) return true;
-  const env = cfg.llm.providers[providerId].api_key_env;
+  const env = cfg?.llm?.providers?.[providerId]?.api_key_env;
+  if (!env) return false;
   const secrets = _readSecrets();
   return !!(secrets[env] || process.env[env]);
 }
@@ -674,7 +675,7 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
     return { status: 'error', message: `Too many concurrent sessions (max ${AGENT_MAX_SESSIONS}). Stop one before starting another.` };
   }
   const cfg = loadConfig();
-  const prov = opts.provider || cfg.llm?.default_provider || 'mock';
+  const prov = opts.provider || cfg.llm?.roles?.planner || cfg.llm?.roles?.primary || cfg.llm?.default_provider || 'mock';
   if (!_isProviderConfigured(prov, cfg)) {
     const env = cfg.llm?.providers?.[prov]?.api_key_env || prov;
     return { status: 'error', message: `Add your ${prov} API key in Settings → AI / LLM (${env}), or set the ${env} environment variable.` };

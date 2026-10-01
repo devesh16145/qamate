@@ -16,6 +16,24 @@ import agent_chat as ac
 import agent_sessions
 
 
+def test_tool_result_outcome_is_emitted_before_summary_truncation(monkeypatch):
+    from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
+    emitted = []
+    monkeypatch.setattr(ac, "emit", emitted.append)
+    event_class = type("FunctionToolResultEvent", (), {})
+    async def stream():
+        for part in [RetryPromptPart(content=[{"type": "list_type", "loc": ("checkpoints",),
+                                               "msg": "array required", "input": "x" * 2000}], tool_name="execute_goal"),
+                     ToolReturnPart(tool_name="execute_goal", content={"ok": False, "detail": "x" * 2000})]:
+            event = event_class()
+            event.part = part
+            yield event
+    asyncio.run(ac._stream_handler(None, stream()))
+    assert emitted[0]["outcome"] == {"ok": False, "retry": True, "validation_failed": True}
+    assert emitted[1]["outcome"] == {"ok": False, "retry": False, "validation_failed": False}
+    assert all(len(event["summary"]) <= 1503 for event in emitted)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # _add_usage — the token counter must move on BOTH turn endings (the budget-stop
 # path used to skip it entirely, keeping the UI counter at 0)
@@ -38,11 +56,12 @@ def test_add_usage_counts_provider_reported_tokens():
     assert rt.session_tokens["estimated"] is False
 
 
-def test_add_usage_estimates_when_provider_omits():
+def test_add_usage_marks_missing_provider_usage_as_unknown():
     rt = _rt()
     rt._add_usage(msgs=[ModelResponse(parts=[TextPart(content="z" * 400)])])
-    assert rt.session_tokens["total"] >= 100      # ~400 chars / 4
-    assert rt.session_tokens["estimated"] is True
+    assert rt.session_tokens["total"] == 0
+    assert rt.session_tokens["estimated"] is False
+    assert rt.session_tokens["usage_incomplete"] is True
 
 
 def test_add_usage_accumulates_across_turns():
@@ -107,7 +126,7 @@ def test_demoted_tools_not_model_facing(agent):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _ctx():
-    return types.SimpleNamespace(deps=types.SimpleNamespace(plan=[]))
+    return types.SimpleNamespace(deps=types.SimpleNamespace(plan=[], config={}))
 
 
 def _call(agent, name, ctx, *args, **kw):

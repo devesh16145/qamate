@@ -279,8 +279,10 @@ Notes:
    (navigate / click / fill / select_option). Add a checkpoint (`add_checkpoint`,
    `url_contains` or `page_contains_text`) at each meaningful outcome so the test verifies
    results, not just that clicks happened.
-2. Do NOT record login steps — the test runner logs in for you. Your first recorded step is
-   the post-login landing page.
+2. Omit login steps ONLY when this test's runner fixture is confirmed to supply authenticated
+   state. Do not assume that a logged-in authoring browser means a fresh test is logged in.
+   For projects without configured runner authentication, or when the user asks to preserve
+   login, record the complete login sequence. Do not clear those steps after logging in.
 3. Call `create_test_case` ONCE, with a clear id (TC-<AREA>-NNN) and the correct flow_id.
 4. VERIFY: immediately call `run_test_case(tc_id, flow_id)`.
 5. If it does not PASS:

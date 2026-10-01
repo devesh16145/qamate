@@ -3,6 +3,10 @@ const h = React.createElement;
 const I = {};
 
 const ICONS = {
+  History: [
+    ['path', { d: 'M3 11a9 9 0 1 1 2.6 6.4M3 4v7h7' }],
+    ['path', { d: 'M12 7v5l3 2' }],
+  ],
   Play: [['polygon', { points: '6 4 20 12 6 20 6 4', fill: 'currentColor', stroke: 'none' }]],
   Stop: [['rect', { x: 5, y: 5, width: 14, height: 14, rx: 2 }]],
   Record: [['circle', { cx: 12, cy: 12, r: 6, fill: 'currentColor', stroke: 'none' }]],

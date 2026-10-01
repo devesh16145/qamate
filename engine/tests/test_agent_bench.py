@@ -216,6 +216,8 @@ STUB = textwrap.dedent("""\
             msg = cmd.get("message", "")
             if mode == "hang":
                 pass  # never completes -> driver must time out
+            elif mode == "terminal":
+                emit({"event": "error", "terminal": True, "message": "model unavailable"})
             elif "do not ask again" in msg:
                 # this is the canned reply to our input_required pause
                 emit({"event": "tool_call", "tool": "create_test_case", "args": {}})
@@ -249,9 +251,13 @@ def _task():
 def test_run_task_full_protocol(tmp_path):
     stub = _write_stub(tmp_path)
     events_path = tmp_path / "events" / "BENCH-T.jsonl"
+    def check_durable(event):
+        persisted = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+        assert persisted[-1] == event
     r = ab.run_task(_task(), str(tmp_path), project_id=None, env_name="dev",
                     ready_timeout=30, turn_timeout=30, agent_script=stub,
                     events_path=str(events_path),
+                    on_event=check_durable,
                     stderr_path=str(tmp_path / "stderr.log"))
     assert r["infra_error"] is None
     assert r["session_id"] == "sess-stub"
@@ -280,6 +286,15 @@ def test_run_task_hang_times_out(tmp_path):
     assert ab.task_verdict(r) == "timeout"
 
 
+def test_terminal_error_finishes_without_waiting_for_timeout(tmp_path):
+    stub = _write_stub(tmp_path, scenario="terminal")
+    result = ab.run_task(_task(), str(tmp_path), project_id=None, env_name="dev",
+                         ready_timeout=30, turn_timeout=60, agent_script=stub)
+    assert result["completed"] and result["terminal_error"]
+    assert ab.task_verdict(result) == "model_error"
+    assert result["wall_s"] < 15
+
+
 def test_child_env_defaults_dev_seller_index(monkeypatch):
     monkeypatch.delenv("ATS_SELLER_USER_INDEX", raising=False)
     assert "ATS_SELLER_USER_INDEX" not in ab._child_env("/r", "dev")
@@ -299,6 +314,7 @@ def test_score_usage_est_survives_killed_turn():
     s = ab.score_events(evs)
     assert s["input_est_total"] == 39000 and s["requests"] == 2
     assert s["tokens"]["total"] == 0          # provider usage never arrived
+    assert s["usage_incomplete"] is True     # zero is not a measured token total
 
 
 def test_summarize_tokens_incl_est():
@@ -310,3 +326,16 @@ def test_summarize_tokens_incl_est():
     card = ab.summarize_bench(results)
     assert card["tokens_total"] == 1000
     assert card["tokens_total_incl_est"] == 6000
+
+
+def test_independent_replays_have_distinct_artifact_roots(tmp_path, monkeypatch):
+    seen = []
+    def run(*args, **kwargs):
+        seen.append(kwargs["env"]["ATS_RESULTS_DIR"])
+        return True, "1 passed"
+    monkeypatch.setattr(ab.agent_eval, "run_test_once", run)
+    one = ab.verify_independent(str(tmp_path), str(tmp_path / "tests"), _task(), "dev", None)
+    two = ab.verify_independent(str(tmp_path), str(tmp_path / "tests"), _task(), "dev", None)
+    assert len(set(seen)) == 4
+    assert one["artifact_dirs"] == seen[:2] and two["artifact_dirs"] == seen[2:]
+    assert one["runs"] == [True, True]

@@ -466,7 +466,7 @@ def test_record_navigate_dedupes_consecutive():
 
 
 def test_add_checkpoint_attaches_to_last_step():
-    sess = ac.BrowserSession()
+    sess = _cp_session()
     sess.steps = [{"id": 7, "targetDescription": "Click Orders"}]
     sess.add_checkpoint("Orders shown", "url_contains", "/orders")
     cp = sess.assertions[-1]
@@ -613,11 +613,39 @@ def test_checkpoint_url_gate():
     assert r["ok"] is False and s.assertions[-1]["value"] == "/orders"
 
 
-def test_checkpoint_probe_failure_still_records():
+def test_checkpoint_probe_failure_does_not_record_success():
     class _Boom(_CpPage):
         def inner_text(self, sel): raise RuntimeError("page gone")
     s = ac.BrowserSession()
     s.page = _Boom("")
     s.browser = _CpBrowser()
     r = s.add_checkpoint("x", "page_contains_text", "anything")
-    assert r["ok"] and len(s.assertions) == 1   # best-effort: never block on probe errors
+    assert not r["ok"] and not s.assertions
+
+
+def test_negative_checkpoint_and_case_sensitivity():
+    s = _cp_session("Backpack")
+    assert not s.add_checkpoint("Removed", "page_not_contains_text", "Backpack")["ok"]
+    assert not s.add_checkpoint("Present", "page_contains_text", "backpack")["ok"]
+    assert s.add_checkpoint("Absent", "page_not_contains_text", "Onesie")["ok"]
+    assert len(s.assertions) == 1
+
+
+def test_checkpoints_reject_blank_values_and_dead_pages():
+    s = _cp_session()
+    assert not s.add_checkpoint("Blank", "page_contains_text", " ")["ok"]
+    s.page = None
+    assert not s.add_checkpoint("Absent", "page_not_contains_text", "anything")["ok"]
+    assert not s.assertions
+
+
+def test_failed_request_does_not_count_prompt_as_output(monkeypatch):
+    from types import SimpleNamespace
+    runtime = ac.AgentRuntime.__new__(ac.AgentRuntime)
+    runtime.session_tokens = {"input": 0, "output": 0, "total": 0}
+    events = []
+    monkeypatch.setattr(ac, "emit", events.append)
+    runtime._add_usage(msgs=[SimpleNamespace(parts=[SimpleNamespace(content="user input " * 1000)])])
+    assert events[-1]["output"] == 0 and events[-1]["total"] == 0
+    assert events[-1]["usage_incomplete"] is True
+    assert events[-1]["usage_source"] == "unavailable_or_partial"

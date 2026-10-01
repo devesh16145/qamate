@@ -65,7 +65,7 @@ def _clean(s):
 
 
 def _label(el):
-    for k in ("aria_label", "text", "label_text", "context_label", "placeholder", "name", "id"):
+    for k in ("aria_label", "text", "label_text", "context_label", "placeholder", "name", "id", "test_id"):
         v = _clean(el.get(k))
         if v:
             return v
@@ -89,7 +89,8 @@ def element_to_model(el):
     synthetic = bool(el.get("synthetic"))
     # Placeholder ranks above the context label: the browser computes the accessible
     # name from the placeholder, so role+name locators stay valid for it.
-    name = _clean(el.get("aria_label") or el.get("text") or el.get("label_text")
+    content_name = "" if tag in {"input", "textarea", "select"} else el.get("text")
+    name = _clean(el.get("aria_label") or el.get("label_text") or content_name
                   or el.get("placeholder"))
     # Nameless-control rescue: a nearby sibling label ("Shipping Address" beside a bare
     # combobox div) names the element for the agent — but it is NOT the accessible
@@ -111,16 +112,23 @@ def element_to_model(el):
     test_id = (el.get("test_id") or "").strip()
     role = _aria_role(el)
     label = _label(el)
+    # An existing option must never also match a later "Create <name>" option.
+    role_name = name if role == "option" else name[:80]
+    exact_option = {"exact": True} if role == "option" else {}
 
     fallbacks = []
     if test_id:                                       # the most STABLE handle an app exposes
         primary = {"by": "test_id", "value": test_id}
+        attribute = el.get("test_id_attribute", "data-testid")
+        if attribute in {"data-test-id", "data-test", "data-cy"}:
+            escaped = test_id.replace("\\", "\\\\").replace('"', '\\"')
+            primary = {"by": "css", "value": f'[{attribute}="{escaped}"]'}
     elif synthetic and name:
         # Role-less clickable div: get_by_role would NOT match it (no ARIA semantics),
         # so target it by its visible text instead.
         primary = {"by": "text", "value": name[:80]}
     elif role and name and not context_named:
-        primary = {"by": "role", "role": role, "name": name[:80]}
+        primary = {"by": "role", "role": role, "name": role_name, **exact_option}
     elif placeholder:
         primary = {"by": "placeholder", "value": placeholder}
     elif el_id and id_css:
@@ -140,11 +148,22 @@ def element_to_model(el):
     if test_id and primary.get("by") != "test_id":
         fallbacks.append({"by": "test_id", "value": test_id})
     if role and name and primary.get("by") != "role" and not synthetic and not context_named:
-        fallbacks.append({"by": "role", "role": role, "name": name[:80]})  # survives a test-id rename
+        fallbacks.append({"by": "role", "role": role, "name": role_name, **exact_option})  # survives a test-id rename
     if name and primary.get("by") != "text" and not context_named:
         fallbacks.append({"by": "text", "value": name[:80]})
+    if tag in {"a", "button"} and name:
+        # Card links and aria-hidden combobox placeholders need the clickable
+        # ancestor, not the child text node. Recorder verifies node identity.
+        escaped_text = name[:80].replace("\\", "\\\\").replace('"', '\\"')
+        fallbacks.append({"by": "css", "value": f'{tag}:has-text("{escaped_text}")'})
     if placeholder and primary.get("by") != "placeholder":
         fallbacks.append({"by": "placeholder", "value": placeholder})
+    # Form field names are generally stable across React remounts; generated IDs
+    # need not be. The recorder still verifies uniqueness AND node identity.
+    field_name = el.get("name") or ""
+    if field_name and tag in {"input", "textarea", "select"}:
+        escaped_name = field_name.replace("\\", "\\\\").replace('"', '\\"')
+        fallbacks.append({"by": "css", "value": f'{tag}[name="{escaped_name}"]'})
     if id_css and primary.get("value") != id_css:
         fallbacks.append({"by": "css", "value": id_css})
     if context_named and role and primary.get("by") != "role":
@@ -155,7 +174,7 @@ def element_to_model(el):
     fingerprint = {"tag": tag, "role": role, "name": name[:80], "text": (el.get("text") or "")[:80]}
 
     return {
-        "ref": _slug(label, tag or "el"),
+        "ref": _slug(test_id or label, tag or "el"),
         "tag": tag,
         "role": role or ("button" if synthetic else ""),
         "synthetic_role": synthetic,
@@ -166,16 +185,25 @@ def element_to_model(el):
         "input_type": (el.get("type") or ""),
         "required": bool(el.get("required")),
         "disabled": bool(el.get("disabled")),
+        "readonly": bool(el.get("readonly")),
         # Comprehensive capture: keep hidden elements too (users miss these), flagged.
         "visible": el.get("visible", True),
         "hidden_reason": el.get("hidden_reason", ""),
         "broken": bool(el.get("_broken")),
         "href": (el.get("href") or "")[:100],
         "container": el.get("container") or "",
+        "entity_context": el.get("entity_context") or "",
+        "field_context": el.get("field_context") or "",
         "primary": primary,
         "fallbacks": fallbacks,
         "fingerprint": fingerprint,
         "test_id": test_id,
+        "test_id_attribute": el.get("test_id_attribute", "data-testid"),
+        "options": el.get("options", []),
+        "value": bool(el.get("value")) if el.get("type") == "password" else el.get("value", ""),
+        "checked": bool(el.get("checked")),
+        "node_id": el.get("node_id"),
+        "autocomplete": el.get("autocomplete", ""),
     }
 
 
@@ -183,10 +211,20 @@ def element_to_model(el):
 # flagged with why it's hidden, plus broken images. The deterministic
 # data-collection half of "exploration".
 _COMPREHENSIVE_DOM_JS = r"""() => {
+    if (!window.__qamateNodes) window.__qamateNodes = {ids:new WeakMap(), next:0, document:crypto.randomUUID()};
+    const nodeId = el => {
+        const store = window.__qamateNodes;
+        if (!store.ids.has(el)) store.ids.set(el, ++store.next);
+        return store.document + ':' + store.ids.get(el);
+    };
     const sels = ['button','a[href]','a','input:not([type=hidden])','select','textarea',
         '[role=button]','[role=link]','[role=tab]','[role=checkbox]','[role=radio]',
         '[role=combobox]','[role=menuitem]','[role=option]','[role=switch]','[onclick]','[contenteditable=true]'];
     const clean = (t) => (t || '').replace(/[\u200b\u200c\u200d\u2060\ufeff]/g, '').trim();
+    const entityContext = el => {
+        const container = el.closest('tr,[role=row],article,li,[data-test$="-item"],[data-testid$="-item"]');
+        return container ? clean(container.innerText).replace(/\s+/g, ' ').slice(0, 140) : '';
+    };
     // Nearby-label rescue for nameless controls (div-soup forms): the visible label
     // ("Shipping Address") is often a SIBLING text node, not an associated <label>.
     const nearLabel = (el) => {
@@ -251,16 +289,23 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
             const label_text = (el.labels && el.labels[0]) ? clean(el.labels[0].textContent).slice(0, 80) : '';
             out.push({
                 tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+                node_id: nodeId(el),
+                autocomplete: el.getAttribute('aria-autocomplete') || (el.hasAttribute('list') ? 'list' : ''),
                 text: text, aria_label: aria_label, placeholder: placeholder,
                 name: el.getAttribute('name') || '', type: el.getAttribute('type') || '', id: el.id || '',
                 test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
+                test_id_attribute: ['data-testid','data-test-id','data-test','data-cy'].find(a => el.getAttribute(a)) || '',
+                options: el.tagName === 'SELECT' ? Array.from(el.options).map(o => ({label:o.label, value:o.value, disabled:o.disabled, selected:o.selected})) : [],
                 value: el.value || '', checked: !!el.checked, disabled: !!el.disabled,
+                readonly: !!el.readOnly,
                 required: !!el.required || el.getAttribute('aria-required') === 'true',
                 visible: reason === '', hidden_reason: reason,
                 label_text: label_text,
+                field_context: (el.matches('input,textarea,select,[role=combobox]') ? label_text || nearLabel(el) : ''),
                 context_label: (aria_label || text || placeholder || label_text) ? '' : nearLabel(el),
                 href: (el.tagName === 'A' ? (el.getAttribute('href') || '') : '').slice(0, 100),
                 container: landmark(el) || zone(r),
+                entity_context: entityContext(el),
                 rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
             });
         }
@@ -285,12 +330,15 @@ _COMPREHENSIVE_DOM_JS = r"""() => {
         seen.add(el); synth++;
         out.push({
             tag: el.tagName.toLowerCase(), role: '', text: text.slice(0, 150),
+            node_id: nodeId(el),
             aria_label: el.getAttribute('aria-label') || '', placeholder: '',
             name: '', type: '', id: el.id || '',
             test_id: el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('data-cy') || '',
+            test_id_attribute: ['data-testid','data-test-id','data-test','data-cy'].find(a => el.getAttribute(a)) || '',
             value: '', checked: false, disabled: false, required: false,
             visible: true, hidden_reason: '', synthetic: true, label_text: '',
             href: '', container: landmark(el) || zone(r),
+            entity_context: entityContext(el),
             rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
         });
     }

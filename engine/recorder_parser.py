@@ -575,7 +575,13 @@ def _generate_assertion_code(assertion):
     value = assertion.get("value", "")
     timeout = assertion.get("timeout", 10000)
 
-    if atype == "element_visible":
+    if atype == "collection_nonempty":
+        return f'expect(page.locator({selector!r}).first).to_be_visible(timeout={int(timeout)})'
+    elif atype == "locator_has_value":
+        return f'expect(page.locator({selector!r})).to_have_value({value!r}, timeout={int(timeout)})'
+    elif atype == "locator_has_text":
+        return f'expect(page.locator({selector!r})).to_have_text({value!r}, timeout={int(timeout)})'
+    elif atype == "element_visible":
         return f'expect(page.locator("{selector}")).to_be_visible(timeout={timeout})'
     elif atype == "element_not_visible":
         return f'expect(page.locator("{selector}")).not_to_be_visible(timeout={timeout})'
@@ -596,13 +602,15 @@ def _generate_assertion_code(assertion):
     elif atype == "page_contains_text":
         # Web-first: auto-retries until the text appears (or timeout) instead of
         # a single brittle check after a fixed sleep.
-        return f'expect(page.locator("body")).to_contain_text("{value}", timeout={timeout})'
+        return f'expect(page.locator("body")).to_contain_text({value!r}, timeout={int(timeout)})'
     elif atype == "page_not_contains_text":
-        return f'expect(page.locator("body")).not_to_contain_text("{value}", timeout={timeout})'
+        return f'expect(page.locator("body")).not_to_contain_text({value!r}, timeout={int(timeout)})'
     elif atype == "url_contains":
         # re.escape at runtime so URL punctuation (?, ., /) is matched literally.
         return f'expect(page).to_have_url(re.compile(".*" + re.escape("{value}") + ".*"), timeout={timeout})'
     elif atype == "url_equals":
+        if assertion.get("relative_to_base"):
+            return f'expect(page).to_have_url(urljoin(base_url, {value!r}), timeout={int(timeout)})'
         return f'expect(page).to_have_url("{value}", timeout={timeout})'
     elif atype == "url_not_contains":
         return f'expect(page).not_to_have_url(re.compile(".*" + re.escape("{value}") + ".*"), timeout={timeout})'
@@ -741,7 +749,6 @@ def generate_from_review(payload, ats_root, tests_dir=None):
 
     # Generate test lines
     test_lines = []
-    prev_raw = ""
     skip_count = 0           # how many subsequent steps to skip (consumed by a multi-line emit)
     autocomplete_pick_count = 0  # how many autocomplete-selects have fired so far; nth index for the next pick
     for i, step in enumerate(steps):
@@ -823,16 +830,13 @@ def generate_from_review(payload, ats_root, tests_dir=None):
         # Undo (Ctrl+Z) — mistakes during recording, not intentional test steps
         if stype == "press" and step.get("value") == "ControlOrMeta+z":
             continue
-        # Skip consecutive duplicate actions (e.g. double-clicking same element)
-        if raw and raw == prev_raw and stype in ("click", "check"):
-            continue
-        prev_raw = raw
+        # Preserve every reviewed action and its assertion boundary. Identical
+        # clicks can paginate, increment, or toggle; text equality is not proof
+        # that a dispatched action was redundant.
 
-        # ── Use raw strings for Tailwind CSS locators ──
-        if 'locator("' in raw:
-            raw = raw.replace('locator("', 'locator(r"')
-        elif "locator('" in raw:
-            raw = raw.replace("locator('", "locator(r'")
+        # Preserve recorded Python string semantics. Adding an r prefix changes
+        # escaped quotes/backslashes (including CSS attribute selectors). Codegen
+        # and the agent already emit executable Python string literals.
 
         # ── Rewrite broken `input[name="..."]` selectors to working DOM-level
         # selectors (admin PO form quirk — name attrs don't render but
@@ -880,17 +884,15 @@ def generate_from_review(payload, ats_root, tests_dir=None):
                 full_url = raw_url_match.group(2)
                 path_match = re.search(r'https?://[^/]+(/.*)', full_url)
                 if path_match:
-                    # Strip the leading slash from the extracted path —
-                    # admin_url / base_url already end with `/` (per conftest's
-                    # _get_platform_url), so naive concatenation produces a
-                    # double slash like `https://app.example.com//#/login`.
-                    # Some hosting layers (S3 / CloudFront on admin-dev) reject
-                    # double-slash paths with AccessDenied.
-                    path = path_match.group(1).lstrip("/")
+                    # The captured path is origin-relative, not relative to the
+                    # configured app root (which may itself contain a subpath).
+                    # Normalize leading slashes so urljoin cannot interpret a
+                    # recorded path as a new network authority.
+                    path = "/" + path_match.group(1).lstrip("/")
                     if "admin" in full_url:
-                        raw = raw.replace(f'{quote}{full_url}{quote}', f'admin_url + "{path}"')
+                        raw = raw.replace(f'{quote}{full_url}{quote}', f'urljoin(admin_url, {json.dumps(path)})')
                     else:
-                        raw = raw.replace(f'{quote}{full_url}{quote}', f'base_url + "{path}"')
+                        raw = raw.replace(f'{quote}{full_url}{quote}', f'urljoin(base_url, {json.dumps(path)})')
 
         # ── Selective force=True — for elements with known overlay/disabled patterns ──
         if stype in ("click", "check", "dblclick"):
@@ -987,6 +989,11 @@ def generate_from_review(payload, ats_root, tests_dir=None):
                 # The value may itself be a function call like tc_data.get("input_5", "")
                 # so we need balanced-paren matching for the .fill argument.
                 if is_mui_numeric_fill:
+                    # Match the live sequential-fill replacement semantics.
+                    # Typing alone appends to an existing value (0 -> 07).
+                    numeric_locator = raw.rsplit('.fill(', 1)[0]
+                    test_lines.append(f'    {numeric_locator}.click()')
+                    test_lines.append(f'    {numeric_locator}.press("ControlOrMeta+a")')
                     raw = re.sub(
                         r'\.fill\(((?:[^()]|\([^()]*\))*)\)',
                         r'.press_sequentially(\1, delay=80)',
@@ -1206,11 +1213,13 @@ def generate_from_review(payload, ats_root, tests_dir=None):
         # corrupt regex assertions like re.compile(...). A function replacement is
         # inserted literally.
         existing = re.sub(pattern, lambda _m: new_func, existing, flags=re.DOTALL)
-        with open(test_py, "w", encoding="utf-8") as f:
-            f.write(existing)
     else:
-        with open(test_py, "a", encoding="utf-8") as f:
-            f.write(full_func)
+        existing += full_func
+    # Do this after replacement: the replaced final function may span the EOF.
+    if "from urllib.parse import urljoin\n" not in existing:
+        existing += "\nfrom urllib.parse import urljoin\n"
+    with open(test_py, "w", encoding="utf-8") as f:
+        f.write(existing)
 
     # Save test data
     data_file = os.path.join(flow_dir, "test_data.json")
