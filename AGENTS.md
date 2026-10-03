@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Project continuity
+
+Read [MEMORY.md](MEMORY.md) before continuing Qamate work. It consolidates the
+project's goals, decisions, evidence, limitations, and remaining acceptance work.
+Follow its links to the acceptance ledger before reporting progress or completion.
+Historical results are version-specific; do not treat green development pilots
+as proof of unseen-site reliability.
+
+The Cursor Cloud notes below are environment-specific historical setup guidance.
+Detect the current host before choosing paths or commands; this repository is
+also developed on Windows. Use the memory's dated ledger for validation counts.
+
 ## Cursor Cloud specific instructions
 
 QAmate is an **Electron desktop IDE** (`main.js`, `preload.js`, `src/`) that drives a
