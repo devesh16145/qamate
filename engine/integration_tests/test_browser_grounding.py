@@ -435,3 +435,75 @@ def test_restored_recording_replays_on_fresh_document(session):
     for assertion in session.assertions:
         exec(_generate_assertion_code(assertion), {"page": session.page, "expect": expect})
     assert session.page.locator("select").input_value() == "lohi"
+
+
+def _emitted_page_statements(source):
+    import ast
+    function = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef))
+    return [n for n in ast.walk(function) if isinstance(n, (ast.Expr, ast.With))
+            and ast.unparse(n).lstrip().startswith(("page.", "expect(", "with page."))]
+
+
+def _run_statements(statements, page):
+    import ast
+    import re
+    from playwright.sync_api import expect
+    for statement in statements:
+        exec(compile(ast.Module(body=[statement], type_ignores=[]), "<generated>", "exec"),
+             {"page": page, "expect": expect, "re": re, "tc_data": {}})
+
+
+def test_generated_scroll_and_set_checked_steps_replay(session, tmp_path):
+    """Regression: scroll steps emitted `page.mouse.wheel(0, )` (TypeError) and a
+    set_checked fallback got `.scroll_into_view_if_needed()` chained onto its None result."""
+    from recorder_parser import generate_from_review
+    session.page.set_content('<div style="height:3000px"></div><label><input id="agree" type="checkbox"> Agree</label>'
+                             '<p id="far">Terms end here</p>')
+    payload = {"tc_id": "TC-SCROLL-001", "flowId": "scrollcheck", "steps": [
+        {"id": 1, "type": "scroll", "value": "",
+         "rawLine": 'page.get_by_text("Terms end here").first.scroll_into_view_if_needed()'},
+        {"id": 2, "type": "check", "rawLine": 'page.locator("#agree").set_checked(True, force=True)'}],
+        "assertions": [], "criteria": []}
+    assert generate_from_review(payload, str(tmp_path))["status"] == "success"
+    source = (tmp_path / "tests/flows/scrollcheck/test_scrollcheck.py").read_text(encoding="utf-8")
+    assert "mouse.wheel(0, )" not in source and ").scroll_into_view_if_needed()" not in source.split("set_checked")[1].split("\n")[0]
+    _run_statements(_emitted_page_statements(source), session.page)
+    assert session.page.locator("#agree").is_checked()
+
+
+def test_pressed_keys_are_recorded_and_replayed(session, tmp_path):
+    from recorder_parser import generate_from_review
+    session.page.set_content('<form onsubmit="event.preventDefault();document.querySelector(\'output\').textContent=\'sent\'">'
+                             '<input aria-label="Query"></form><output></output>')
+    session.page.get_by_label("Query").focus()
+    assert session.press_key("Enter")["ok"]
+    assert session.steps[-1]["rawLine"] == 'page.keyboard.press("Enter")' and session.steps[-1]["type"] == "press"
+    payload = {"tc_id": "TC-KEY-001", "flowId": "keys", "steps": session.steps, "assertions": [], "criteria": []}
+    assert generate_from_review(payload, str(tmp_path))["status"] == "success"
+    source = (tmp_path / "tests/flows/keys/test_keys.py").read_text(encoding="utf-8")
+    assert 'page.keyboard.press("Enter")' in source
+
+
+def test_generated_body_text_checks_use_visible_text(session, tmp_path):
+    """Live checks read visible text; replay must not pass or fail on hidden text."""
+    from recorder_parser import generate_from_review
+    session.page.set_content('<p>Order placed</p><div hidden>Payment failed</div>')
+    payload = {"tc_id": "TC-TEXT-001", "flowId": "visible", "steps": [
+        {"id": 1, "type": "navigate", "rawLine": 'page.goto("https://fixture.test/")'}],
+        "assertions": [{"type": "page_contains_text", "value": "Order placed", "afterStep": 1},
+                       {"type": "page_not_contains_text", "value": "Payment failed", "afterStep": 1}],
+        "criteria": []}
+    assert generate_from_review(payload, str(tmp_path))["status"] == "success"
+    source = (tmp_path / "tests/flows/visible/test_visible.py").read_text(encoding="utf-8")
+    assert source.count("use_inner_text=True") == 2
+    from playwright.sync_api import expect
+    expect(session.page.locator("body")).not_to_contain_text("Payment failed", use_inner_text=True, timeout=1000)
+
+
+def test_live_numeric_retyping_replaces_value_on_every_platform(session):
+    """Control+a is not select-all on macOS; the live path must replace, not append."""
+    session.page.set_content('<input type="number" aria-label="Units" value="0">')
+    session.inspect()
+    ref = next(r for r, el in session.by_ref.items() if el.get("name") == "Units")
+    assert session.act("fill", ref, "7")["ok"]
+    assert session.page.get_by_label("Units").input_value() == "7"

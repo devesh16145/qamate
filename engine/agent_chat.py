@@ -56,6 +56,7 @@ import json
 import asyncio
 import datetime
 import threading
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -247,6 +248,21 @@ def _compact_percepts(messages):
     return out
 
 
+def planner_request_metrics(response):
+    """Token and reasoning figures for one planner response (None when unreported)."""
+    from pydantic_ai.messages import ThinkingPart
+    usage = getattr(response, "usage", None)
+    details = dict(getattr(usage, "details", None) or {})
+    reasoning = details.get("reasoning_tokens")
+    return {
+        "input": getattr(usage, "input_tokens", None),
+        "output": getattr(usage, "output_tokens", None),
+        "reasoning_tokens": reasoning,
+        "thinking_chars": sum(len(p.content or "") for p in response.parts if isinstance(p, ThinkingPart)),
+        "tool_calls": sum(1 for p in response.parts if isinstance(p, ToolCallPart)),
+    }
+
+
 class TurnCompactingModel(WrapperModel):
     """Caps WITHIN-TURN context growth. Every model request re-sends the whole
     turn transcript, so long authoring turns grow quadratically — run-5
@@ -270,15 +286,30 @@ class TurnCompactingModel(WrapperModel):
         from prompt_metrics import context_metrics
         emit({"event": "planner_context", **context_metrics(messages, parameters)})
 
+    @staticmethod
+    def _report_request(started, response):
+        """Per-request planner timing (same event the decision model emits), so a run
+        shows how much wall time is model thinking vs browser/tool work."""
+        try:
+            emit({"event": "model_usage", "role": "planner", **planner_request_metrics(response),
+                  "duration_ms": round((time.monotonic() - started) * 1000)})
+        except Exception:
+            pass
+
     async def request(self, messages, model_settings, model_request_parameters):
         self._report_context(messages, model_request_parameters)
-        return await super().request(messages, model_settings, model_request_parameters)
+        started = time.monotonic()
+        response = await super().request(messages, model_settings, model_request_parameters)
+        self._report_request(started, response)
+        return response
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
         self._report_context(messages, model_request_parameters)
+        started = time.monotonic()
         async with super().request_stream(messages, model_settings, model_request_parameters, run_context) as stream:
             yield stream
+        self._report_request(started, stream.get())
 
     def prepare_messages(self, messages):
         if self.compact and self.multi_app_active is not None and self.multi_app_active():
@@ -1496,8 +1527,14 @@ class BrowserSession:
     def press_key(self, key: str, times: int = 1) -> dict:
         """Press a keyboard key N times."""
         try:
+            pre_url = self._url()
             for _ in range(max(1, times)):
                 self.page.keyboard.press(key)
+                # Recorded so replay presses it too (Enter to submit, Escape to close).
+                self.step_id += 1
+                self.steps.append({"id": self.step_id, "rawLine": f'page.keyboard.press("{_q(key)}")',
+                                   "type": "press", "target": "page.keyboard", "url": pre_url,
+                                   "targetDescription": f"Press {key}", "value": key, "varName": ""})
             self._settle()
             result = {"ok": True, "key": key, "times": times, "url": self._url()}
             if self.overlay_opened():
@@ -1917,7 +1954,7 @@ class BrowserSession:
                     # Type for real; the rawLine stays .fill() — codegen rewrites it
                     # to press_sequentially + Tab via _is_mui_numeric_input_fill.
                     live.click()
-                    live.press("Control+a")
+                    live.press("ControlOrMeta+a")
                     live.press_sequentially(val, delay=40)
                     live.press("Tab")
                 else:
@@ -3506,6 +3543,9 @@ def build_agent(model, max_tokens=None, profile=None, *, hybrid=False, decision_
             junit = os.path.join(rdir, "junit.xml")
             env = dict(base_env)
             env["ATS_RESULTS_DIR"] = rdir   # known dir so we can find the failure screenshot
+            # Authoring checks only need pass/fail + the failure screenshot: skip video,
+            # tracing and API-body capture (the Run button keeps full diagnostics).
+            env.update({"ATS_VIDEO": "off", "ATS_TRACING": "off", "ATS_NETWORK": "off"})
             cmd = [sys.executable, "-m", "pytest", flow_dir, "-k", underscored,
                    "--tb=short", "-q", "-ra", "-p", "no:cacheprovider", "--tracing=off", f"--junitxml={junit}"]
             try:

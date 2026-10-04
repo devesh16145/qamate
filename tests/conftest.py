@@ -690,11 +690,13 @@ def browser_context_args(browser_context_args, results_dir):
         "no_viewport": True,
     }
 
-    # Always enable video — each test gets its own context with video
-    video_dir = os.path.join(results_dir, "videos")
-    os.makedirs(video_dir, exist_ok=True)
-    args["record_video_dir"] = video_dir
-    args["record_video_size"] = {"width": 1920, "height": 1080}
+    # Video for every test, except quick authoring checks (ATS_VIDEO=off): the agent's
+    # verification runs don't need a recording, and encoding 1080p slows every run.
+    if (os.environ.get("ATS_VIDEO") or "").lower() != "off":
+        video_dir = os.path.join(results_dir, "videos")
+        os.makedirs(video_dir, exist_ok=True)
+        args["record_video_dir"] = video_dir
+        args["record_video_size"] = {"width": 1920, "height": 1080}
     return args
 
 

@@ -602,9 +602,9 @@ def _generate_assertion_code(assertion):
     elif atype == "page_contains_text":
         # Web-first: auto-retries until the text appears (or timeout) instead of
         # a single brittle check after a fixed sleep.
-        return f'expect(page.locator("body")).to_contain_text({value!r}, timeout={int(timeout)})'
+        return f'expect(page.locator("body")).to_contain_text({value!r}, use_inner_text=True, timeout={int(timeout)})'
     elif atype == "page_not_contains_text":
-        return f'expect(page.locator("body")).not_to_contain_text({value!r}, timeout={int(timeout)})'
+        return f'expect(page.locator("body")).not_to_contain_text({value!r}, use_inner_text=True, timeout={int(timeout)})'
     elif atype == "url_contains":
         # re.escape at runtime so URL punctuation (?, ., /) is matched literally.
         return f'expect(page).to_have_url(re.compile(".*" + re.escape("{value}") + ".*"), timeout={timeout})'
@@ -925,9 +925,14 @@ def generate_from_review(payload, ats_root, tests_dir=None):
 
         # ── Generate code ──
         if stype == "scroll":
-            px = step.get("value", "500")
-            test_lines.append(f"    page.mouse.wheel(0, {px})")
-            test_lines.append("    page.wait_for_timeout(500)")
+            if "scroll_into_view_if_needed" in raw:
+                # The agent scrolled a target into view: replay exactly that (an empty
+                # value used to emit `page.mouse.wheel(0, )`, a runtime TypeError).
+                test_lines.append(f"    {raw}")
+            else:
+                px = str(step.get("value") or "").strip() or "500"
+                test_lines.append(f"    page.mouse.wheel(0, {px})")
+                test_lines.append("    page.wait_for_timeout(500)")
         elif stype == "navigate":
             test_lines.append(f"    {raw}")
             # Settle briefly, but NEVER block on full network idle: SPAs (this app
@@ -970,7 +975,7 @@ def generate_from_review(payload, ats_root, tests_dir=None):
 
             # For CSS-locator elements, scroll into view first (handles sticky footers)
             if 'locator(' in raw and stype in ("click", "fill", "check"):
-                locator_expr = raw.strip().split(".click(")[0].split(".fill(")[0].split(".check(")[0]
+                locator_expr = re.split(r"\.(?:click|fill|check|set_checked|dblclick|select_option)\(", raw.strip(), maxsplit=1)[0]
                 test_lines.append(f"    {locator_expr}.scroll_into_view_if_needed()")
 
             if is_file_chooser_trigger:

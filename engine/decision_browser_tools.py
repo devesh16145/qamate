@@ -22,9 +22,28 @@ class BrowserBridge:
         self.transition_step = 0
         self.transition_visits = []
         self.inputs = {slot.name: slot.value for slot in contract.inputs}
+        self.violation = None
+
+    def watch_request(self, request):
+        """Passive policy watch. A sync-API page.route() would pause ALL page traffic
+        while the agent is thinking (measured: an 11 ms fetch took 2.7 s), so requests
+        are observed, never intercepted; the loop stops at its next step instead."""
+        if self.violation:
+            return
+        if self.policy == "read_only" and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            self.violation = f"{request.method} request during read-only browsing"
+        elif request.is_navigation_request() and request.frame == self.session.page.main_frame:
+            try:
+                escaped = origin(request.url) != origin(self.contract.start_url)
+            except ValueError:
+                escaped = True
+            if escaped:
+                self.violation = "navigation left the registered origin"
 
     def snapshot(self):
         obs = self.session.inspect(160)
+        if self.violation:
+            return {**obs, "policy_violation": self.violation}
         if self.active_milestone is not None and self.transition_start is not None and obs.get("ok"):
             page_key = self._page_key(obs.get("url", ""))
             previous = self._page_key(self.transition_visits[-1]["url"]) if self.transition_visits else self.transition_start
@@ -268,19 +287,12 @@ def register_decision_browser(agent, Deps, bro, value_gate, emit):
         ctx.deps.decision_browser_used = True
         bridge = BrowserBridge(ctx.deps.session, contract, policy,
                                public_demo_auth=execution.get('public_demo_auth') is True)
-        def restrict(route):
-            request = route.request
-            # No writes via HTTP; page navigation cannot escape the registered origin.
-            blocked = request.method not in {"GET", "HEAD", "OPTIONS"}
-            if request.is_navigation_request() and request.frame == bridge.session.page.main_frame:
-                blocked |= origin(request.url) != origin(contract.start_url)
-            route.abort() if blocked else route.continue_()
         async def perform(action):
             value = bridge.inputs.get(action.slot)
             if action.kind in {"fill", "select", "pick"}:
                 value = await value_gate(ctx, action.ref, value, action.kind)
             return await bro(bridge.act, action, value)
-        await bro(bridge.session.page.route, "**/*", restrict)
+        await bro(bridge.session.page.on, "request", bridge.watch_request)
         try:
             await bro(bridge.session.navigate, contract.start_url)
             emit({"event": "decision_browser_contract", "contract": contract.model_dump()})
@@ -295,4 +307,4 @@ def register_decision_browser(agent, Deps, bro, value_gate, emit):
             ctx.deps.decision_browser_complete = bool(result.get("ok"))
             return result
         finally:
-            await bro(bridge.session.page.unroute, "**/*", restrict)
+            await bro(bridge.session.page.remove_listener, "request", bridge.watch_request)

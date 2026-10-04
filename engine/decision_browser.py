@@ -223,6 +223,8 @@ async def browse(contract, observe, perform, check, decider, *, policy="read_onl
             return result("budget_exhausted")
         readiness = await probe(contract.milestones[stage]) if probe else None
         obs = await observe()
+        if obs.get("policy_violation"):
+            return result("policy_violation", detail=obs["policy_violation"])
         if origin(obs.get("url", "")) != origin(contract.start_url):
             return result("origin_violation")
         try:

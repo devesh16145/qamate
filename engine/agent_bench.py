@@ -149,6 +149,10 @@ def score_events(events):
             entry = s.setdefault("role_usage", {}).setdefault(role, {"input": 0, "output": 0, "requests": 0, "incomplete": False, "duration_ms": 0})
             entry["requests"] += 1
             entry["duration_ms"] += ev.get("duration_ms", 0) or 0
+            if ev.get("reasoning_tokens") is not None:
+                entry["reasoning_tokens"] = entry.get("reasoning_tokens", 0) + int(ev["reasoning_tokens"])
+            if ev.get("thinking_chars"):
+                entry["thinking_chars"] = entry.get("thinking_chars", 0) + int(ev["thinking_chars"])
             for field in ("input", "output"):
                 if ev.get(field) is None:
                     entry["incomplete"] = True
