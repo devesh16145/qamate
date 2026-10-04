@@ -37,7 +37,7 @@
   <script src="vendor/icons.js"></script>
   <script type="text/babel">
     const { useState, useEffect } = React;
-    const I = window.I;
+    // `I` (icons) is already a global from vendor/icons.js; redeclaring it is a SyntaxError.
 
     function fmtDur(s) { return s >= 60 ? `${(s/60).toFixed(1)}m` : `${s.toFixed(1)}s`; }
 
@@ -61,9 +61,10 @@
           } catch (e) { console.error(e); }
         }
         load();
-        // Refresh every 10s so new runs appear
-        const t = setInterval(load, 10000);
-        return () => clearInterval(t);
+        // New runs appear as soon as they land; the slow poll is only a fallback.
+        const off = window.ats.onDataChanged ? window.ats.onDataChanged(k => { if (k.history) load(); }) : null;
+        const t = setInterval(load, 30000);
+        return () => { clearInterval(t); if (off) off(); };
       }, []);
 
       const dock     = () => { try { window.ats.historyDock(); } catch(e) {} };

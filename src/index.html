@@ -921,118 +921,117 @@ function JiraModal({ tcId, flowId, description, initialType, isTab, onClose, toa
 </script>
 <script type="text/babel">
 
+/* Loads the test list (MODULES), run history (HISTORY) and users into the globals the
+   IDE renders from. Runs at startup and again whenever tests or runs change on disk. */
+window.loadAtsData = async function loadAtsData() {
+    const flows = await window.ats.getFlows();
+    const history = await window.ats.getHistory();
+
+    // Bulk-read test_data for every TC in one IPC call so the explorer can show
+    // each variant as a second-level row under its parent test case.
+    const allItems = [];
+    for (const f of flows) for (const tc of f.test_cases) allItems.push({ flowId: f.id, tcId: tc.tc_id });
+    const bulk = (allItems.length ? await window.ats.getBulkTcData(allItems) : {}) || {};
+
+    const isVariantShape = (val) => val && typeof val === 'object' && !Array.isArray(val)
+        && Object.keys(val).length > 0
+        && Object.values(val).every(v => v && typeof v === 'object' && !Array.isArray(v));
+    const kindOf = (name) => /negative|empty|error|fail|invalid|reject|missing/i.test(name) ? 'negative' : 'positive';
+
+    const iconMap = { 'catalog': 'Box', 'sign_in': 'User', 'po': 'FileText' };
+    const mappedModules = flows.map(f => ({
+        id: f.id,
+        name: f.name,
+        icon: iconMap[f.id] || 'Folder',
+        tests: f.test_cases.map(tc => {
+            const tcId = tc.tc_id;
+            const tdata = bulk[tcId];
+            const hasVariants = isVariantShape(tdata);
+            const variantNames = hasVariants ? Object.keys(tdata) : [];
+            return {
+                id: tcId,
+                title: tc.description,
+                pre: tc.preconditions,
+                checkpoints: tc.checkpoints || [],
+                tags: [],
+                hasData: true,
+                datasets: hasVariants ? variantNames : ['default'],
+                lastStatus: 'never',
+                lastDuration: '—',
+                versions: variantNames.map(name => ({
+                    id: `${tcId}::${name}`,
+                    label: name,
+                    kind: kindOf(name),
+                    dataset: name,
+                    lastStatus: 'never',
+                    lastDuration: '—',
+                    error: '',
+                    tags: [],
+                })),
+            };
+        })
+    }));
+
+    // Map history
+    const mappedHistory = history.map(h => {
+        const parts = (h.id || '').split('_');
+        const passedN = h.passed || 0, failedN = h.failed || 0;
+        return {
+            id: h.id,
+            when: `${parts[0]} ${(parts[1] || '').replace(/-/g, ':')}`,
+            tcs: h.tc_ids || [],
+            passed: passedN,
+            failed: failedN,
+            skipped: h.skipped || 0,
+            flaky: h.flaky || 0,
+            warnings: h.warnings || 0,
+            // Prefer the numeric duration_s; h.duration is a display string like
+            // "2m 13s" and parseFloat would wrongly yield 2.0s for a 133s run.
+            duration: (typeof h.duration_s === 'number' ? h.duration_s : parseFloat(h.duration)) || 0,
+            // run_metadata.status is "Completed"/"Stopped"; derive pass/fail from counts
+            status: h.status === 'Stopped' ? 'fail' : (failedN > 0 ? 'fail' : (passedN > 0 ? 'pass' : 'fail')),
+            // Authoritative per-test results embedded by the runner (JUnit-derived)
+            results: h.results || null,
+        };
+    });
+
+    const configObj = await window.ats.getConfig();
+    window.MODULES = mappedModules;
+    window.HISTORY = mappedHistory.length ? mappedHistory : [{ id: 'empty', when: 'Never', tcs: [], passed: 0, failed: 0, skipped: 0, duration: 0, status: 'pass' }];
+    window.TREND = [ { day: 'Today', total: 0, passed: 0, failed: 0 } ]; // stub
+    window.USER_STORIES = {};
+    window.TEST_STEPS = {};
+
+    window.USERS = (configObj?.platforms?.seller?.users || configObj?.users || []).map((u, i) => ({
+        id: `seller-${i}`,
+        name: u.label || `Seller ${i + 1}`,
+        email: u.email || '',
+        password: u.password || '',
+    }));
+    if (window.USERS.length === 0) {
+        window.USERS = [{ id: 'seller-0', name: 'Default User', email: '', password: '' }];
+    }
+
+    window.ADMINS = (configObj?.platforms?.admin?.users || configObj?.admin_users || []).map((u, i) => ({
+        id: `admin-${i}`,
+        name: u.label || `Admin ${i + 1}`,
+        email: u.email || '',
+        password: u.password || '',
+    }));
+    if (window.ADMINS.length === 0) {
+        window.ADMINS = [{ id: 'admin-0', name: 'Default Admin', email: '', password: '' }];
+    }
+};
+
 function DataBridge() {
     const [data, setData] = useState(null);
     const [err, setErr] = useState(null);
 
     useEffect(() => {
-        async function load() {
-            try {
-                const flows = await window.ats.getFlows();
-                const history = await window.ats.getHistory();
-
-                // Bulk-read test_data for every TC in one IPC call so the explorer can show
-                // each variant as a second-level row under its parent test case.
-                const allItems = [];
-                for (const f of flows) for (const tc of f.test_cases) allItems.push({ flowId: f.id, tcId: tc.tc_id });
-                const bulk = (allItems.length ? await window.ats.getBulkTcData(allItems) : {}) || {};
-
-                const isVariantShape = (val) => val && typeof val === 'object' && !Array.isArray(val)
-                    && Object.keys(val).length > 0
-                    && Object.values(val).every(v => v && typeof v === 'object' && !Array.isArray(v));
-                const kindOf = (name) => /negative|empty|error|fail|invalid|reject|missing/i.test(name) ? 'negative' : 'positive';
-
-                const iconMap = { 'catalog': 'Box', 'sign_in': 'User', 'po': 'FileText' };
-                const mappedModules = flows.map(f => ({
-                    id: f.id,
-                    name: f.name,
-                    icon: iconMap[f.id] || 'Folder',
-                    tests: f.test_cases.map(tc => {
-                        const tcId = tc.tc_id;
-                        const tdata = bulk[tcId];
-                        const hasVariants = isVariantShape(tdata);
-                        const variantNames = hasVariants ? Object.keys(tdata) : [];
-                        return {
-                            id: tcId,
-                            title: tc.description,
-                            pre: tc.preconditions,
-                            checkpoints: tc.checkpoints || [],
-                            tags: [],
-                            hasData: true,
-                            datasets: hasVariants ? variantNames : ['default'],
-                            lastStatus: 'never',
-                            lastDuration: '—',
-                            versions: variantNames.map(name => ({
-                                id: `${tcId}::${name}`,
-                                label: name,
-                                kind: kindOf(name),
-                                dataset: name,
-                                lastStatus: 'never',
-                                lastDuration: '—',
-                                error: '',
-                                tags: [],
-                            })),
-                        };
-                    })
-                }));
-
-                // Map history
-            const mappedHistory = history.map(h => {
-                const parts = (h.id || '').split('_');
-                const passedN = h.passed || 0, failedN = h.failed || 0;
-                return {
-                    id: h.id,
-                    when: `${parts[0]} ${(parts[1] || '').replace(/-/g, ':')}`,
-                    tcs: h.tc_ids || [],
-                    passed: passedN,
-                    failed: failedN,
-                    skipped: h.skipped || 0,
-                    flaky: h.flaky || 0,
-                    warnings: h.warnings || 0,
-                    // Prefer the numeric duration_s; h.duration is a display string like
-                    // "2m 13s" and parseFloat would wrongly yield 2.0s for a 133s run.
-                    duration: (typeof h.duration_s === 'number' ? h.duration_s : parseFloat(h.duration)) || 0,
-                    // run_metadata.status is "Completed"/"Stopped"; derive pass/fail from counts
-                    status: h.status === 'Stopped' ? 'fail' : (failedN > 0 ? 'fail' : (passedN > 0 ? 'pass' : 'fail')),
-                    // Authoritative per-test results embedded by the runner (JUnit-derived)
-                    results: h.results || null,
-                };
-            });
-
-            const configObj = await window.ats.getConfig();
-            window.MODULES = mappedModules;
-            window.HISTORY = mappedHistory.length ? mappedHistory : [{ id: 'empty', when: 'Never', tcs: [], passed: 0, failed: 0, skipped: 0, duration: 0, status: 'pass' }];
-            window.TREND = [ { day: 'Today', total: 0, passed: 0, failed: 0 } ]; // stub
-            window.USER_STORIES = {};
-            window.TEST_STEPS = {};
-            
-            window.USERS = (configObj?.platforms?.seller?.users || configObj?.users || []).map((u, i) => ({
-                id: `seller-${i}`,
-                name: u.label || `Seller ${i + 1}`,
-                email: u.email || '',
-                password: u.password || '',
-            }));
-            if (window.USERS.length === 0) {
-                window.USERS = [{ id: 'seller-0', name: 'Default User', email: '', password: '' }];
-            }
-            
-            window.ADMINS = (configObj?.platforms?.admin?.users || configObj?.admin_users || []).map((u, i) => ({
-                id: `admin-${i}`,
-                name: u.label || `Admin ${i + 1}`,
-                email: u.email || '',
-                password: u.password || '',
-            }));
-            if (window.ADMINS.length === 0) {
-                window.ADMINS = [{ id: 'admin-0', name: 'Default Admin', email: '', password: '' }];
-            }
-            
-            setData(true);
-        } catch (err) {
-            console.error("Failed to load ATS data", err);
-            setErr(err.message || String(err));
-        }
-        }
-        load();
+        window.loadAtsData().then(() => setData(true)).catch((e) => {
+            console.error("Failed to load ATS data", e);
+            setErr(e.message || String(e));
+        });
     }, []);
 
     if (err) return <div style={{padding: 40, color: 'red'}}>Error: {err}</div>;
@@ -1180,21 +1179,19 @@ function App() {
   const [leftTool, setLeftTool] = useState('explorer'); // explorer | search | schedule
 
   // Selection / active state
-  const [checked, setChecked] = useState(new Set(['TC-CATALOG-001', 'TC-CATALOG-003']));
-  const [pinned, setPinned] = useState(new Set(['TC-CATALOG-001']));
-  const [expandedTcs, setExpandedTcs] = useState(new Set(['TC-CATALOG-001']));
+  const [checked, setChecked] = useState(() => new Set());
+  const [pinned, setPinned] = useState(() => new Set());
+  const [expandedTcs, setExpandedTcs] = useState(() => new Set());
   const [checkedVersions, setCheckedVersions] = useState(new Set());
 
   // Tab state
-  const [tabs, setTabs] = useState([
-    { kind: 'tc', id: 'TC-CATALOG-001', view: 'data' },
-  ]);
-  const [activeTab, setActiveTab] = useState('TC-CATALOG-001');
+  const [tabs, setTabs] = useState([]);
+  const [activeTab, setActiveTab] = useState(null);
 
   // Filtering
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const [openModules, setOpenModules] = useState(new Set(['catalog', 'signup', 'po', 'address']));
+  const [openModules, setOpenModules] = useState(() => new Set(MODULES.map(m => m.id)));
 
   // Run state
   const [running, setRunning] = useState(false);
@@ -1243,10 +1240,38 @@ function App() {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2400);
   };
 
+  // Live data: tests saved by the agent / recorder and finished runs show up without a
+  // reload. The main process watches the tests and results folders; we re-read the
+  // globals and bump a version that every derived view depends on.
+  const [dataVersion, setDataVersion] = useState(0);
+  useEffect(() => {
+    if (!window.ats.onDataChanged) return undefined;
+    let busy = false, again = false;
+    const refresh = async () => {
+      if (busy) { again = true; return; }
+      busy = true;
+      try { await window.loadAtsData(); setDataVersion(v => v + 1); }
+      catch (e) { console.warn('refresh failed', e); }
+      busy = false;
+      if (again) { again = false; refresh(); }
+    };
+    return window.ats.onDataChanged(refresh);
+  }, []);
+  // A flow that appears while the app is open (e.g. the agent's first test in it) opens expanded.
+  const knownModules = useRef(null);
+  useEffect(() => {
+    const ids = MODULES.map(m => m.id);
+    if (knownModules.current) {
+      const fresh = ids.filter(id => !knownModules.current.has(id));
+      if (fresh.length) setOpenModules(s => new Set([...s, ...fresh]));
+    }
+    knownModules.current = new Set(ids);
+  }, [dataVersion]);
+
   // Counts
-  const totalTests = useMemo(() => MODULES.reduce((s, m) => s + m.tests.length, 0), []);
-  const failingCount = useMemo(() => MODULES.reduce((s, m) => s + m.tests.filter(t => t.lastStatus === 'fail').length, 0), []);
-  const newCount = useMemo(() => MODULES.reduce((s, m) => s + m.tests.filter(t => t.tags.includes('new') || t.lastStatus === 'never').length, 0), []);
+  const totalTests = useMemo(() => MODULES.reduce((s, m) => s + m.tests.length, 0), [dataVersion]);
+  const failingCount = useMemo(() => MODULES.reduce((s, m) => s + m.tests.filter(t => t.lastStatus === 'fail').length, 0), [dataVersion]);
+  const newCount = useMemo(() => MODULES.reduce((s, m) => s + m.tests.filter(t => t.tags.includes('new') || t.lastStatus === 'never').length, 0), [dataVersion]);
 
   // Resolve active tab
   const activeTcId = useMemo(() => {
@@ -1266,7 +1291,7 @@ function App() {
       }
     }
     return null;
-  }, [activeTcId]);
+  }, [activeTcId, dataVersion]);
 
   /* ───── Tab helpers ───── */
   const openTab = useCallback((tcId, view = 'data') => {
@@ -1487,7 +1512,7 @@ function App() {
       });
       return { ...m, tests };
     }).filter(m => m.tests.length > 0);
-  }, [search, filter, checked, pinned]);
+  }, [search, filter, checked, pinned, dataVersion]);
 
   return (
     <div className="app">
@@ -3380,7 +3405,7 @@ function TestCaseView({ tabId, view, setTabView, toast, openCoverageTab, openRev
       }
     }
     return null;
-  }, [tabId]);
+  }, [tabId, MODULES]);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -4157,7 +4182,7 @@ function ResultsView({ history, trend, onCreateBug, openTab, runId, toast }) {
       });
     }
     return (run.tcs || []).map(id => byId[id]).filter(Boolean);
-  }, [run]);
+  }, [run, MODULES]);
 
   const failedTests = executed.filter(t => t.lastStatus === 'fail');
   const passedTests = executed.filter(t => t.lastStatus === 'pass');

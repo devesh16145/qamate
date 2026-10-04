@@ -198,7 +198,44 @@ app.whenReady().then(async () => {
     console.error('[QAmate] First-run setup error:', e && e.message);
   }
   createWindow();
+  _watchData();
 });
+
+// ── Keep the IDE's test list and run history live ─────────────────────────────
+// Tests are written by the agent (docked or in its own window), the recorder, or
+// edits outside the app; runs land in results/. Watch those trees and tell every
+// window what changed, so lists refresh in place instead of needing a reload.
+const _dataWatchers = [];
+function _watchData() {
+  const roots = [path.join(DATA_ROOT, 'tests'), path.join(DATA_ROOT, 'projects'), RESULTS_DIR];
+  let pending = { tests: false, history: false };
+  let timer = null;
+  const flush = () => {
+    timer = null;
+    const kinds = pending;
+    pending = { tests: false, history: false };
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.webContents.send('ats-data-changed', kinds); } catch (e) { /* window closing */ }
+    }
+  };
+  for (const root of roots) {
+    try {
+      fs.mkdirSync(root, { recursive: true });
+      _dataWatchers.push(fs.watch(root, { recursive: true }, (_event, file) => {
+        const base = path.basename(String(file || ''));
+        let hit = false;
+        if (/^test_.*\.py$/.test(base) || base === 'test_cases.json' || base === 'test_data.json') {
+          pending.tests = true; hit = true;
+        } else if (root === RESULTS_DIR && base === 'run_metadata.json') {
+          pending.history = true; hit = true;
+        }
+        if (hit && !timer) timer = setTimeout(flush, 400);
+      }));
+    } catch (e) {
+      console.warn('[QAmate] could not watch', root, e && e.message);
+    }
+  }
+}
 
 app.on('window-all-closed', () => {
   killPython();

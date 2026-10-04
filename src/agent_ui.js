@@ -561,10 +561,10 @@
     const LP = window.LlmProviders;
     const list = (providerList || []).filter((p) => p.canPlan !== false);
     if (lockedModel) {
-      return <span className="ag-pill static" title="The model is fixed while this session runs. Start a new chat to switch."><Ic.Sparkle size={12} />{lockedModel}</span>;
+      return <span className="ag-pill static" title="The model is fixed while this session runs. Start a new chat to switch."><Ic.Sparkle size={12} /><span className="ag-pill-text">{lockedModel}</span></span>;
     }
     if (llmConfig && !list.length) {
-      return <span className="ag-pill warn" title="Open Preferences → AI models in the main window, add a provider and save."><Ic.AlertCircle size={12} />No model — add one in Preferences</span>;
+      return <span className="ag-pill warn" title="No model yet. Open Preferences → AI models in the main window, add a provider and save."><Ic.AlertCircle size={12} /><span className="ag-pill-text">Add a model</span></span>;
     }
     const cur = list.find((p) => p.id === provider);
     const configured = !LP || !llmConfig || LP.isConfigured(provider, llmConfig, secretKeys || {});

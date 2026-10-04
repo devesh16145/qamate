@@ -76,6 +76,12 @@ contextBridge.exposeInMainWorld('ats', {
   agentRenameSession: (opts) => ipcRenderer.invoke('agent-rename-session', opts),     // {projectId, sessionId, title}
   agentDeleteSession: (opts) => ipcRenderer.invoke('agent-delete-session', opts),     // {projectId, sessionId}
   agentSessionTranscript: (opts) => ipcRenderer.invoke('agent-session-transcript', opts), // {projectId, sessionId}
+  // Test list / run history changed on disk ({tests, history}) -> refresh in place.
+  onDataChanged: (callback) => {
+    const handler = (_, data) => callback(data || {});
+    ipcRenderer.on('ats-data-changed', handler);
+    return () => ipcRenderer.removeListener('ats-data-changed', handler);
+  },
   onAgentEvent: (callback) => {
     const handler = (_, data) => callback(data);
     ipcRenderer.on('agent-event', handler);
