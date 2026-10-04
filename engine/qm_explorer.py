@@ -16,11 +16,12 @@ the effect seen live (a URL change) as the replay's wait condition.
 """
 import re
 import time
+from urllib.parse import urljoin
 
 from qm_decide import choose
 from qm_ground import decide, rank, words
 from qm_observe import observe
-from qm_runtime import Flow, relative_url
+from qm_runtime import Flow, generic_url, relative_url
 from qm_selectors import locator_for
 from qm_steps import execute
 
@@ -71,7 +72,10 @@ class Explorer:
         op = intent.get("do")
         try:
             if op == "goto":
-                outcome = self._record({"op": "goto", "value": self._url_value(intent["url"]),
+                url = intent["url"]
+                if "://" not in url and not self.base_url and self.page.url.startswith("http"):
+                    url = urljoin(self.page.url, url)   # no project URL: the test must still open it
+                outcome = self._record({"op": "goto", "value": self._url_value(url),
                                         "name": intent.get("name") or f"Open {intent['url']}"})
             elif op == "press" and not intent.get("target"):
                 outcome = self._record({"op": "press", "value": intent["key"],
@@ -251,7 +255,7 @@ class Explorer:
             if check:
                 self.flow.timeout_ms = saved
         if step["op"] in ("click", "dblclick", "press") and self.page.url != before:
-            step["expect_url"] = relative_url(self.page.url)
+            step["expect_url"] = generic_url(relative_url(self.page.url))   # /companies/:id/show
         self.steps.append(step)
         return {"ok": True, "step": step, "url": self.page.url}
 

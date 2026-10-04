@@ -212,3 +212,15 @@ def test_explore_maps_the_app_instead_of_writing_a_test(monkeypatch, browser, se
     assert result["explored"]["pages"] >= 3 and not scripted.calls and result["saved"] is None
     assert "Mapped **" in summary_text(result) and "Save transfer" in summary_text(result)
     page.close()
+
+
+def test_a_relative_goto_without_a_project_url_records_the_full_address(browser, server):
+    """Regression (live run): with no project URL, "goto /path" failed as an invalid URL."""
+    from qm_explorer import Explorer
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    explorer = Explorer(page, base_url=None)
+    outcome = explorer.run_intent({"do": "goto", "url": "/operations.html#/inventory"})
+    assert outcome["ok"], outcome
+    assert explorer.steps[-1]["value"] == server + "operations.html#/inventory" and page.url.endswith("#/inventory")
+    page.close()

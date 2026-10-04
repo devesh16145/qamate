@@ -124,3 +124,25 @@ def test_a_step_that_does_not_fit_drops_the_rest_of_the_plan(browser, model, app
     # The first reply was abandoned at the bad step instead of being read to its end (10 steps).
     assert len(model.log[0]) < len(wrong) and time.monotonic() - started < len(wrong) * PER_STEP_S + 4
     page.close()
+
+
+def test_a_second_task_in_the_same_chat_is_saved(browser, model, app, tmp_path):
+    """Regression (live run, 2026-10-04): the chat runtime drains the planner's token totals
+    after every turn; the next turn's bookkeeping crashed, the agent re-planned around the
+    crash, and a test whose replay had passed was never saved."""
+    model.replies = [written_slowly({"flow": "transfers", "title": "Open the transfer form"},
+                                    [TRANSFER[0], {"do": "expect_text", "value": "New transfer"}]),
+                     written_slowly({"flow": "transfers", "title": "Create a transfer to Jaipur"}, TRANSFER)]
+    page = browser.new_page()
+    page.goto(app + "operations.html#/transfers")
+    agent = FastAgent(page, browser, model.config, base_url=app, tests_root=str(tmp_path / "tests"))
+    first = agent.run_task("Open the new transfer form")
+    for key in ("input", "output"):
+        agent.planner.usage.pop(key, 0)          # what agent_chat does after every turn
+    page.goto(app + "operations.html#/transfers")   # the next task starts from the list
+    second = agent.run_task("Create transfer Batch 7 to Jaipur with 4 units")
+    assert first["saved"] and second["saved"] and not second["stop_reason"], second
+    assert second["timing"]["planner_calls"] == 1 and not second["replanned"]
+    # The saved transfer's page is checked by route, not by the id this run happened to get.
+    assert any('expect_url="/operations.html#/transfers/:id"' in line for line in second["code"]), second["code"]
+    page.close()

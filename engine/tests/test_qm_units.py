@@ -283,3 +283,24 @@ def test_a_request_names_the_site_to_open():
     assert task_url(ask) == "https://marmelab.com/atomic-crm-demo/" and is_exploration(ask)
     assert task_url("Log in on (https://www.saucedemo.com).") == "https://www.saucedemo.com"
     assert not is_exploration("Explore the cart and write a test for removing an item")
+
+
+def test_urls_reached_by_a_click_match_any_record_id():
+    from qm_runtime import generic_url, url_pattern
+    assert generic_url("/app/#/companies/55/show") == "/app/#/companies/:id/show"
+    assert generic_url("/users/5f2b9c1e7a/edit?tab=2") == "/users/:id/edit?tab=2"
+    assert generic_url("/inventory-item.html?id=4") == "/inventory-item.html?id=4"     # queries are kept
+    pattern = url_pattern("/app/#/companies/:id/show")
+    assert pattern.match("https://crm.test/app/#/companies/812/show")
+    assert not pattern.match("https://crm.test/app/#/companies/812/edit")
+    assert not url_pattern("/a/:identity").match("https://x.test/a/123")               # only whole segments
+
+
+def test_planner_token_totals_survive_being_drained_between_turns():
+    from types import SimpleNamespace as NS
+    from qm_planner import Planner
+    planner = Planner.__new__(Planner)
+    planner.provider, planner.usage, planner.timings = NS(last_usage={"prompt_tokens": 10, "completion_tokens": 2}), {}, []
+    planner.provider_name, planner.emit = "x", lambda e: None
+    planner._account(0, None, False)
+    assert planner.usage == {"input": 10, "output": 2}

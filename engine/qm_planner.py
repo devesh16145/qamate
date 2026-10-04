@@ -118,8 +118,9 @@ class Planner:
         ms = round((time.monotonic() - started) * 1000)
         self.timings.append({"ms": ms, "first_step_ms": first_step_ms, "input": tokens_in, "output": tokens_out,
                              "reasoning": reasoning, "cancelled": cancelled})
-        self.usage["input"] += int(tokens_in or 0)
-        self.usage["output"] += int(tokens_out or 0)
+        # The chat runtime drains these totals after every turn (it pops the keys).
+        self.usage["input"] = self.usage.get("input", 0) + int(tokens_in or 0)
+        self.usage["output"] = self.usage.get("output", 0) + int(tokens_out or 0)
         self.emit({"event": "model_usage", "role": "planner", "profile": self.provider_name,
                    "input": tokens_in, "output": tokens_out, "reasoning_tokens": reasoning,
                    "duration_ms": ms, "first_step_ms": first_step_ms})

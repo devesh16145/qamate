@@ -125,12 +125,29 @@ def relative_url(url):
     return rel
 
 
+_ID_SEGMENT = re.compile(r"^(?:\d+|[0-9a-fA-F]{8,}|[0-9a-fA-F-]{20,}|[A-Za-z0-9_-]{24,})$")
+_ID_TOKEN = re.compile(r"(?<=[/#]):id(?=$|[/?#])")
+
+
+def generic_url(rel):
+    """A URL an action led to, with record ids in its path or route written as :id --
+    a test that creates a record must still match when the app assigns a new id on the
+    next run (/companies/55/show -> /companies/:id/show). Query strings are kept."""
+    def fold(part):
+        path, mark, query = part.partition("?")
+        return "/".join(":id" if _ID_SEGMENT.match(seg) else seg for seg in path.split("/")) + mark + query
+    path, hashmark, fragment = rel.partition("#")
+    return fold(path) + (hashmark + fold(fragment) if hashmark else "")
+
+
 def url_pattern(expected):
-    """Regex matching `expected` (a relative URL or a full URL) on any origin."""
+    """Regex matching `expected` (a relative URL or a full URL) on any origin; an `:id`
+    segment matches any one segment."""
     rel = relative_url(expected) if "://" in expected else expected
     if not rel.startswith(("/", "#", "?")):
         rel = "/" + rel
-    return re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+" + re.escape(rel) + r"$")
+    body = r"[^/?#]+".join(re.escape(piece) for piece in _ID_TOKEN.split(rel))
+    return re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+" + body + r"$")
 
 
 class Flow:

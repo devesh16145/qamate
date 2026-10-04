@@ -14,6 +14,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
+from llm import LLMError
 from qm_explorer import Explorer
 from qm_map import PageMap, describe_pages, quick_scan
 from qm_observe import observe
@@ -149,11 +150,14 @@ class FastAgent:
                     break
             try:
                 plan = stream.result()
-            except Exception as exc:
+            except LLMError as exc:
                 if ran and problem is None:   # the reply broke off after some steps ran: carry on
                     problem = {"reason": "planner_error", "detail": str(exc)[:200]}
                     continue
                 stop_reason = f"planner error: {str(exc)[:200]}"
+                break
+            except Exception as exc:          # a bug on our side, not the model's: don't re-plan around it
+                stop_reason = f"internal error: {type(exc).__name__}: {str(exc)[:200]}"
                 break
             if plan["test"]["flow"] != "agent":
                 meta["flow"] = plan["test"]["flow"]
