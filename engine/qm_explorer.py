@@ -43,9 +43,10 @@ def data_key_for(label, taken):
 
 class Explorer:
     def __init__(self, page, *, base_url=None, config=None, emit=lambda e: None, confirm=None,
-                 timeout_ms=8000, check_timeout_ms=5000):
+                 timeout_ms=8000, check_timeout_ms=5000, page_map=None):
         self.page, self.base_url, self.config = page, base_url, config or {}
         self.emit, self.confirm = emit, confirm
+        self.page_map = page_map   # qm_map.PageMap: learns pages and where clicks lead
         self.flow = Flow(page, base_url=base_url, timeout_ms=timeout_ms)
         self.check_timeout_ms = check_timeout_ms
         self.steps, self.data = [], {}
@@ -104,6 +105,8 @@ class Explorer:
         op = intent["do"]
         target = intent.get("target") or ""
         obs = observe(self.page)
+        if self.page_map is not None:
+            self.page_map.see(obs)
         ground = {"op": op, "target": target, "within": intent.get("within"),
                   "role": intent.get("role"), "name_hint": intent.get("name"), "value": intent.get("value")}
         candidates = rank(ground, obs)
@@ -142,7 +145,10 @@ class Explorer:
             step["value"] = intent["key"]
         if op == "select" and not self._is_native_select(loc["selector"]):
             return self._custom_select(intent, step, element, how, confidence, loc)
+        before = self.page.url
         outcome = self._record(step, check=op.startswith("expect"))
+        if outcome["ok"] and self.page_map is not None and self.page.url != before:
+            self.page_map.went(before, element.label, self.page.url)   # the real label, not the planner's wording
         outcome.update({"how": how, "confidence": confidence, "element": element.summary(),
                         "positional": loc["positional"]})
         return outcome

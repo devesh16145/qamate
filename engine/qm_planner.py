@@ -16,7 +16,9 @@ from llm import make_provider, extract_json, LLMError
 from qm_runtime import relative_url
 
 SYSTEM = """You plan the steps of a browser test for QAmate, a test-automation tool.
-You get the task, test data and the CURRENT page (its interactive elements and visible text).
+You get the task, test data, the CURRENT page (its interactive elements and visible text) and,
+when the app has been seen before, "known_pages": its other pages with their exact control labels
+("label -> route" says where a control led).
 Reply with ONLY a JSON object, keys in this order:
 {"test": {"flow": "orders", "title": "Short test title"}, "steps": [STEP, ...], "done": false}
 
@@ -38,7 +40,8 @@ Rules:
   seen yet -- for those, write the labels a user would see. Each extra round trip costs time.
   If a step doesn't match the real page, execution stops there and you'll be shown that page
   with the closest elements, so you can adjust the rest.
-- On the current page, use labels exactly as they appear in its elements.
+- On the current page, use labels exactly as they appear in its elements. For pages listed in
+  known_pages, use their labels exactly too -- plan through them as confidently as the current page.
 - When several elements share a label (e.g. "Add to cart" on every product), say which one
   with "within": the item's name, row text or section.
 - Set "done": true when your steps complete the whole task, including its checks. Use
@@ -80,28 +83,32 @@ class Planner:
         self.usage = {"input": 0, "output": 0}   # running totals, drained by the caller
         self.timings = []                        # per call: {ms, first_step_ms, input, output, reasoning}
 
-    def _message(self, task, observation, done_steps, problem, test_data, history):
-        return json.dumps({
+    def _message(self, task, observation, done_steps, problem, test_data, history, known_pages):
+        message = {
             "task": task,
             "test_data": test_data or {},
             "page": page_summary(observation),
             "steps_done": [s.get("name") or s["op"] for s in done_steps][-30:],
             "problem": problem,
             "earlier_tasks": list(history)[-5:],
-        }, ensure_ascii=False)
+        }
+        if known_pages:
+            message["known_pages"] = list(known_pages)
+        return json.dumps(message, ensure_ascii=False)
 
-    def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
+    def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=(), known_pages=None):
         """The whole plan in one go (blocks until the model has finished writing it)."""
         stream = self.start(task, observation, done_steps=done_steps, problem=problem,
-                            test_data=test_data, history=history)
+                            test_data=test_data, history=history, known_pages=known_pages)
         for _ in stream.steps():
             pass
         return stream.result()
 
-    def start(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
+    def start(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=(), known_pages=None):
         """Start planning and return a PlanStream: its steps can be executed while the model
         is still writing the rest of the plan."""
-        return PlanStream(self, self._message(task, observation, done_steps, problem, test_data, history))
+        return PlanStream(self, self._message(task, observation, done_steps, problem, test_data, history,
+                                              known_pages))
 
     def _account(self, started, first_step_ms, cancelled):
         usage = self.provider.last_usage or {}

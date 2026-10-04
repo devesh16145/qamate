@@ -14,12 +14,21 @@ import re
 import time
 
 from qm_explorer import Explorer
+from qm_map import PageMap, quick_scan
 from qm_observe import observe
 from qm_planner import Planner, slug
 from qm_runtime import relative_url
 from qm_steps import render
 from qm_testgen import write_test
 from qm_verify import replay
+
+
+_EXPLORE = re.compile(r"^\s*(?:please\s+)?(?:explore|scan|map|learn)\b", re.I)
+
+
+def is_exploration(task):
+    """'Explore the app and list its flows' asks for a map of the app, not a test."""
+    return bool(_EXPLORE.match(task or "")) and not re.search(r"\btests?\b", task, re.I)
 
 
 def _intent_text(intent):
@@ -53,20 +62,24 @@ def next_tc_id(tests_root, flow):
 class FastAgent:
     def __init__(self, page, browser, config, *, provider_name=None, base_url=None, tests_root=None,
                  storage_state=None, test_data=None, emit=lambda e: None, confirm=None,
-                 max_rounds=8, max_seconds=300, log_dir=None):
+                 max_rounds=8, max_seconds=300, log_dir=None, page_map=None, scan="auto"):
         self.page, self.browser, self.config = page, browser, config
         self.base_url, self.tests_root, self.storage_state = base_url, tests_root, storage_state
         self.test_data, self.emit, self.confirm = test_data or {}, emit, confirm
         self.max_rounds, self.max_seconds, self.log_dir = max_rounds, max_seconds, log_dir
         self.planner = Planner(config, provider_name, emit=emit)
         self.history = []   # short summaries of earlier tasks in this chat
+        # What the agent knows about the app's pages (qm_map); per project when given a path.
+        self.page_map = page_map if page_map is not None else PageMap()
+        self.scan = scan     # "auto": learn a fresh app's main pages before the first plan
 
     def run_task(self, task):
         started = time.monotonic()
         explorer = Explorer(self.page, base_url=self.base_url, config=self.config,
-                            emit=self.emit, confirm=self.confirm)
+                            emit=self.emit, confirm=self.confirm, page_map=self.page_map)
         self.planner.timings = []
         self.trace = []   # one entry per executed intent: what ran, how, how long
+        self.scan_ms = None
         # Every test starts from a known page: reopen where this task begins. A blank
         # browser (no project URL) has none -- the planner's first step opens the app.
         start_url = self.page.url if self.page.url not in ("", "about:blank") else self.base_url
@@ -74,12 +87,17 @@ class FastAgent:
             start = explorer.run_intent({"do": "goto", "url": start_url, "name": "Open the app"})
             if not start["ok"]:
                 return self._finish(task, explorer, started, error=f"could not open the app: {start.get('detail')}")
+            if is_exploration(task):
+                return self._explore(task, started)
+            if self.scan == "auto" and len(self.page_map) < 3:
+                self._learn_app()
         problem, meta, plan_items, stop_reason = None, {"flow": "agent", "title": ""}, [], None
         for round_no in range(self.max_rounds):
             if time.monotonic() - started > self.max_seconds:
                 stop_reason = f"stopped after {self.max_seconds} s"
                 break
             obs = observe(self.page)
+            self.page_map.see(obs)
             try:
                 stream = self._start_plan(task, obs, explorer, problem)
             except Exception as exc:
@@ -134,9 +152,29 @@ class FastAgent:
             stop_reason = f"stopped after {self.max_rounds} planning rounds"
         return self._finish(task, explorer, started, meta=meta, stop_reason=stop_reason, problem=problem)
 
+    def _learn_app(self, max_pages=12, max_seconds=20):
+        """A fresh app: read its navigation and "New ..." pages first (links only, nothing is
+        submitted), so the plan can use the real labels of pages not yet on screen."""
+        item = [{"step": "Learn the app's main pages", "status": "active"}]
+        self.emit({"event": "plan", "steps": item})
+        scanned = quick_scan(self.page, self.page_map, max_pages=max_pages, max_seconds=max_seconds, emit=self.emit)
+        self.scan_ms = scanned["ms"]
+        item[0].update(status="done", step=f"Learned {scanned['pages']} pages of the app")
+        self.emit({"event": "plan", "steps": item})
+
+    def _explore(self, task, started):
+        """'Explore the app': map its pages instead of authoring a test."""
+        scanned = quick_scan(self.page, self.page_map, max_pages=25, max_seconds=45, emit=self.emit)
+        result = {"task": task, "steps": 0, "authoring_s": round(time.monotonic() - started, 1),
+                  "stop_reason": None, "saved": None, "replay": None,
+                  "explored": {"pages": scanned["pages"], "s": round(scanned["ms"] / 1000, 1),
+                               "lines": self.page_map.for_task(task, budget=6000)}}
+        self.history.append(f"{task[:80]} -> mapped {scanned['pages']} pages")
+        return result
+
     def _start_plan(self, task, observation, explorer, problem):
         kwargs = {"done_steps": explorer.steps, "problem": problem, "test_data": self.test_data,
-                  "history": self.history}
+                  "history": self.history, "known_pages": self.page_map.for_task(task, observation.url)}
         if hasattr(self.planner, "start"):
             return self.planner.start(task, observation, **kwargs)
         return _Planned(self.planner.plan(task, observation, **kwargs))
@@ -148,6 +186,7 @@ class FastAgent:
     def _finish(self, task, explorer, started, *, meta=None, stop_reason=None, problem=None, error=None):
         meta = meta or {"flow": "agent", "title": ""}
         steps, data = explorer.steps, explorer.data
+        self.page_map.save()
         # A test must open a real page first, once.
         while len(steps) >= 2 and steps[0]["op"] == "goto" and steps[1]["op"] == "goto":
             steps.pop(0)
@@ -160,6 +199,7 @@ class FastAgent:
                   "timing": {"planner_calls": len(calls), "planner_s": round(sum(c["ms"] for c in calls) / 1000, 1),
                              "first_step_s": (round(calls[0]["first_step_ms"] / 1000, 1)
                                               if calls and calls[0].get("first_step_ms") is not None else None),
+                             "scan_s": round(self.scan_ms / 1000, 1) if getattr(self, "scan_ms", None) else None,
                              "browser_s": round(sum((t.get("ms") or 0) for t in trace) / 1000, 1),
                              "replay_s": None},
                   "replanned": [{"step": _intent_text(t["intent"]), "reason": t["reason"], "detail": t["detail"]}
@@ -229,6 +269,13 @@ def _brief(outcome):
 def summary_text(result):
     """Plain chat reply for a finished task."""
     lines = []
+    if result.get("explored"):
+        e = result["explored"]
+        lines.append(f"Mapped **{e['pages']} pages** of the app in {e['s']} s (links only; nothing was submitted).")
+        lines += [f"- `{line.split(' (', 1)[0]}` {line.split(' (', 1)[1] if ' (' in line else ''}" if not line.startswith("Everywhere")
+                  else f"- {line}" for line in e["lines"]]
+        lines.append("\nI'll use these pages and labels when planning. Ask me to write a test for any flow.")
+        return "\n".join(lines)
     if result.get("saved"):
         s = result["saved"]
         lines.append(f"Saved **{s['tc_id']}** in flow `{s['flow']}` — {result['steps']} steps, "
@@ -251,6 +298,8 @@ def summary_text(result):
         parts = [f"planning {t['planner_s']} s ({calls})", f"browser {t['browser_s']} s"]
         if t.get("replay_s") is not None:
             parts.append(f"replay {t['replay_s']} s")
+        if t.get("scan_s") is not None:
+            parts.insert(0, f"learning the app {t['scan_s']} s")
         lines.append("Time: " + " · ".join(parts) + ".")
     for r in (result.get("replanned") or [])[:3]:
         lines.append(f"Re-planned after: {r['step']} — {r['reason']}" + (f" ({r['detail'][:120]})" if r.get("detail") else ""))

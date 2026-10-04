@@ -197,6 +197,11 @@ def ui_map_path(ats_root, project_id):
     return os.path.join(project_dir(ats_root, project_id), "ui_map.json")
 
 
+def page_map_path(ats_root, project_id):
+    """The fast engine's memory of the app's pages and labels (engine/qm_map.py)."""
+    return os.path.join(project_dir(ats_root, project_id), "page_map.json")
+
+
 def requirements_path(ats_root, project_id):
     return os.path.join(project_dir(ats_root, project_id), "requirements.json")
 

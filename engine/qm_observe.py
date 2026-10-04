@@ -108,7 +108,9 @@ def parse(snapshot_text):
         parent = stack[-1][1] if stack else None
         if body.startswith("/url:"):
             if parent is not None:
-                parent.url = body[5:].strip()
+                raw_url = body[5:].strip()
+                quoted = len(raw_url) >= 2 and raw_url[0] == raw_url[-1] == '"'
+                parent.url = _unquote(raw_url[1:-1]) if quoted else raw_url   # /url: "#/contacts"
             continue
         if body.startswith("text:"):
             text = body[5:].strip().strip('"')

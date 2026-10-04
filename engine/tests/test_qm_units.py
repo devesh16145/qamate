@@ -159,3 +159,75 @@ def test_duplicate_links_to_the_same_place_are_one_choice():
 def test_a_text_check_targets_the_control_showing_the_value():
     pick, _ = _ground("expect_text", "Company", value="Acme Rockets")
     assert pick.ref == "e15"
+
+
+# ── app memory (qm_map) ──────────────────────────────────────────────────────
+from qm_map import PageMap, page_controls, route_of
+
+
+def _obs(url, snapshot, title="App"):
+    elements, texts = parse(snapshot)
+    return SimpleNamespace(url=url, title=title, elements=elements, page_text=texts)
+
+
+LIST = '''- navigation [ref=e1]:
+  - link "Orders" [ref=e2]:
+    - /url: "#/orders"
+  - link "Customers" [ref=e3]:
+    - /url: "#/customers"
+- main [ref=e4]:
+  - link "New order" [ref=e5]:
+    - /url: "#/orders/create"
+  - textbox "Search" [ref=e6]
+''' + "".join(f'''  - generic [ref=r{i}]:
+    - link "Order #{1000 + i} Pending" [ref=l{i}]:
+      - /url: "#/orders/{1000 + i}"
+''' for i in range(12))
+
+FORM = '''- navigation [ref=e1]:
+  - link "Orders" [ref=e2]:
+    - /url: "#/orders"
+  - link "Customers" [ref=e3]:
+    - /url: "#/customers"
+- main [ref=e4]:
+  - textbox "Customer" [ref=f1]
+  - combobox "Status" [ref=f2]
+  - textbox "Notes" [ref=f3]
+  - button "Create order" [ref=f4]
+'''
+
+
+def test_routes_fold_record_ids_and_drop_queries():
+    assert route_of("https://x.test/app/#/orders/1042/show?tab=2") == "/app/#/orders/:id/show"
+    assert route_of("https://x.test/users/5f2b9c1e7a/edit") == "/users/:id/edit"
+    assert route_of("https://x.test/orders?page=2") == "/orders"
+
+
+def test_page_controls_keep_fields_and_collapse_record_lists():
+    lines = page_controls(_obs("https://x.test/#/orders", LIST))
+    assert 'link "New order"' in lines and 'textbox "Search"' in lines
+    assert sum(1 for l in lines if l.startswith('link "Order #')) == 2 and "... +10 more links" in lines
+
+
+def test_map_tells_the_planner_real_labels_and_where_links_lead(tmp_path):
+    path = str(tmp_path / "page_map.json")
+    m = PageMap(path)
+    m.see(_obs("https://x.test/#/orders", LIST))
+    m.see(_obs("https://x.test/#/orders/create", FORM))
+    m.went("https://x.test/#/orders", "New order", "https://x.test/#/orders/create")
+    m.save()
+    lines = PageMap(path).for_task("Create an order for ACME with status Paid", "https://x.test/#/dashboard")
+    assert lines[0].startswith("Everywhere: ") and 'link "Orders"' in lines[0]
+    form = next(l for l in lines if l.startswith("/#/orders/create"))
+    assert 'button "Create order"' in form and 'link "Orders"' not in form       # chrome listed once
+    listing = next(l for l in lines if l.startswith("/#/orders ("))
+    assert 'link "New order" -> /#/orders/create' in listing
+    assert lines.index(form) < lines.index(listing)   # most relevant page first ("create", "order", "status")
+
+
+def test_map_respects_its_budget_and_skips_the_current_page():
+    m = PageMap()
+    m.see(_obs("https://x.test/#/orders", LIST))
+    m.see(_obs("https://x.test/#/orders/create", FORM))
+    assert not any(l.startswith("/#/orders/create") for l in m.for_task("orders", "https://x.test/#/orders/create"))
+    assert sum(len(l) for l in m.for_task("orders", budget=120)) <= 120

@@ -41,9 +41,9 @@ class ScriptedPlanner:
     def __init__(self, plans):
         self.plans, self.calls = list(plans), []
 
-    def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
+    def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=(), known_pages=None):
         self.calls.append({"page": page_summary(observation), "problem": problem,
-                           "done": [s.get("name") for s in done_steps]})
+                           "done": [s.get("name") for s in done_steps], "known_pages": known_pages})
         return qm_planner.normalize_plan(self.plans.pop(0) if self.plans else {"steps": [], "done": True})
 
 
@@ -184,4 +184,31 @@ def test_blank_start_without_project_records_the_real_first_page(monkeypatch, br
     assert result["timing"]["planner_calls"] == 0 or result["timing"]["browser_s"] >= 0
     log = json.load(open(result["log"], encoding="utf-8"))
     assert log["trace"] and log["replay"]["ok"]
+    page.close()
+
+
+def test_a_fresh_app_is_learned_first_so_the_plan_sees_unvisited_forms(monkeypatch, browser, server, tmp_path):
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    agent, scripted, events = make_agent(monkeypatch, page, browser, server, tmp_path, [
+        {"steps": [{"do": "click", "target": "New transfer"},
+                   {"do": "expect_text", "value": "New transfer"}], "done": True, "test": {"flow": "transfers"}},
+    ])
+    result = agent.run_task("Open the new transfer form")
+    known = "\n".join(scripted.calls[0]["known_pages"] or [])
+    assert 'textbox "Transfer name"' in known and 'button "Save transfer"' in known   # a page not yet visited
+    assert result["saved"] and result["timing"]["scan_s"] is not None
+    # A second task in the same session doesn't scan again.
+    scripted.plans.append({"steps": [{"do": "expect_text", "value": "Transfers"}], "done": True})
+    assert agent.run_task("Check the transfers page")["timing"]["scan_s"] is None
+    page.close()
+
+
+def test_explore_maps_the_app_instead_of_writing_a_test(monkeypatch, browser, server, tmp_path):
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [])
+    result = agent.run_task("Explore the app and list its main user flows, with the pages each flow touches.")
+    assert result["explored"]["pages"] >= 3 and not scripted.calls and result["saved"] is None
+    assert "Mapped **" in summary_text(result) and "Save transfer" in summary_text(result)
     page.close()

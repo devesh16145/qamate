@@ -4777,6 +4777,7 @@ class AgentRuntime:
     async def _fast_chat(self, message, attachments, attachment_names):
         """One chat turn on the fast engine: plan, execute, replay-verify, save."""
         from qm_agent import FastAgent, summary_text
+        from qm_map import PageMap
         task = message or "Use the attached file(s) as the test requirements."
         for path, name in _attachment_paths(attachments):
             try:
@@ -4804,11 +4805,15 @@ class AgentRuntime:
             if self.fast is None:
                 tests_root = (project_store.ensure_tests_scaffold(self.ats_root, self.project_id)
                               if self.project_id else os.path.join(self.ats_root, "tests"))
+                page_map = PageMap(project_store.page_map_path(self.ats_root, self.project_id)
+                                   if self.project_id else None)
+                scan = str((self.config.get("agent_execution") or {}).get("fast_scan") or "auto")
                 self.fast = FastAgent(self.session.page, self.session.browser, self.config,
                                       provider_name=self.fast_ctx["provider"], base_url=self.fast_ctx["base_url"],
                                       tests_root=tests_root, storage_state=self.fast_ctx["storage_state"],
                                       test_data=self.fast_ctx["test_data"], emit=emit, confirm=confirm,
-                                      log_dir=os.path.join(self.ats_root, "results", "_fast_runs"))
+                                      log_dir=os.path.join(self.ats_root, "results", "_fast_runs"),
+                                      page_map=page_map, scan=scan)
             return self.fast.run_task(task)
 
         try:
