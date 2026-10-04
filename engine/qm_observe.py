@@ -43,6 +43,9 @@ class Element:
     depth: int = 0
     regions: list = field(default_factory=list)   # [(role, name), ...] outermost first
     text: list = field(default_factory=list)       # text lines directly inside
+    parent: object = None                          # nearest ancestor Element (with a ref)
+    children: list = field(default_factory=list)   # descendant Elements one level down
+    context: str = ""                              # nearby labels that tell repeated controls apart
 
     @property
     def label(self):
@@ -69,6 +72,8 @@ class Element:
         where = self.region("dialog", "alertdialog", "row", "form", "navigation", "listitem")
         if where:
             bits.append(f"in {where[0]}" + (f' "{where[1][:40]}"' if where[1] else ""))
+        if self.context:
+            bits.append(f"near {self.context[:80]}")
         return " ".join(bits)
 
 
@@ -118,8 +123,11 @@ def parse(snapshot_text):
         regions = [(r, n) for _, _, r, n in stack if r in REGION_ROLES]
         el = None
         if "ref" in attrs:
+            ancestor = next((e for _, e, _, _ in reversed(stack) if e is not None), None)
             el = Element(ref=attrs.pop("ref"), role=role, name=name, attrs=attrs, inline=inline,
-                         depth=indent // 2, regions=regions)
+                         depth=indent // 2, regions=regions, parent=ancestor)
+            if ancestor is not None:
+                ancestor.children.append(el)
             elements.append(el)
         if inline and not el:
             texts.append(inline)
@@ -128,7 +136,42 @@ def parse(snapshot_text):
         if name and role in ("heading", "cell", "status", "alert"):
             texts.append(name)
         stack.append((indent, el, role, name))
+    _add_context(elements)
     return elements, texts
+
+
+def _subtree(el):
+    out = []
+    for child in el.children:
+        out.append(child)
+        out.extend(_subtree(child))
+    return out
+
+
+def _add_context(elements):
+    """For controls whose label repeats (six 'Add to cart' buttons), record the labels
+    of their item -- the largest enclosing container that holds only this one copy of
+    the control (a product card, a list item, a row) -- so a step can say which it means."""
+    def key(e):
+        return (e.role, (e.label or "").lower())
+    counts = {}
+    for e in elements:
+        if e.interactive and e.label:
+            counts[key(e)] = counts.get(key(e), 0) + 1
+    for e in elements:
+        if not (e.interactive and counts.get(key(e), 0) > 1):
+            continue
+        best, node = None, e.parent
+        while node is not None:
+            nodes = _subtree(node)
+            if len(nodes) > 25 or any(n is not e and key(n) == key(e) for n in nodes):
+                break
+            best, node = node, node.parent
+        if best is None:
+            continue
+        labels = [n.label for n in _subtree(best) if n is not e and n.label and key(n) != key(e)]
+        labels += best.text
+        e.context = " · ".join(dict.fromkeys(l.strip() for l in labels if l and l.strip()))[:160]
 
 
 @dataclass

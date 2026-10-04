@@ -32,7 +32,11 @@ from playwright.sync_api import expect
 QUIET_PROBE = r"""
 (() => {
   if (window.__qmProbe) return;
-  const probe = window.__qmProbe = { inflight: 0, last: performance.now() };
+  // pending: request id -> start time. Requests open longer than 1.5 s are treated as
+  // background (analytics beacons, long-polling, streams) and stop counting.
+  const probe = window.__qmProbe = { pending: new Map(), seq: 0, last: performance.now() };
+  probe.busy = () => { const now = performance.now(); let n = 0;
+    probe.pending.forEach((t) => { if (now - t < 1500) n++; }); return n; };
   const bump = () => { probe.last = performance.now(); };
   const watch = () => new MutationObserver(bump).observe(document, {
     subtree: true, childList: true, attributes: true, characterData: true });
@@ -40,14 +44,14 @@ QUIET_PROBE = r"""
   const origFetch = window.fetch;
   if (origFetch) {
     window.fetch = function (...args) {
-      probe.inflight++; bump();
-      return origFetch.apply(this, args).finally(() => { probe.inflight--; bump(); });
+      const id = ++probe.seq; probe.pending.set(id, performance.now()); bump();
+      return origFetch.apply(this, args).finally(() => { probe.pending.delete(id); bump(); });
     };
   }
   const send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...args) {
-    probe.inflight++; bump();
-    this.addEventListener('loadend', () => { probe.inflight--; bump(); }, { once: true });
+    const id = ++probe.seq; probe.pending.set(id, performance.now()); bump();
+    this.addEventListener('loadend', () => { probe.pending.delete(id); bump(); }, { once: true });
     return send.apply(this, args);
   };
   // Short one-shot timers count as pending work (debounced search, simulated saves);
@@ -73,10 +77,10 @@ SETTLE_JS = r"""
     const now = performance.now();
     // Quiet is measured from the start of this wait, so work an action triggers a tick
     // later (hashchange renders, microtasks) is always seen.
-    if (probe.inflight <= 0 && (!probe.timers || probe.timers.size === 0) && now - Math.max(probe.last, start) >= quietMs)
+    if (probe.busy() === 0 && (!probe.timers || probe.timers.size === 0) && now - Math.max(probe.last, start) >= quietMs)
       return resolve({ quiet: true, ms: Math.round(now - start) });
     if (now - start >= maxMs)
-      return resolve({ quiet: false, ms: Math.round(now - start), inflight: probe.inflight,
+      return resolve({ quiet: false, ms: Math.round(now - start), requests: probe.busy(),
                        timers: probe.timers ? probe.timers.size : 0 });
     (probe.rawSetTimeout || setTimeout)(tick, 40);   // our own poll must not count as page work
   };
