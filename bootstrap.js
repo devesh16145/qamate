@@ -62,9 +62,16 @@ function bundledPython() {
 
 /** A usable system Python 3.11+, or null. */
 function systemPython() {
+  // Apps opened from Finder get a minimal PATH without Homebrew / python.org
+  // installs, so on macOS also try their standard locations explicitly.
+  const macPaths = process.platform === 'darwin'
+    ? ['/opt/homebrew/bin', '/usr/local/bin', '/Library/Frameworks/Python.framework/Versions/Current/bin']
+        .flatMap((dir) => ['python3.13', 'python3.12', 'python3.11', 'python3'].map((exe) => [path.join(dir, exe), []]))
+        .filter(([p]) => fs.existsSync(p))
+    : [];
   const candidates = IS_WIN
     ? [['py', ['-3.12']], ['py', ['-3']], ['python', []], ['python3', []]]
-    : [['python3', []], ['python', []]];
+    : [...macPaths, ['python3', []], ['python', []]];
   for (const [cmd, pre] of candidates) {
     try {
       const r = spawnSync(cmd, [...pre, '-c', 'import sys;print("%d.%d" % sys.version_info[:2])'],
