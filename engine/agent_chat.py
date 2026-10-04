@@ -88,6 +88,10 @@ from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 
+# Code root (engine/ + tests/conftest.py). ATS_ROOT is the data root; they differ only
+# in a packaged macOS app, where the code is read-only (see bootstrap.js).
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Default max tool calls per chat turn. 0 = unlimited (no pause).
 # Overridden per-session via the init command's tool_budget field or ATS_AGENT_TOOL_BUDGET env var.
 TOOL_BUDGET_DEFAULT = int(os.environ.get("ATS_AGENT_TOOL_BUDGET") or 30)
@@ -2484,7 +2488,8 @@ class BrowserSession:
                "--collect-only", "-q", "-p", "no:cacheprovider"]
         env = dict(os.environ)
         env["ATS_ROOT"] = ats_root
-        env["PYTHONPATH"] = ats_root
+        env["ATS_APP_ROOT"] = _APP_ROOT
+        env["PYTHONPATH"] = _APP_ROOT
         kw = {"stdin": _sp.DEVNULL}
         if sys.platform == "win32":
             kw["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0x08000000)
@@ -3470,7 +3475,8 @@ def build_agent(model, max_tokens=None, profile=None, *, hybrid=False, decision_
         underscored = tc_id.replace("-", "_")
         base_env = os.environ.copy()
         base_env["ATS_ROOT"] = ats_root
-        base_env["PYTHONPATH"] = ats_root
+        base_env["ATS_APP_ROOT"] = _APP_ROOT
+        base_env["PYTHONPATH"] = _APP_ROOT
         base_env["PYTHONUNBUFFERED"] = "1"
         proj = ctx.deps.project or {}
         if proj.get("id"):

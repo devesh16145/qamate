@@ -65,6 +65,8 @@ npm run dist:mac:dir       # unsigned .app in dist/  (npm run dist:mac for a .dm
 
 Use `venv/bin/python` wherever the Windows docs say `venv\Scripts\python`.
 
+A packaged `QAmate.app` keeps its code read-only inside the app bundle and stores everything it writes (Python environment, `config.json`, results, projects, the built-in test suite, agent sessions) in `~/Library/Application Support/QAmate`, so it works from `/Applications`. Running from source keeps the familiar in-repo layout.
+
 ### Run the app
 
 ```bat

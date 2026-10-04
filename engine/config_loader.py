@@ -3,8 +3,14 @@ import os
 import shutil
 
 
-def ats_root():
+def app_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def ats_root():
+    """Data root: ATS_ROOT when the app sets it (it differs from the code root in a
+    packaged macOS app), else this checkout."""
+    return os.environ.get("ATS_ROOT") or app_root()
 
 
 def config_path():
@@ -12,7 +18,7 @@ def config_path():
 
 
 def example_config_path():
-    return os.path.join(ats_root(), "config.example.json")
+    return os.path.join(app_root(), "config.example.json")
 
 
 def ensure_config():

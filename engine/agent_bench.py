@@ -71,6 +71,9 @@ DEFAULT_REPLY = ("Use your best judgment and continue. Pick reasonable test-pref
 
 if ENGINE_DIR not in sys.path:
     sys.path.insert(0, ENGINE_DIR)
+# Code root (engine/ + tests/conftest.py). ATS_ROOT is the data root; they differ only
+# in a packaged macOS app, where the code is read-only (see bootstrap.js).
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import agent_eval  # run_test_once / classify - the independent verification leg
 
 
@@ -355,7 +358,7 @@ class AgentProc:
 
 
 def _child_env(ats_root, env_name):
-    e = {"ATS_ROOT": ats_root, "PYTHONPATH": ats_root,
+    e = {"ATS_ROOT": ats_root, "ATS_APP_ROOT": _APP_ROOT, "PYTHONPATH": _APP_ROOT,
          "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
          "ATS_ENV": env_name}
     if "ATS_SELLER_USER_INDEX" in os.environ:

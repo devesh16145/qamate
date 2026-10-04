@@ -102,14 +102,24 @@ def _criteria_with_defaults(raw):
     return c
 
 
+def _manual_results_dir():
+    """Artifacts dir when ATS_RESULTS_DIR is unset (direct pytest runs). Stays next to
+    this conftest, unless the app runs with a separate data root (packaged macOS app,
+    read-only code) — then it goes under ATS_ROOT/results/manual."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    data_root = os.environ.get("ATS_ROOT")
+    if data_root and os.path.abspath(data_root) != os.path.dirname(here):
+        return os.path.join(data_root, "results", "manual")
+    return os.path.join(here, "results", "manual")
+
+
 def _write_checkpoints(tc_id, checkpoints, verdict=None, criteria=None):
     """Persist checkpoint results (and, once known, the criteria verdict) so the
     runner / results loader / UI can show per-checkpoint detail. Rewritten after
     every checkpoint so partial results survive an early exit. Falls back to a
     manual results dir when ATS_RESULTS_DIR is unset (never silently dropped).
     tc_id carries any variant suffix, so parametrized variants don't collide."""
-    results_dir = os.environ.get("ATS_RESULTS_DIR") or os.path.join(
-        os.path.dirname(__file__), "results", "manual")
+    results_dir = os.environ.get("ATS_RESULTS_DIR") or _manual_results_dir()
     cp_dir = os.path.join(results_dir, "checkpoints")
     os.makedirs(cp_dir, exist_ok=True)
     safe_id = tc_id.replace("-", "_")
@@ -540,7 +550,7 @@ def ats_config():
 @pytest.fixture(scope="session")
 def results_dir():
     """Directory where this run's artifacts are stored."""
-    d = os.environ.get("ATS_RESULTS_DIR", os.path.join(os.path.dirname(__file__), "results", "manual"))
+    d = os.environ.get("ATS_RESULTS_DIR") or _manual_results_dir()
     os.makedirs(d, exist_ok=True)
     return d
 

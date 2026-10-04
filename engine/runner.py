@@ -22,6 +22,10 @@ import time
 import datetime
 import threading
 
+# Code root (engine/ + tests/conftest.py). ATS_ROOT is the data root; they differ only
+# in a packaged macOS app, where the code is read-only (see bootstrap.js).
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def emit(event_data):
     """Send a JSON event to the Electron main process via stdout."""
     print(json.dumps(event_data), flush=True)
@@ -100,6 +104,11 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
         "-s",  # Prevent pytest from capturing stdout, which can cause double-buffering hangs
         "-k", filter_expr,
     ]
+    # Separate data root (packaged macOS app): the suite is no longer under the
+    # code checkout, so point pytest at the shipped ini and root it at the data dir.
+    app_ini = os.path.join(_APP_ROOT, "pytest.ini")
+    if os.path.abspath(ats_root) != _APP_ROOT and os.path.isfile(app_ini):
+        cmd += ["-c", app_ini, "--rootdir", ats_root]
 
     if mode != "headless":
         cmd.append("--headed")
@@ -132,7 +141,8 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     test_env["ATS_RESULTS_DIR"] = results_dir
     test_env["ATS_RUN_TIMESTAMP"] = timestamp
     test_env["ATS_ROOT"] = ats_root
-    test_env["PYTHONPATH"] = ats_root
+    test_env["ATS_APP_ROOT"] = _APP_ROOT
+    test_env["PYTHONPATH"] = _APP_ROOT
     test_env["PYTHONUNBUFFERED"] = "1"
 
     # Browser zoom override from UI selector
@@ -317,7 +327,7 @@ def run_tests(tc_ids, env, mode, parallel, ats_root, zoom="", user_index=0, exec
     # ── Generate report ──
     report_path = None
     try:
-        engine_dir = os.path.join(ats_root, "engine")
+        engine_dir = os.path.join(_APP_ROOT, "engine")
         sys.path.insert(0, engine_dir)
         from report_generator import generate_report
         report_path = generate_report(results_dir)

@@ -74,3 +74,36 @@ def test_scaffold_upgrades_only_exact_generated_legacy_shim(tmp_path):
     shim.write_text(custom, encoding="utf-8")
     ps.ensure_tests_scaffold(root, "fixture")
     assert shim.read_text(encoding="utf-8") == custom
+
+
+def test_project_shim_loads_shared_conftest_from_app_root(tmp_path):
+    """Data root != code root (packaged macOS app): shims must find the shared
+    conftest in the app's code, and older shims that pointed at ATS_ROOT are upgraded."""
+    import project_store as ps
+    data = tmp_path / "data"
+    ps.ensure_tests_scaffold(str(data), "p1")
+    shim = (data / "projects" / "p1" / "tests" / "conftest.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("ATS_APP_ROOT")' in shim and repr(ps._APP_ROOT) in shim
+    assert (data / "projects" / "p1" / "tests" / "fixtures" / "test_upload.png").is_file()
+
+    old = data / "projects" / "p2" / "tests" / "conftest.py"
+    old.parent.mkdir(parents=True)
+    old.write_text(ps._V2_CONFTEST_SHIM.format(ats_root=str(data)), encoding="utf-8")
+    ps.ensure_tests_scaffold(str(data), "p2")
+    assert "ATS_APP_ROOT" in old.read_text(encoding="utf-8")
+
+    custom = data / "projects" / "p3" / "tests" / "conftest.py"
+    custom.parent.mkdir(parents=True)
+    custom.write_text("# user conftest\n", encoding="utf-8")
+    ps.ensure_tests_scaffold(str(data), "p3")
+    assert custom.read_text(encoding="utf-8") == "# user conftest\n"
+
+
+def test_config_loader_uses_data_root(tmp_path, monkeypatch):
+    import config_loader
+    monkeypatch.setenv("ATS_ROOT", str(tmp_path))
+    assert config_loader.config_path() == str(tmp_path / "config.json")
+    assert config_loader.ensure_config() == str(tmp_path / "config.json")
+    assert (tmp_path / "config.json").is_file()   # seeded from the app's example config
+    monkeypatch.delenv("ATS_ROOT")
+    assert config_loader.ats_root() == config_loader.app_root()

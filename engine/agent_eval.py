@@ -48,6 +48,10 @@ import argparse
 import datetime
 import subprocess
 
+# Code root (engine/ + tests/conftest.py). ATS_ROOT is the data root; they differ only
+# in a packaged macOS app, where the code is read-only (see bootstrap.js).
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 ATS_ROOT_DEFAULT = os.path.dirname(ENGINE_DIR)
 DEFAULT_TASKS = os.path.join(ENGINE_DIR, "agent_eval_tasks.json")
@@ -156,7 +160,7 @@ def evaluate(ats_root, tasks, runs=2, env_name="dev", timeout=300, progress=None
     """Run each task's test up to `runs` times (stop early once a run fails - a test
     that fails any run is already not reliable, exactly like the agent's own gate).
     Returns a list of per-test results."""
-    base_env = {"ATS_ROOT": ats_root, "PYTHONPATH": ats_root,
+    base_env = {"ATS_ROOT": ats_root, "ATS_APP_ROOT": _APP_ROOT, "PYTHONPATH": _APP_ROOT,
                 "PYTHONUNBUFFERED": "1", "ATS_ENV": env_name}
     out = []
     for t in tasks:

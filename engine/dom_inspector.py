@@ -1049,7 +1049,9 @@ def _inspect_via_pytest(ats_root, flow_id, tc_id, headless=True, variant=None, o
 
     env = os.environ.copy()
     env["ATS_ROOT"] = ats_root
-    env["PYTHONPATH"] = ats_root + os.pathsep + env.get("PYTHONPATH", "")
+    env["ATS_APP_ROOT"] = _ATS_ROOT  # code root: makes -p engine.dom_inspector_plugin importable
+    env["PYTHONPATH"] = _ATS_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+    env.setdefault("ATS_RESULTS_DIR", os.path.join(ats_root, "results", "_coverage"))
     env["ATS_COVERAGE_SNAPSHOT_OUT"] = snap_path
     env["PYTHONUNBUFFERED"] = "1"
     if variant:

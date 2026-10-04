@@ -4,19 +4,25 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const bootstrap = require('./bootstrap');
+
+// Code lives in APP_ROOT (read-only inside a macOS .app); everything QAmate writes
+// lives in DATA_ROOT. They are the same folder in dev and on Windows (see bootstrap.js).
+const APP_ROOT = __dirname;
+const DATA_ROOT = bootstrap.DATA_DIR;
+bootstrap.ensureDataDir();
 const LlmProviders = require('./src/llm_providers');
 
-const PROVIDER_CATALOG = JSON.parse(fs.readFileSync(path.join(__dirname, 'engine', 'provider_catalog.json'), 'utf8'));
+const PROVIDER_CATALOG = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'engine', 'provider_catalog.json'), 'utf8'));
 LlmProviders.setCatalog(PROVIDER_CATALOG);
 
 let mainWindow;
 let pythonProcess = null;
 
 const VENV_PYTHON = bootstrap.VENV_PYTHON;
-const RUNNER_SCRIPT = path.join(__dirname, 'engine', 'runner.py');
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-const CONFIG_EXAMPLE_PATH = path.join(__dirname, 'config.example.json');
-const RESULTS_DIR = path.join(__dirname, 'results');
+const RUNNER_SCRIPT = path.join(APP_ROOT, 'engine', 'runner.py');
+const CONFIG_PATH = path.join(DATA_ROOT, 'config.json');
+const CONFIG_EXAMPLE_PATH = path.join(APP_ROOT, 'config.example.json');
+const RESULTS_DIR = path.join(DATA_ROOT, 'results');
 
 function ensureConfig() {
   if (fs.existsSync(CONFIG_PATH)) return CONFIG_PATH;
@@ -38,7 +44,7 @@ function loadConfig() {
 
 /** OS window/taskbar icon. Windows needs .ico/.png — export assets/branding/qamate-mark-32.png from the brand sheet. */
 function resolveAppIcon() {
-  const branding = path.join(__dirname, 'assets', 'branding');
+  const branding = path.join(APP_ROOT, 'assets', 'branding');
   const png = path.join(branding, 'qamate-mark-32.png');
   if (fs.existsSync(png)) {
     const img = nativeImage.createFromPath(png);
@@ -58,7 +64,7 @@ const APP_ICON = resolveAppIcon();
 
 /** Marketing website capture: `electron . --capture-screenshots` */
 const CAPTURE_SCREENSHOTS = process.argv.includes('--capture-screenshots');
-const SCREENSHOT_DIR = path.join(__dirname, 'website', 'assets', 'screenshots');
+const SCREENSHOT_DIR = path.join(APP_ROOT, 'website', 'assets', 'screenshots');
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -72,7 +78,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#ffffff', symbolColor: '#45454d', height: 44 },
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(APP_ROOT, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -81,7 +87,7 @@ function createWindow() {
     ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  mainWindow.loadFile(path.join(APP_ROOT, 'src', 'index.html'));
   if (!CAPTURE_SCREENSHOTS) mainWindow.webContents.openDevTools();
   if (CAPTURE_SCREENSHOTS) scheduleWebsiteCaptures(mainWindow);
 }
@@ -181,7 +187,7 @@ ipcMain.handle('set-titlebar-theme', (e, { theme } = {}) => {
 app.whenReady().then(async () => {
   // Running from source on macOS: show the QAmate mark in the Dock, not Electron's.
   if (process.platform === 'darwin' && app.dock) {
-    const dockPng = path.join(__dirname, 'assets', 'branding', 'qamate-mark-1024.png');
+    const dockPng = path.join(APP_ROOT, 'assets', 'branding', 'qamate-mark-1024.png');
     if (fs.existsSync(dockPng)) app.dock.setIcon(nativeImage.createFromPath(dockPng));
   }
   try {
@@ -256,10 +262,12 @@ ipcMain.handle('run-tests', async (event, options) => {
   sendToRenderer('test-log', `Launching test engine...`);
 
   pythonProcess = spawn(VENV_PYTHON, [RUNNER_SCRIPT], {
-    cwd: __dirname,
+    cwd: DATA_ROOT,
     env: {
       ...process.env,
-      PYTHONPATH: __dirname,
+      ATS_ROOT: DATA_ROOT,
+      ATS_APP_ROOT: APP_ROOT,
+      PYTHONPATH: APP_ROOT,
       PYTHONUNBUFFERED: '1',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -355,7 +363,7 @@ ipcMain.handle('run-tests', async (event, options) => {
     adminUserIndex: options.adminUserIndex ?? 0,
     variant: options.variant,
     project_id: options.project_id || options.projectId || null,
-    ats_root: __dirname,
+    ats_root: DATA_ROOT,
   });
 
   pythonProcess.stdin.write(runCmd + '\n');
@@ -386,21 +394,21 @@ ipcMain.handle('save-config', async (event, config) => {
 // ──────────────────────────────────────
 ipcMain.handle('open-report', async (event, filePath) => {
   if (filePath) {
-    const abs = path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
+    const abs = path.isAbsolute(filePath) ? filePath : path.join(DATA_ROOT, filePath);
     shell.openPath(abs);
   }
 });
 
 ipcMain.handle('open-folder', async (event, folderPath) => {
   if (folderPath) {
-    const abs = path.isAbsolute(folderPath) ? folderPath : path.join(__dirname, folderPath);
+    const abs = path.isAbsolute(folderPath) ? folderPath : path.join(DATA_ROOT, folderPath);
     shell.openPath(abs);
   }
 });
 
 ipcMain.handle('open-file', async (event, filePath) => {
   if (filePath) {
-    const abs = path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
+    const abs = path.isAbsolute(filePath) ? filePath : path.join(DATA_ROOT, filePath);
     shell.openPath(abs);
   }
 });
@@ -409,11 +417,11 @@ ipcMain.handle('open-file', async (event, filePath) => {
 // debugging with DOM snapshots, network, console and per-action screenshots.
 ipcMain.handle('open-trace', async (event, tracePath) => {
   if (!tracePath) return { status: 'error', message: 'No trace path provided' };
-  const abs = path.isAbsolute(tracePath) ? tracePath : path.join(__dirname, tracePath);
+  const abs = path.isAbsolute(tracePath) ? tracePath : path.join(DATA_ROOT, tracePath);
   if (!fs.existsSync(abs)) return { status: 'error', message: 'Trace file not found' };
   try {
     const proc = spawn(VENV_PYTHON, ['-m', 'playwright', 'show-trace', abs], {
-      cwd: __dirname,
+      cwd: DATA_ROOT,
       detached: true,
       stdio: 'ignore',
     });
@@ -428,7 +436,7 @@ ipcMain.handle('open-trace', async (event, tracePath) => {
 // Autonomous pipeline IPC: secrets, projects, explore (L1), PRD (L2),
 // synthesize (L3). Mirrors the analyze-coverage spawn+stream pattern.
 // ════════════════════════════════════════════════════════════════
-const PROJECT_STORE = path.join(__dirname, 'engine', 'project_store.py');
+const PROJECT_STORE = path.join(APP_ROOT, 'engine', 'project_store.py');
 
 // ── App-level project scoping ────────────────────────────────────────────────
 // The ACTIVE project (projects/_index.json) scopes the whole app: each project
@@ -437,9 +445,9 @@ const PROJECT_STORE = path.join(__dirname, 'engine', 'project_store.py');
 // Path convention mirrored in engine/project_store.py tests_root() — keep in sync.
 function _activeProjectId() {
   try {
-    const idx = JSON.parse(fs.readFileSync(path.join(__dirname, 'projects', '_index.json'), 'utf8'));
+    const idx = JSON.parse(fs.readFileSync(path.join(DATA_ROOT, 'projects', '_index.json'), 'utf8'));
     const id = idx && idx.active;
-    if (id && fs.existsSync(path.join(__dirname, 'projects', id, 'project.json'))) return id;
+    if (id && fs.existsSync(path.join(DATA_ROOT, 'projects', id, 'project.json'))) return id;
   } catch (e) { /* no projects yet */ }
   return null;
 }
@@ -449,13 +457,13 @@ function _testsRoot() {
   // 'test' agent project) keep showing the legacy built-in suite unchanged.
   const pid = _activeProjectId();
   if (pid) {
-    const own = path.join(__dirname, 'projects', pid, 'tests');
+    const own = path.join(DATA_ROOT, 'projects', pid, 'tests');
     if (fs.existsSync(own)) return own;
   }
-  return path.join(__dirname, 'tests');
+  return path.join(DATA_ROOT, 'tests');
 }
 function _flowsDir() { return path.join(_testsRoot(), 'flows'); }
-const AGENT_RECORDER = path.join(__dirname, 'engine', 'agent_recorder.py');
+const AGENT_RECORDER = path.join(APP_ROOT, 'engine', 'agent_recorder.py');
 const SECRETS_PATH = path.join(app.getPath('userData'), 'ats_secrets.json');
 
 // ── Secrets: encrypted at rest via OS keychain (safeStorage). Plaintext is
@@ -628,7 +636,7 @@ async function _testProvider({ id, profile, key }) {
 // is tagged with its sessionId and routed to the dedicated Agent window (not the IDE). The
 // conversation/transcript/meta persist on disk under projects/<id>/agent_sessions/ — Python
 // (engine/agent_sessions.py) owns messages.json; Node does the plain-JSON sidebar ops below.
-const AGENT_CHAT = path.join(__dirname, 'engine', 'agent_chat.py');
+const AGENT_CHAT = path.join(APP_ROOT, 'engine', 'agent_chat.py');
 const AGENT_MAX_SESSIONS = parseInt(process.env.ATS_AGENT_MAX_SESSIONS || '4', 10);
 const agentProcs = new Map(); // sessionId -> { proc, buf, projectId }
 
@@ -639,7 +647,7 @@ function createAgentWindow() {
     width: 1240, height: 840,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(APP_ROOT, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -647,7 +655,7 @@ function createAgentWindow() {
     backgroundColor: '#0f0f1a',
     ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
-  agentWindow.loadFile(path.join(__dirname, 'src', 'agent.html'));
+  agentWindow.loadFile(path.join(APP_ROOT, 'src', 'agent.html'));
   // Closing the Agent window does NOT stop its sessions — they keep running (persisted +
   // resumable) and stay visible in the docked panel or when the window is reopened. Sessions
   // end on explicit Stop or app quit (window-all-closed -> _agentKillAll).
@@ -662,7 +670,7 @@ function createHistoryWindow() {
     width: 420, height: 700,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(APP_ROOT, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -670,7 +678,7 @@ function createHistoryWindow() {
     backgroundColor: '#ffffff',
     ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
-  historyWindow.loadFile(path.join(__dirname, 'src', 'history.html'));
+  historyWindow.loadFile(path.join(APP_ROOT, 'src', 'history.html'));
   historyWindow.on('closed', () => { historyWindow = null; });
   return historyWindow;
 }
@@ -682,7 +690,7 @@ function createBugManagerWindow() {
     width: 1100, height: 760,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(APP_ROOT, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -690,7 +698,7 @@ function createBugManagerWindow() {
     backgroundColor: '#ffffff',
     ...(APP_ICON ? { icon: APP_ICON } : {}),
   });
-  bugManagerWindow.loadFile(path.join(__dirname, 'src', 'bugs.html'));
+  bugManagerWindow.loadFile(path.join(APP_ROOT, 'src', 'bugs.html'));
   bugManagerWindow.on('closed', () => { bugManagerWindow = null; });
   return bugManagerWindow;
 }
@@ -722,8 +730,8 @@ function _agentWrite(sessionId, obj) {
 
 function _spawnAgent(sessionId, projectId, initCmd) {
   const proc = spawn(VENV_PYTHON, [AGENT_CHAT], {
-    cwd: __dirname,
-    env: { ...process.env, ATS_ROOT: __dirname, PYTHONUNBUFFERED: '1', ..._llmEnv() },
+    cwd: DATA_ROOT,
+    env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT, PYTHONUNBUFFERED: '1', ..._llmEnv() },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const entry = { proc, buf: '', projectId };
@@ -850,8 +858,8 @@ ipcMain.handle('agent-stop', async (event, { sessionId } = {}) => { if (sessionI
 // reads session.json/transcript.jsonl and does title-rename / delete here. ──
 function _agentSessionsDir(projectId) {
   projectId = projectId || _activeProjectId();
-  if (projectId) return path.join(__dirname, 'projects', projectId, 'agent_sessions');
-  return path.join(__dirname, '.agent_context', 'agent_sessions');
+  if (projectId) return path.join(DATA_ROOT, 'projects', projectId, 'agent_sessions');
+  return path.join(DATA_ROOT, '.agent_context', 'agent_sessions');
 }
 
 function _mintSessionId(title) {
@@ -953,8 +961,8 @@ function _showOpen(opts) {
 // the agent falls back to the active project — the context/memory buttons must too.
 function _activeProjectId() {
   try {
-    const idx = JSON.parse(fs.readFileSync(path.join(__dirname, 'projects', '_index.json'), 'utf8'));
-    if (idx && idx.active && fs.existsSync(path.join(__dirname, 'projects', idx.active, 'project.json'))) return idx.active;
+    const idx = JSON.parse(fs.readFileSync(path.join(DATA_ROOT, 'projects', '_index.json'), 'utf8'));
+    if (idx && idx.active && fs.existsSync(path.join(DATA_ROOT, 'projects', idx.active, 'project.json'))) return idx.active;
   } catch (e) { /* no active project */ }
   return null;
 }
@@ -962,7 +970,7 @@ function _activeProjectId() {
 function _agentContextPaths(projectId) {
   projectId = projectId || _activeProjectId();
   if (projectId) {
-    const pdir = path.join(__dirname, 'projects', projectId);
+    const pdir = path.join(DATA_ROOT, 'projects', projectId);
     let contextDir = path.join(pdir, 'context');
     try {
       const pj = JSON.parse(fs.readFileSync(path.join(pdir, 'project.json'), 'utf8'));
@@ -970,7 +978,7 @@ function _agentContextPaths(projectId) {
     } catch (e) { /* use default */ }
     return { contextDir, memoryPath: path.join(pdir, 'AGENT_MEMORY.md') };
   }
-  const base = path.join(__dirname, '.agent_context');
+  const base = path.join(DATA_ROOT, '.agent_context');
   return { contextDir: base, memoryPath: path.join(base, 'AGENT_MEMORY.md') };
 }
 
@@ -1077,7 +1085,7 @@ ipcMain.handle('agent-context-add', async (event, { projectId } = {}) => {
 ipcMain.handle('agent-context-set-folder', async (event, { projectId } = {}) => {
   projectId = projectId || _activeProjectId();
   if (!projectId) return { status: 'error', message: 'Select a project first to attach a context folder.' };
-  const pf = path.join(__dirname, 'projects', projectId, 'project.json');
+  const pf = path.join(DATA_ROOT, 'projects', projectId, 'project.json');
   if (!fs.existsSync(pf)) return { status: 'error', message: `Project '${projectId}' not found.` };
   const r = await _showOpen({ title: 'Choose a folder to use as this project context', properties: ['openDirectory'] });
   if (!r || r.canceled || !r.filePaths || !r.filePaths.length) return { status: 'cancelled' };
@@ -1135,7 +1143,7 @@ function runEngine(event, args, progressChannel, extraEnv) {
     let result = null;
     let proc;
     try {
-      proc = spawn(VENV_PYTHON, args, { cwd: __dirname, env: { ...process.env, ATS_ROOT: __dirname, ..._llmEnv(), ...(extraEnv || {}) } });
+      proc = spawn(VENV_PYTHON, args, { cwd: DATA_ROOT, env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT, ..._llmEnv(), ...(extraEnv || {}) } });
     } catch (err) { return resolve({ status: 'error', message: err.message }); }
     proc.stdout.on('data', (chunk) => {
       for (const raw of chunk.toString().split('\n')) {
@@ -1174,11 +1182,11 @@ ipcMain.handle('delete-project', async (e, { projectId }) =>
 ipcMain.handle('capture-login', async (e, { projectId, url }) => {
   return new Promise((resolve) => {
     try {
-      const authDir = path.join(__dirname, 'projects', projectId, 'auth');
+      const authDir = path.join(DATA_ROOT, 'projects', projectId, 'auth');
       fs.mkdirSync(authDir, { recursive: true });
       const storageFile = path.join(authDir, 'storage_state.json');
       const proc = spawn(VENV_PYTHON, ['-m', 'playwright', 'codegen', '--channel', 'chrome', '--save-storage', storageFile, url || 'about:blank'],
-        { cwd: __dirname, env: { ...process.env }, detached: false });
+        { cwd: DATA_ROOT, env: { ...process.env }, detached: false });
       proc.on('close', (code) => resolve({ status: code === 0 ? 'success' : 'error', captured: fs.existsSync(storageFile) }));
       proc.on('error', (err) => resolve({ status: 'error', message: err.message }));
     } catch (err) { resolve({ status: 'error', message: err.message }); }
@@ -1201,12 +1209,12 @@ ipcMain.handle('bench-run', async (event, opts) => {
   if (!fs.existsSync(VENV_PYTHON)) return { ok: false, error: `Python not found at ${VENV_PYTHON}` };
   const provider = (opts && opts.provider) || '';
   const only = (opts && opts.only) || '';
-  const args = [path.join(__dirname, 'engine', 'agent_bench.py')];
+  const args = [path.join(APP_ROOT, 'engine', 'agent_bench.py')];
   if (provider) args.push('--provider', provider);
   if (only) args.push('--only', only);
   benchProcess = spawn(VENV_PYTHON, args, {
-    cwd: __dirname,
-    env: { ...process.env, ATS_ROOT: __dirname, PYTHONPATH: __dirname, ..._llmEnv(),
+    cwd: DATA_ROOT,
+    env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT, PYTHONPATH: APP_ROOT, ..._llmEnv(),
            PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -1464,7 +1472,7 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, pl
       
       const startUrl = baseUrl + loginPath;
 
-      const tempFile = path.join(__dirname, 'temp_recording.py');
+      const tempFile = path.join(DATA_ROOT, 'temp_recording.py');
 
       // Clean up any previous temp file
       try { fs.unlinkSync(tempFile); } catch (e) { /* ok */ }
@@ -1475,7 +1483,7 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, pl
       // platform/env and every later recording starts already authenticated —
       // no repetitive logins. When a saved session exists we open the app home
       // instead of the login page.
-      const authDir = path.join(__dirname, '.auth');
+      const authDir = path.join(DATA_ROOT, '.auth');
       try { fs.mkdirSync(authDir, { recursive: true }); } catch (e) { /* ok */ }
       const storageFile = path.join(authDir, `${platform || 'seller'}_${env || 'dev'}_storage.json`);
       const hasStorage = fs.existsSync(storageFile);
@@ -1492,7 +1500,7 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, pl
       codegenArgs.push(recordUrl);
 
       const codegenProcess = spawn(VENV_PYTHON, codegenArgs, {
-        cwd: __dirname,
+        cwd: DATA_ROOT,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: false,
@@ -1522,10 +1530,10 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, pl
         }
 
         // Parse the recorded steps into structured JSON
-        const PARSER_SCRIPT = path.join(__dirname, 'engine', 'recorder_parser.py');
+        const PARSER_SCRIPT = path.join(APP_ROOT, 'engine', 'recorder_parser.py');
         const parserProcess = spawn(VENV_PYTHON, [
-          PARSER_SCRIPT, 'parse', __dirname
-        ], { cwd: __dirname });
+          PARSER_SCRIPT, 'parse', DATA_ROOT
+        ], { cwd: DATA_ROOT, env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT } });
 
         let out = '';
         parserProcess.stdout.on('data', d => out += d.toString());
@@ -1567,10 +1575,10 @@ ipcMain.handle('record-test', async (event, { flowId, tcId, description, env, pl
 ipcMain.handle('save-recording-review', async (event, payload) => {
   return new Promise((resolve, reject) => {
     try {
-      const PARSER_SCRIPT = path.join(__dirname, 'engine', 'recorder_parser.py');
+      const PARSER_SCRIPT = path.join(APP_ROOT, 'engine', 'recorder_parser.py');
       const parserProcess = spawn(VENV_PYTHON, [
-        PARSER_SCRIPT, 'generate', __dirname
-      ], { cwd: __dirname });
+        PARSER_SCRIPT, 'generate', DATA_ROOT
+      ], { cwd: DATA_ROOT, env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT } });
 
       let out = '';
       parserProcess.stdin.write(JSON.stringify(payload));
@@ -1602,15 +1610,15 @@ ipcMain.handle('save-recording-review', async (event, payload) => {
 ipcMain.handle('analyze-coverage', async (event, { flowId, tcId, headed, stopTerminal, variant }) => {
   return new Promise((resolve) => {
     try {
-      const INSPECTOR_SCRIPT = path.join(__dirname, 'engine', 'dom_inspector.py');
+      const INSPECTOR_SCRIPT = path.join(APP_ROOT, 'engine', 'dom_inspector.py');
       const args = [INSPECTOR_SCRIPT, 'analyze', flowId, tcId];
       if (headed) args.push('--headed');
       if (stopTerminal) args.push('--stop-terminal');
       if (variant) args.push('--variant', variant);
 
       const proc = spawn(VENV_PYTHON, args, {
-        cwd: __dirname,
-        env: { ...process.env, ATS_ROOT: __dirname },
+        cwd: DATA_ROOT,
+        env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT },
       });
 
       let stderrBuf = '';
@@ -1767,8 +1775,8 @@ ipcMain.handle('create-test-case', async (event, { flowId, tcId, description, pr
 // IPC: Clone test flows from another suite (built-in or another project) into
 // the ACTIVE suite. Never overwrites an existing flow folder.
 function _suiteFlowsDirFor(projectId) {
-  return projectId ? path.join(__dirname, 'projects', projectId, 'tests', 'flows')
-                   : path.join(__dirname, 'tests', 'flows');
+  return projectId ? path.join(DATA_ROOT, 'projects', projectId, 'tests', 'flows')
+                   : path.join(DATA_ROOT, 'tests', 'flows');
 }
 function _listSuiteFlows(flowsDir) {
   const out = [];
@@ -1791,7 +1799,7 @@ ipcMain.handle('list-clone-sources', async () => {
     if (active !== null) {   // built-in suite is a source unless it IS the target
       sources.push({ id: null, name: 'ATS (built-in suite)', flows: _listSuiteFlows(_suiteFlowsDirFor(null)) });
     }
-    const projDir = path.join(__dirname, 'projects');
+    const projDir = path.join(DATA_ROOT, 'projects');
     if (fs.existsSync(projDir)) {
       for (const pid of fs.readdirSync(projDir)) {
         if (pid === active) continue;
@@ -2038,7 +2046,7 @@ ipcMain.handle('save-bulk-tc-data', async (event, items) => {
   }
 });
 
-const TEMPLATES_DIR = path.join(__dirname, 'templates');
+const TEMPLATES_DIR = path.join(DATA_ROOT, 'templates');
 
 ipcMain.handle('save-template', async (event, { name, data }) => {
   try {
@@ -2380,7 +2388,7 @@ ipcMain.handle('create-jira-story', async (event, { tcId, flowId, userStory, sum
 //   labels:[], status:'draft'|'raised', jiraKey, jiraUrl, jiraStatus,
 //   runFolder, attachments:[paths], createdAt, updatedAt }
 // ──────────────────────────────────────────────────────────────────────────
-function _jiraItemsPath() { return path.join(__dirname, 'jira_items.json'); }
+function _jiraItemsPath() { return path.join(DATA_ROOT, 'jira_items.json'); }
 function _readJiraItems() {
   try {
     const p = _jiraItemsPath();
