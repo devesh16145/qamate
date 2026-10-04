@@ -234,12 +234,33 @@ const STEPS = [
  * Resolves { ok:true } or { ok:false, message } — the caller opens the main
  * window regardless so the app is usable (runs will report the missing env).
  */
+/** Wait until the splash is closed (its "Continue" button) or `ms` passes. */
+function waitForClose(win, ms) {
+  return new Promise((r) => {
+    if (win.isDestroyed()) return r();
+    const t = setTimeout(r, ms);
+    win.once('closed', () => { clearTimeout(t); r(); });
+  });
+}
+
 async function runFirstRunSetup(appIcon) {
   const win = createSplash(appIcon);
-  // Give the splash a moment to load before we start pushing updates.
-  await new Promise((r) => win.webContents.once('did-finish-load', r));
+  // Start once the splash has loaded — or failed to, or 10 s passed: setup must
+  // never hang behind a blank window.
+  await new Promise((r) => {
+    const t = setTimeout(r, 10000);
+    const done = () => { clearTimeout(t); r(); };
+    win.webContents.once('did-finish-load', done);
+    win.webContents.once('did-fail-load', done);
+  });
 
-  const log = (line) => splashCall(win, 'qamateLog', line);
+  // Keep a log file so failed setups can be diagnosed after the splash closes.
+  const logFile = path.join(DATA_DIR, 'setup.log');
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(logFile, `QAmate setup ${new Date().toISOString()}\n`); } catch (_) { /* best effort */ }
+  const log = (line) => {
+    try { fs.appendFileSync(logFile, line + '\n'); } catch (_) { /* best effort */ }
+    return splashCall(win, 'qamateLog', line);
+  };
   const setStep = (i, detail) => splashCall(win, 'qamateStep', i, STEPS.length, STEPS[i].label, detail || '');
 
   const base = baseInterpreter();
@@ -247,7 +268,8 @@ async function runFirstRunSetup(appIcon) {
     await splashCall(win, 'qamateFail', IS_WIN
       ? 'Python 3.11+ was not found. Install Python 3.12 from python.org (tick "Add to PATH"), then relaunch QAmate.'
       : 'Python 3.11+ was not found. Install it (for example: brew install python@3.12), then relaunch QAmate.');
-    await new Promise((r) => setTimeout(r, 60000));
+    await log('ERROR: no Python 3.11+ interpreter found');
+    await waitForClose(win, 120000);
     if (!win.isDestroyed()) win.close();
     return { ok: false, message: 'No Python interpreter available' };
   }
@@ -292,8 +314,9 @@ async function runFirstRunSetup(appIcon) {
     if (!win.isDestroyed()) win.close();
     return { ok: true };
   } catch (e) {
-    await splashCall(win, 'qamateFail', `Setup could not finish: ${e.message}`);
-    await new Promise((r) => setTimeout(r, 60000));
+    await log(`ERROR: ${e.message}`);
+    await splashCall(win, 'qamateFail', `Setup could not finish: ${e.message} Details: ${logFile}`);
+    await waitForClose(win, 120000);
     if (!win.isDestroyed()) win.close();
     return { ok: false, message: e.message };
   }
