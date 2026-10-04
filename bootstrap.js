@@ -43,7 +43,7 @@ const REQUIREMENTS = path.join(APP_DIR, 'requirements.txt');
 const STAMP = path.join(VENV_DIR, '.qamate-env.json');
 
 // Bump when requirements or provisioning steps change to force a re-provision.
-const ENV_VERSION = '1';
+const ENV_VERSION = '2';  // 2: Playwright 1.58 -> 1.63 (public AI snapshot + Locator.normalize)
 
 // ── Interpreter discovery ────────────────────────────────────────────────────
 
@@ -99,10 +99,11 @@ function baseInterpreter() {
  */
 function pythonReady() {
   if (!fs.existsSync(VENV_PYTHON)) return false;
-  try {
-    const s = JSON.parse(fs.readFileSync(STAMP, 'utf8'));
-    if (s && s.version === ENV_VERSION && s.complete === true) return true;
-  } catch (_) { /* no/old stamp */ }
+  let stamp = null;
+  try { stamp = JSON.parse(fs.readFileSync(STAMP, 'utf8')); } catch (_) { /* no stamp */ }
+  // A provisioned env from an older ENV_VERSION re-runs setup (reuses the venv,
+  // upgrades packages); only an unstamped, hand-made dev venv is taken as-is.
+  if (stamp) return stamp.version === ENV_VERSION && stamp.complete === true;
   const sp = IS_WIN
     ? path.join(VENV_DIR, 'Lib', 'site-packages', 'playwright')
     : path.join(VENV_DIR, 'lib');

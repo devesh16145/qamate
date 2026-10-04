@@ -10,7 +10,7 @@
 # are resolved automatically and intentionally not pinned here.
 
 # ── Browser automation ───────────────────────────────────────────────────────
-playwright==1.58.0
+playwright==1.63.0
 
 # ── Test runner + plugins ────────────────────────────────────────────────────
 # pytest-xdist: parallel mode (-n).  pytest-rerunfailures: retries -> FLAKY label
