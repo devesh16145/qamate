@@ -27,7 +27,8 @@ try:
             return async () => ({
               listProjects: {projects:[project], active:'fixture'},
               agentListSessions: {sessions:[session]},
-              getConfig: {llm:{default_provider:'mock', providers:{mock:{protocol:'mock',model:'mock'}}}},
+              getConfig: {llm:{schema:2, default_provider:'local', providers:{local:{preset:'ollama', model:'fixture'}}}},
+              getProviderCatalog: {presets:{ollama:{label:'Ollama (local)', protocol:'ollama', needs_key:false, endpoints:[{id:'default', base_url:'http://localhost:11434'}], models:[]}}},
               getSecretStatus: {keys:{}}, agentContextList:{files:[],folders:[]},
               agentSessionTranscript:{bubbles:[]}
             }[name] || {});

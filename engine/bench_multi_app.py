@@ -119,7 +119,7 @@ def main():
             if name == decision:
                 parser.error("Planner model override requires separate planner and decision profiles")
             profile["model"] = args.planner_model
-        if profile["protocol"] not in {"mock", "ollama"} and not os.environ.get(profile.get("api_key_env", "")):
+        if profile["protocol"] != "ollama" and not os.environ.get(profile.get("api_key_env", "")):
             parser.error("Selected profile requires its API key environment variable")
         profiles[name] = {key: value for key, value in profile.items() if key in {
             "protocol", "model", "base_url", "api_key_env", "token_parameter", "supports_temperature", "capabilities"}}

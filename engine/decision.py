@@ -45,7 +45,7 @@ class ChoiceDecider:
         if self.usage_sink:
             usage = usage or {}
             self.usage_sink({"event": "model_usage", "role": "decision", "profile": self.name,
-                             "model": self.cfg.get("model", "mock"), "duration_ms": round((time.monotonic() - started) * 1000),
+                             "model": self.cfg.get("model", ""), "duration_ms": round((time.monotonic() - started) * 1000),
                              "input": usage.get("input_tokens", usage.get("prompt_tokens")),
                              "output": usage.get("output_tokens", usage.get("completion_tokens"))})
 

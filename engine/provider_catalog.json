@@ -1,0 +1,377 @@
+{
+  "_comment": "BYOK provider presets shared by the Electron UI (via main.js) and the Python engine (model_profiles.py). A profile in config.json llm.providers names a preset with \"preset\"; any field set on the profile overrides the preset. Secrets are never stored here or in config.json - only the env var NAME that carries the key. Verified against provider docs 2026-10-04.",
+  "version": 1,
+  "presets": {
+    "mimo": {
+      "label": "Xiaomi MiMo",
+      "protocol": "openai",
+      "api_key_env": "MIMO_API_KEY",
+      "key_url": "https://platform.xiaomimimo.com/#/console/api-keys",
+      "docs_url": "https://mimo.mi.com/docs/en-US/quick-start/faq/api-integration",
+      "endpoints": [
+        {
+          "id": "payg",
+          "label": "Pay-as-you-go (sk- keys)",
+          "base_url": "https://api.xiaomimimo.com/v1",
+          "key_prefix": "sk-"
+        },
+        {
+          "id": "tp-sgp",
+          "label": "Token Plan - Singapore (tp- keys)",
+          "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+          "key_prefix": "tp-"
+        },
+        {
+          "id": "tp-ams",
+          "label": "Token Plan - Europe (tp- keys)",
+          "base_url": "https://token-plan-ams.xiaomimimo.com/v1",
+          "key_prefix": "tp-"
+        },
+        {
+          "id": "tp-cn",
+          "label": "Token Plan - China (tp- keys)",
+          "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+          "key_prefix": "tp-"
+        }
+      ],
+      "default_model": "mimo-v2.6-flash",
+      "models": [
+        {
+          "id": "mimo-v2.6-flash",
+          "label": "MiMo V2.6 Flash - fast, cheap",
+          "vision": true
+        },
+        {
+          "id": "mimo-v2.6-pro",
+          "label": "MiMo V2.6 Pro - flagship",
+          "vision": true
+        },
+        {
+          "id": "mimo-v2.6-pro-ultraspeed",
+          "label": "MiMo V2.6 Pro Ultraspeed",
+          "vision": true
+        }
+      ],
+      "max_tokens": 16384,
+      "token_parameter": "max_completion_tokens",
+      "supports_temperature": false,
+      "thinking_field": "reasoning_content",
+      "thinking": {
+        "default": "on",
+        "on": {
+          "extra_body": {
+            "thinking": {
+              "type": "enabled"
+            }
+          }
+        },
+        "off": {
+          "extra_body": {
+            "thinking": {
+              "type": "disabled"
+            }
+          }
+        }
+      },
+      "validate": {
+        "method": "models"
+      }
+    },
+    "anthropic": {
+      "label": "Anthropic Claude",
+      "protocol": "anthropic",
+      "api_key_env": "ATS_ANTHROPIC_KEY",
+      "key_url": "https://platform.claude.com/",
+      "docs_url": "https://platform.claude.com/docs/en/models/overview",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "Anthropic API",
+          "base_url": "https://api.anthropic.com"
+        }
+      ],
+      "default_model": "claude-sonnet-5-5",
+      "models": [
+        {
+          "id": "claude-sonnet-5-5",
+          "label": "Claude Sonnet 5.5 - balanced",
+          "vision": true
+        },
+        {
+          "id": "claude-opus-5-5",
+          "label": "Claude Opus 5.5 - most capable",
+          "vision": true
+        },
+        {
+          "id": "claude-fable-5-1",
+          "label": "Claude Fable 5.1",
+          "vision": true
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "label": "Claude Haiku 4.5 - fast, cheap",
+          "vision": true
+        }
+      ],
+      "max_tokens": 16384,
+      "supports_temperature": false,
+      "validate": {
+        "method": "models"
+      }
+    },
+    "openai": {
+      "label": "OpenAI",
+      "protocol": "openai_responses",
+      "api_key_env": "ATS_OPENAI_KEY",
+      "key_url": "https://platform.openai.com/api-keys",
+      "docs_url": "https://developers.openai.com/api/docs/models",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "OpenAI API",
+          "base_url": "https://api.openai.com/v1"
+        }
+      ],
+      "default_model": "gpt-6.1-sol",
+      "models": [
+        {
+          "id": "gpt-6.1-sol",
+          "label": "GPT-6.1 Sol - balanced",
+          "vision": true
+        },
+        {
+          "id": "gpt-6-astra",
+          "label": "GPT-6 Astra - flagship",
+          "vision": true
+        },
+        {
+          "id": "gpt-6-luna",
+          "label": "GPT-6 Luna - fast, cheap",
+          "vision": true
+        }
+      ],
+      "max_tokens": 16384,
+      "supports_temperature": false,
+      "validate": {
+        "method": "models"
+      }
+    },
+    "gemini": {
+      "label": "Google Gemini",
+      "protocol": "google",
+      "api_key_env": "GEMINI_API_KEY",
+      "key_url": "https://aistudio.google.com/apikey",
+      "docs_url": "https://ai.google.dev/gemini-api/docs/models",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "Gemini API",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        }
+      ],
+      "default_model": "gemini-3.8-flash",
+      "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash - fast",
+          "vision": true
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro (preview)",
+          "vision": true
+        },
+        {
+          "id": "gemini-3.1-flash-lite",
+          "label": "Gemini 3.1 Flash-Lite - cheapest",
+          "vision": true
+        }
+      ],
+      "max_tokens": 16384,
+      "supports_temperature": true,
+      "validate": {
+        "method": "models"
+      }
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "protocol": "openai",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "key_url": "https://openrouter.ai/keys",
+      "docs_url": "https://openrouter.ai/docs/api/reference/overview",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "OpenRouter",
+          "base_url": "https://openrouter.ai/api/v1"
+        }
+      ],
+      "default_model": "xiaomi/mimo-v2.6-flash",
+      "models": [
+        {
+          "id": "xiaomi/mimo-v2.6-flash",
+          "label": "Xiaomi MiMo V2.6 Flash",
+          "vision": true
+        },
+        {
+          "id": "xiaomi/mimo-v2.6-pro",
+          "label": "Xiaomi MiMo V2.6 Pro",
+          "vision": true
+        }
+      ],
+      "max_tokens": 16384,
+      "supports_temperature": true,
+      "thinking_field": "reasoning",
+      "headers": {
+        "HTTP-Referer": "https://github.com/devesh16145/qamate",
+        "X-Title": "QAmate"
+      },
+      "validate": {
+        "method": "key",
+        "path": "/key"
+      }
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "protocol": "openai",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "key_url": "https://platform.deepseek.com/api_keys",
+      "docs_url": "https://api-docs.deepseek.com/",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "DeepSeek API",
+          "base_url": "https://api.deepseek.com"
+        }
+      ],
+      "default_model": "deepseek-flash",
+      "models": [
+        {
+          "id": "deepseek-flash",
+          "label": "DeepSeek Flash (V4.1) - fast",
+          "vision": true
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "label": "DeepSeek V4 Pro",
+          "vision": false
+        }
+      ],
+      "max_tokens": 16384,
+      "supports_temperature": false,
+      "thinking_field": "reasoning_content",
+      "thinking": {
+        "default": "on",
+        "on": {
+          "extra_body": {
+            "thinking": {
+              "type": "enabled"
+            }
+          }
+        },
+        "off": {
+          "extra_body": {
+            "thinking": {
+              "type": "disabled"
+            }
+          }
+        }
+      },
+      "validate": {
+        "method": "models"
+      }
+    },
+    "ollama": {
+      "label": "Ollama (local)",
+      "protocol": "ollama",
+      "api_key_env": "",
+      "needs_key": false,
+      "key_url": "https://ollama.com/download",
+      "docs_url": "https://docs.ollama.com/api/openai-compatibility",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "Local Ollama",
+          "base_url": "http://localhost:11434"
+        }
+      ],
+      "default_model": "",
+      "models": [],
+      "max_tokens": 8192,
+      "supports_temperature": true,
+      "thinking_field": "reasoning",
+      "validate": {
+        "method": "models"
+      }
+    },
+    "jev": {
+      "label": "TypeSafe Jev (decision model)",
+      "protocol": "typesafe",
+      "role": "decision",
+      "api_key_env": "TYPESAFE_API_KEY",
+      "key_url": "https://docs.typesafe.ai/api",
+      "docs_url": "https://docs.typesafe.ai/api",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "TypeSafe API",
+          "base_url": "https://api.typesafe.ai/v1"
+        }
+      ],
+      "default_model": "jev-latest",
+      "models": [
+        {
+          "id": "jev-latest",
+          "label": "Jev (latest)",
+          "vision": false
+        }
+      ],
+      "timeout": 30,
+      "validate": {
+        "method": "decision"
+      }
+    },
+    "jev-openrouter": {
+      "label": "Jev via OpenRouter (decision model)",
+      "protocol": "openrouter_decisions",
+      "role": "decision",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "key_url": "https://openrouter.ai/keys",
+      "docs_url": "https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "OpenRouter Decisions (alpha)",
+          "base_url": "https://openrouter.ai/api/alpha"
+        }
+      ],
+      "default_model": "typesafe/jev-1.13",
+      "models": [
+        {
+          "id": "typesafe/jev-1.13",
+          "label": "Jev 1.13",
+          "vision": false
+        }
+      ],
+      "timeout": 30,
+      "validate": {
+        "method": "decision"
+      }
+    },
+    "custom": {
+      "label": "Custom (OpenAI-compatible)",
+      "protocol": "openai",
+      "api_key_env": "",
+      "key_url": "",
+      "docs_url": "",
+      "endpoints": [],
+      "default_model": "",
+      "models": [],
+      "max_tokens": 8192,
+      "supports_temperature": true,
+      "validate": {
+        "method": "models"
+      }
+    }
+  }
+}

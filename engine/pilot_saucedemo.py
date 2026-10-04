@@ -147,7 +147,7 @@ def main(argv=None, result_sink=None, _app_url=None):
     for name in names:
         _, profile = resolve_profile(source_config, name)
         key_env = profile.get("api_key_env")
-        if profile["protocol"] not in {"mock", "ollama"} and not (key_env and os.environ.get(key_env)):
+        if profile["protocol"] != "ollama" and not (key_env and os.environ.get(key_env)):
             parser.error(f"Profile {name!r}: required environment key is not configured")
         profiles[name] = benchmark_profile(profile, args.planner_model_settings if name == args.provider else None)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]

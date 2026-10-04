@@ -6,7 +6,7 @@
 2. On first launch, QAmate copies `config.example.json` → `config.json` if `config.json` is missing.
 3. Open **Settings** and configure:
    - Platform URLs and test users
-   - LLM provider (default is `mock` for offline use)
+   - AI provider (Settings → AI / LLM; required for the AI agent)
    - Jira (optional) — prefer `JIRA_API_KEY` env var over storing tokens in config
 
 ## Important
@@ -29,13 +29,13 @@ venv\Scripts\pytest tests\flows\demo\ -v
 
 QAmate is **bring-your-own-key** for cloud LLMs:
 
-1. Open **Settings → AI / LLM**
-2. Pick a **default provider** (`mock` works offline with no key)
-3. For Anthropic, OpenAI, or other cloud providers: paste your API key and click **Save**
+1. Open **Settings → AI / LLM** and click **Add provider**. Presets (defined in `engine/provider_catalog.json`): Xiaomi MiMo, Anthropic Claude, OpenAI, Google Gemini, OpenRouter, DeepSeek, Ollama (local), and **Custom** for any OpenAI-compatible endpoint
+2. Paste your API key, pick a model (the list fills in from the provider after a successful test), and click **Save key & test**. For Xiaomi MiMo, Token Plan (`tp-`) keys are matched to their region automatically
+3. Optionally set the thinking mode and token cap, then click **Save changes**. The first provider you add becomes the default
 
-Keys are encrypted with your OS keychain (`safeStorage`) and stored in `%APPDATA%/qamate/ats_secrets.json` (or the Electron app userData path). They are **never** written to `config.json` or committed to git.
+Keys are encrypted with your OS keychain (`safeStorage`) and stored in the Electron userData folder (`ats_secrets.json`; `%APPDATA%/qamate` on Windows, `~/Library/Application Support/qamate` on macOS). They are **never** written to `config.json` or committed to git.
 
-Alternatively, set the env var named in `config.example.json` (e.g. `ATS_ANTHROPIC_KEY`, `ATS_OPENAI_KEY`) before launching QAmate.
+For CLI / CI runs outside the app, set the provider's key environment variable instead (shown under **Advanced**, e.g. `MIMO_API_KEY`, `ATS_ANTHROPIC_KEY`, `ATS_OPENAI_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`).
 
 The agent UI blocks session start if the selected provider needs a key that is not configured. You can override the default per session from the provider dropdown in the agent panel.
 

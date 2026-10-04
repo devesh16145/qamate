@@ -4,11 +4,15 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const bootstrap = require('./bootstrap');
+const LlmProviders = require('./src/llm_providers');
+
+const PROVIDER_CATALOG = JSON.parse(fs.readFileSync(path.join(__dirname, 'engine', 'provider_catalog.json'), 'utf8'));
+LlmProviders.setCatalog(PROVIDER_CATALOG);
 
 let mainWindow;
 let pythonProcess = null;
 
-const VENV_PYTHON = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
+const VENV_PYTHON = bootstrap.VENV_PYTHON;
 const RUNNER_SCRIPT = path.join(__dirname, 'engine', 'runner.py');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const CONFIG_EXAMPLE_PATH = path.join(__dirname, 'config.example.json');
@@ -26,7 +30,10 @@ function ensureConfig() {
 function loadConfig() {
   ensureConfig();
   if (!fs.existsSync(CONFIG_PATH)) return {};
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  // One-time upgrade of pre-catalog llm settings (drops the old mock provider).
+  if (LlmProviders.migrateConfig(cfg)) fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  return cfg;
 }
 
 /** OS window/taskbar icon. Windows needs .ico/.png — export assets/branding/qamate-mark-32.png from the brand sheet. */
@@ -172,6 +179,11 @@ ipcMain.handle('set-titlebar-theme', (e, { theme } = {}) => {
 // progress splash, before opening the IDE. A dev checkout with an existing venv
 // is detected as ready and skips this. See bootstrap.js.
 app.whenReady().then(async () => {
+  // Running from source on macOS: show the QAmate mark in the Dock, not Electron's.
+  if (process.platform === 'darwin' && app.dock) {
+    const dockPng = path.join(__dirname, 'assets', 'branding', 'qamate-mark-1024.png');
+    if (fs.existsSync(dockPng)) app.dock.setIcon(nativeImage.createFromPath(dockPng));
+  }
   try {
     if (!bootstrap.pythonReady()) {
       await bootstrap.runFirstRunSetup(APP_ICON);
@@ -480,18 +492,134 @@ function _llmEnv() {
   return env;
 }
 
-function _providerNeedsKey(providerId, cfg) {
-  const p = cfg?.llm?.providers?.[providerId];
-  const protocol = p?.protocol || providerId;
-  return protocol !== 'mock' && protocol !== 'ollama';
+function _keyStatus(cfg) {
+  const keys = {};
+  const s = _readSecrets();
+  for (const k of Object.keys(s)) keys[k] = !!s[k];
+  for (const f of LlmProviders.keyFieldsFromConfig(cfg)) if (process.env[f.env]) keys[f.env] = true;
+  return keys;
 }
 
 function _isProviderConfigured(providerId, cfg) {
-  if (!_providerNeedsKey(providerId, cfg)) return true;
-  const env = cfg?.llm?.providers?.[providerId]?.api_key_env;
-  if (!env) return false;
-  const secrets = _readSecrets();
-  return !!(secrets[env] || process.env[env]);
+  return LlmProviders.isConfigured(providerId, cfg, _keyStatus(cfg));
+}
+
+// ── BYOK "Test connection": validate a key and list the provider's models ──
+async function _fetchJson(url, init) {
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15000) });
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* non-JSON */ }
+  return { status: res.status, ok: res.ok, body };
+}
+
+function _errText(body) {
+  const e = body && (body.error || body);
+  return String((e && (e.message || e.type)) || (typeof e === 'string' ? e : '') || '').slice(0, 200);
+}
+
+async function _probeProvider(r, key) {
+  const base = (r.base_url || '').replace(/\/+$/, '');
+  if (!base) return { ok: false, message: 'Base URL is required.' };
+  const auth = key ? { Authorization: `Bearer ${key}` } : {};
+  // models: [{ id, label?, context?, vision? }]; listed=false when the API has no model listing.
+  let res, models = [], listed = true;
+  if (r.protocol === 'typesafe' || r.protocol === 'openrouter_decisions') {
+    listed = false;
+    // Decision APIs have no model listing: make one tiny two-choice decision.
+    const question = { action: { type: 'choice', instructions: 'Connection test. Choose "ok".', criteria: { ok: 'Connection works', stop: 'Stop' } } };
+    res = await _fetchJson(`${base}${r.protocol === 'typesafe' ? '/systemone' : '/decisions'}`, {
+      method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: r.model, state: {}, questions: question }),
+    });
+  } else if (r.protocol === 'anthropic') {
+    res = await _fetchJson(`${base}${base.endsWith('/v1') ? '' : '/v1'}/models?limit=100`, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } });
+    if (res.ok) models = (res.body?.data || []).map(m => ({ id: m.id, label: m.display_name, context: m.max_input_tokens }));
+  } else if (r.protocol === 'google') {
+    res = await _fetchJson(`${base}/models?pageSize=1000`, { headers: { 'x-goog-api-key': key } });
+    if (res.ok) models = (res.body?.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && !/embedding|aqa|imagen|veo|tts/i.test(m.name))
+      .map(m => ({ id: String(m.name).replace(/^models\//, ''), label: m.displayName, context: m.inputTokenLimit }));
+  } else if (r.preset === 'openrouter') {
+    res = await _fetchJson(`${base}/key`, { headers: auth });
+    if (res.ok) {
+      // The agent needs tool calling, so only list models that support it.
+      const list = await _fetchJson(`${base}/models`, {});
+      models = (list.body?.data || []).filter(m => (m.supported_parameters || []).includes('tools'))
+        .map(m => ({ id: m.id, label: m.name, context: m.context_length, vision: (m.architecture?.input_modalities || []).includes('image') }));
+    }
+  } else {
+    const v1 = r.protocol === 'ollama' && !base.endsWith('/v1') ? base + '/v1' : base;
+    res = await _fetchJson(`${v1}/models`, { headers: { ...auth, ...(r.headers || {}) } });
+    if (res.ok) {
+      models = (res.body?.data || []).map(m => ({ id: m.id, context: m.context_length || m.context_window }));
+      // OpenAI's list also has embedding/audio/image models the agent can't use.
+      if (r.preset === 'openai') models = models.filter(m => !/embed|tts|whisper|dall-e|davinci|babbage|moderation|transcribe|audio|realtime|image|sora/i.test(m.id));
+    } else if (res.status === 404 || res.status === 405) {
+      listed = false;
+      // No model listing on this endpoint: fall back to a 1-token completion.
+      const thinkingOff = (LlmProviders.preset(r.preset)?.thinking?.off?.extra_body) || {};
+      res = await _fetchJson(`${v1}/chat/completions`, {
+        method: 'POST', headers: { ...auth, ...(r.headers || {}), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: r.model, messages: [{ role: 'user', content: 'ping' }], [r.token_parameter || 'max_tokens']: 1, ...thinkingOff }),
+      });
+    }
+  }
+  if (res.ok) return { ok: true, listed, models: models.sort((a, b) => a.id.localeCompare(b.id)) };
+  const rejected = res.status === 401 || res.status === 403 || (r.protocol === 'google' && res.status === 400);
+  return { ok: false, status: res.status, rejected, message: `${rejected ? 'Key rejected' : 'Request failed'} (HTTP ${res.status})${_errText(res.body) ? ': ' + _errText(res.body) : ''}` };
+}
+
+const _modelCache = new Map();  // in-memory only: hash(endpoint+key) -> { at, result }
+const MODEL_CACHE_MS = 10 * 60 * 1000;
+
+async function _listModels({ id, profile, refresh }) {
+  const cfg = loadConfig();
+  const draft = { ...cfg, llm: { ...(cfg.llm || {}), providers: { ...(cfg.llm?.providers || {}), [id]: profile || cfg.llm?.providers?.[id] } } };
+  const r = LlmProviders.resolve(id, draft);
+  if (!r) return { ok: false, message: `Unknown provider ${id}` };
+  if (r.protocol === 'typesafe' || r.protocol === 'openrouter_decisions') return { ok: true, listed: false, models: [] };
+  const needsKey = LlmProviders.listFromConfig(draft).find(p => p.id === id)?.needsKey;
+  const k = (r.api_key_env && (_readSecrets()[r.api_key_env] || process.env[r.api_key_env])) || '';
+  if (needsKey && !k) return { ok: false, needsKey: true, message: 'Save an API key to load models.' };
+  const cacheKey = require('crypto').createHash('sha256').update(`${r.protocol}|${r.preset}|${r.base_url}|${k}`).digest('hex');
+  const hit = _modelCache.get(cacheKey);
+  if (!refresh && hit && Date.now() - hit.at < MODEL_CACHE_MS) return hit.result;
+  let result;
+  try {
+    result = await _probeProvider(r, k);
+    if (k && result.message) result.message = result.message.split(k).join('••••');
+  } catch (err) {
+    const msg = err && err.name === 'TimeoutError' ? 'Timed out reaching the provider' : (err && err.cause && err.cause.code) || (err && err.message) || String(err);
+    return { ok: false, message: `Could not reach ${r.base_url}: ${msg}` };
+  }
+  if (result.ok) _modelCache.set(cacheKey, { at: Date.now(), result });
+  return result;
+}
+
+async function _testProvider({ id, profile, key }) {
+  const cfg = loadConfig();
+  const draft = { ...cfg, llm: { ...(cfg.llm || {}), providers: { ...(cfg.llm?.providers || {}), [id]: profile || cfg.llm?.providers?.[id] } } };
+  const r = LlmProviders.resolve(id, draft);
+  if (!r) return { ok: false, message: `Unknown provider ${id}` };
+  const needsKey = LlmProviders.listFromConfig(draft).find(p => p.id === id)?.needsKey;
+  const k = key || (r.api_key_env && (_readSecrets()[r.api_key_env] || process.env[r.api_key_env])) || '';
+  if (needsKey && !k) return { ok: false, message: 'Enter an API key first.' };
+  // Some providers echo the submitted key in error text; never show it back.
+  const redact = (res) => (k && res.message ? { ...res, message: res.message.split(k).join('••••') } : res);
+  try {
+    const first = redact(await _probeProvider(r, k));
+    if (first.ok || !first.rejected) return { ...first, endpoint: r.endpoint };
+    // Preset with regional endpoints (MiMo Token Plan): find the one this key belongs to.
+    const eps = (LlmProviders.preset(r.preset)?.endpoints || []).filter(e => e.id !== r.endpoint && (!e.key_prefix || k.startsWith(e.key_prefix)));
+    for (const ep of eps) {
+      const res = redact(await _probeProvider({ ...r, base_url: ep.base_url }, k));
+      if (res.ok) return { ...res, endpoint: ep.id, endpointChanged: true, message: `Key works on ${ep.label}` };
+    }
+    return { ...first, endpoint: r.endpoint };
+  } catch (err) {
+    const msg = err && err.name === 'TimeoutError' ? 'Timed out reaching the provider' : (err && err.cause && err.cause.code) || (err && err.message) || String(err);
+    return { ok: false, message: `Could not reach ${r.base_url}: ${msg}` };
+  }
 }
 
 // ── Conversational AI Agent (engine/agent_chat.py) — concurrent persisted sessions ─
@@ -675,10 +803,9 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
     return { status: 'error', message: `Too many concurrent sessions (max ${AGENT_MAX_SESSIONS}). Stop one before starting another.` };
   }
   const cfg = loadConfig();
-  const prov = opts.provider || cfg.llm?.roles?.planner || cfg.llm?.roles?.primary || cfg.llm?.default_provider || 'mock';
-  if (!_isProviderConfigured(prov, cfg)) {
-    const env = cfg.llm?.providers?.[prov]?.api_key_env || prov;
-    return { status: 'error', message: `Add your ${prov} API key in Settings → AI / LLM (${env}), or set the ${env} environment variable.` };
+  const prov = opts.provider || LlmProviders.defaultFromConfig(cfg);
+  if (!prov || !_isProviderConfigured(prov, cfg)) {
+    return { status: 'error', message: LlmProviders.missingKeyMessage(prov, cfg) };
   }
   try {
     _spawnAgent(sessionId, opts.projectId || null, {
@@ -995,17 +1122,11 @@ ipcMain.handle('set-secret', async (e, { key, value }) => {
   catch (err) { return { status: 'error', message: err.message }; }
 });
 ipcMain.handle('get-secret-status', async () => {
-  const cfg = loadConfig();
-  const s = _readSecrets();
-  const keys = {};
-  for (const k of Object.keys(s)) keys[k] = !!s[k];
-  const provs = cfg?.llm?.providers || {};
-  for (const p of Object.values(provs)) {
-    const env = p && p.api_key_env;
-    if (env && process.env[env]) keys[env] = true;
-  }
-  return { status: 'success', keys, available: safeStorage.isEncryptionAvailable() };
+  return { status: 'success', keys: _keyStatus(loadConfig()), available: safeStorage.isEncryptionAvailable() };
 });
+ipcMain.handle('get-provider-catalog', async () => PROVIDER_CATALOG);
+ipcMain.handle('llm-test-provider', async (e, opts) => _testProvider(opts || {}));
+ipcMain.handle('llm-list-models', async (e, opts) => _listModels(opts || {}));
 
 // Spawn a Python engine script; stream {event:"log"} lines to `progressChannel`,
 // resolve with the final {event:"result"|status:...} object.
@@ -1014,7 +1135,7 @@ function runEngine(event, args, progressChannel, extraEnv) {
     let result = null;
     let proc;
     try {
-      proc = spawn(VENV_PYTHON, args, { cwd: __dirname, env: { ...process.env, ATS_ROOT: __dirname, ...(extraEnv || {}) } });
+      proc = spawn(VENV_PYTHON, args, { cwd: __dirname, env: { ...process.env, ATS_ROOT: __dirname, ..._llmEnv(), ...(extraEnv || {}) } });
     } catch (err) { return resolve({ status: 'error', message: err.message }); }
     proc.stdout.on('data', (chunk) => {
       for (const raw of chunk.toString().split('\n')) {
@@ -1085,10 +1206,11 @@ ipcMain.handle('bench-run', async (event, opts) => {
   if (only) args.push('--only', only);
   benchProcess = spawn(VENV_PYTHON, args, {
     cwd: __dirname,
-    env: { ...process.env, ATS_ROOT: __dirname, PYTHONPATH: __dirname,
+    env: { ...process.env, ATS_ROOT: __dirname, PYTHONPATH: __dirname, ..._llmEnv(),
            PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
+    detached: process.platform !== 'win32', // own process group so bench-stop can kill the tree
   });
   const pid = benchProcess.pid;
   let buf = '';
@@ -1118,7 +1240,12 @@ ipcMain.handle('bench-stop', async () => {
   const pid = benchProcess.pid;
   try {
     // Kill the whole tree: the bench spawns agent processes which spawn Chrome.
-    require('child_process').execSync(`taskkill /F /T /PID ${pid}`, { timeout: 30000 });
+    if (process.platform === 'win32') {
+      require('child_process').execSync(`taskkill /F /T /PID ${pid}`, { timeout: 30000 });
+    } else {
+      // POSIX: kill the child's process group when it leads one, else the child itself.
+      try { process.kill(-pid, 'SIGKILL'); } catch (_) { process.kill(pid, 'SIGKILL'); }
+    }
   } catch (e) { /* may already be gone */ }
   benchProcess = null;
   benchBroadcast({ type: 'exit', code: -1, stopped: true });

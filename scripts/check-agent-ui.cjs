@@ -25,4 +25,31 @@ assert.equal(helpers.isConfigured('local', cfg, {}), true);
 assert.equal(helpers.isConfigured('chat', cfg, {}), false);
 assert.equal(helpers.isConfigured('chat', cfg, {CHAT_KEY: true}), true);
 assert.equal(helpers.keyFieldsFromConfig(cfg).length, 3);
-console.log('PASS: two inline JSX blocks, shared agent UI, provider helper contracts');
+
+// Catalog-driven presets, defaults and migration (mirrors engine/model_profiles.py).
+const catalog = JSON.parse(fs.readFileSync(path.join(root, 'engine/provider_catalog.json'), 'utf8'));
+helpers.setCatalog(catalog);
+assert.ok(!helpers.presetIds().includes('mock'));
+assert.equal(helpers.presetIds().slice(-1)[0], 'custom');
+const mimo = {llm: {providers: {mimo: {preset: 'mimo', endpoint: 'tp-sgp'}}}};
+const r = helpers.resolve('mimo', mimo);
+assert.equal(r.base_url, 'https://token-plan-sgp.xiaomimimo.com/v1');
+assert.equal(r.api_key_env, 'MIMO_API_KEY');
+assert.equal(r.model, 'mimo-v2.6-flash');
+assert.equal(r.thinking, 'on');
+assert.equal(helpers.defaultFromConfig(mimo), 'mimo');
+assert.equal(helpers.defaultFromConfig({llm: {providers: {}}}), '');
+const second = helpers.newProfile('mimo', mimo);
+assert.equal(second.id, 'mimo-2');
+assert.equal(second.profile.api_key_env, 'QAMATE_MIMO_2_KEY');
+const legacy = {llm: {default_provider: 'mock', providers: {
+  mock: {},
+  anthropic: {model: 'claude-sonnet-4-6', api_key_env: 'ATS_ANTHROPIC_KEY', max_tokens: 4096},
+  mimo: {model: 'mimo-v2.5-pro', base_url: 'https://token-plan-sgp.xiaomimimo.com/v1', api_key_env: 'MIMO_API_KEY', token_parameter: 'max_completion_tokens'},
+}}};
+assert.equal(helpers.migrateConfig(legacy), true);
+assert.deepEqual(Object.keys(legacy.llm.providers), ['mimo']);
+assert.deepEqual(JSON.parse(JSON.stringify(legacy.llm.providers.mimo)), {api_key_env: 'MIMO_API_KEY', preset: 'mimo', endpoint: 'tp-sgp'});
+assert.equal(legacy.llm.default_provider, 'mimo');
+assert.equal(helpers.migrateConfig(legacy), false);
+console.log('PASS: two inline JSX blocks, shared agent UI, provider helper contracts, catalog presets + migration');

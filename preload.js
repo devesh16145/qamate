@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('ats', {
   // ── Projects & secrets ──
   setSecret: (opts) => ipcRenderer.invoke('set-secret', opts),
   getSecretStatus: () => ipcRenderer.invoke('get-secret-status'),
+  getProviderCatalog: () => ipcRenderer.invoke('get-provider-catalog'),
+  testLlmProvider: (opts) => ipcRenderer.invoke('llm-test-provider', opts),
+  listLlmModels: (opts) => ipcRenderer.invoke('llm-list-models', opts),
   listProjects: () => ipcRenderer.invoke('list-projects'),
   createProject: (opts) => ipcRenderer.invoke('create-project', opts),
   setActiveProject: (opts) => ipcRenderer.invoke('set-active-project', opts),

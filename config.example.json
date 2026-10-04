@@ -64,26 +64,10 @@
     "flaky_label": true
   },
   "llm": {
-    "default_provider": "mock",
-    "providers": {
-      "mock": {},
-      "anthropic": {
-        "model": "claude-sonnet-4-6",
-        "api_key_env": "ATS_ANTHROPIC_KEY",
-        "max_tokens": 4096
-      },
-      "openai": {
-        "model": "gpt-4o",
-        "api_key_env": "ATS_OPENAI_KEY",
-        "max_tokens": 4096
-      },
-      "ollama": {
-        "model": "llama3.1",
-        "base_url": "http://localhost:11434",
-        "max_tokens": 4096
-      }
-    },
-    "_comment": "API keys are NEVER stored here — only env-var names. Set keys in QAmate Settings or your shell environment."
+    "schema": 2,
+    "default_provider": "",
+    "providers": {},
+    "_comment": "Add providers in QAmate Settings -> AI / LLM. A provider names a preset from engine/provider_catalog.json (e.g. {\"preset\": \"mimo\", \"model\": \"mimo-v2.6-flash\"}). API keys are NEVER stored here: they are saved encrypted in the OS keychain, or read from the env var named by api_key_env."
   },
   "jira": {
     "url": "",

@@ -52,6 +52,19 @@ npm install
 
 On first launch, QAmate copies `config.example.json` → `config.json` if missing.
 
+#### macOS
+
+```bash
+brew install node python@3.12
+git clone https://github.com/devesh16145/qamate.git && cd qamate
+npm install
+./run_qamate.sh            # first launch creates venv/ and installs the engine automatically
+./run_engine_tests.sh      # offline engine tests
+npm run dist:mac:dir       # unsigned .app in dist/  (npm run dist:mac for a .dmg)
+```
+
+Use `venv/bin/python` wherever the Windows docs say `venv\Scripts\python`.
+
 ### Run the app
 
 ```bat
@@ -72,9 +85,9 @@ venv\Scripts\pytest tests\flows\demo\ -v
 
 ### AI agent (optional)
 
-1. Open **Settings → AI / LLM**
-2. Default provider is **`mock`** (offline, no API key)
-3. For Claude or OpenAI: paste your key and click **Save**, or set `ATS_ANTHROPIC_KEY` / `ATS_OPENAI_KEY` in your environment
+1. Open **Settings → AI / LLM** and click **Add provider**: Xiaomi MiMo, Anthropic Claude, OpenAI, Google Gemini, OpenRouter, DeepSeek, Ollama (local) or any custom OpenAI-compatible endpoint
+2. Paste your API key, pick a model, and click **Save key & test**
+3. Click **Save changes**. Keys go to your OS keychain, never `config.json`
 
 See [SETUP.md](SETUP.md) for full configuration.
 

@@ -81,10 +81,14 @@ def test_authorization_uses_planners_original_node():
 
 
 def test_generic_decision_has_no_fabricated_probability(monkeypatch):
-    monkeypatch.setenv("ATS_LLM_MOCK_RESPONSE", '{"choice":"a", "confidence":0.99}')
+    class Stub:
+        last_usage = None
+        def complete(self, system, user, max_tokens=None, temperature=0.2):
+            return '{"choice":"a", "confidence":0.99}'
+    monkeypatch.setattr(decision_module, "make_provider", lambda config, name: Stub())
     events = []
-    config = {"llm": {"providers": {"mock": {"protocol": "mock"}}}}
-    result = ChoiceDecider(config, "mock", usage_sink=events.append).choose({}, {"a": "Fill", "stop": "Stop"})
+    config = {"llm": {"providers": {"chat": {"protocol": "openai", "model": "m", "api_key_env": "K"}}}}
+    result = ChoiceDecider(config, "chat", usage_sink=events.append).choose({}, {"a": "Fill", "stop": "Stop"})
     assert result.choice == "a" and result.confidence is None and result.probabilities is None
     assert events[-1]["input"] is None and events[-1]["output"] is None
 

@@ -8,6 +8,26 @@ const ICONS = {
     ['path', { d: 'M12 7v5l3 2' }],
   ],
   Play: [['polygon', { points: '6 4 20 12 6 20 6 4', fill: 'currentColor', stroke: 'none' }]],
+  ArrowUp: [
+    ['line', { x1: 12, y1: 19, x2: 12, y2: 5 }],
+    ['polyline', { points: '5 12 12 5 19 12' }],
+  ],
+  Paperclip: [['path', { d: 'M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5' }]],
+  PenSquare: [
+    ['path', { d: 'M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7' }],
+    ['path', { d: 'M18.4 2.6a2.1 2.1 0 1 1 3 3L12 15l-4 1 1-4 9.4-9.4z' }],
+  ],
+  Sliders: [
+    ['line', { x1: 4, y1: 21, x2: 4, y2: 14 }], ['line', { x1: 4, y1: 10, x2: 4, y2: 3 }],
+    ['line', { x1: 12, y1: 21, x2: 12, y2: 12 }], ['line', { x1: 12, y1: 8, x2: 12, y2: 3 }],
+    ['line', { x1: 20, y1: 21, x2: 20, y2: 16 }], ['line', { x1: 20, y1: 12, x2: 20, y2: 3 }],
+    ['line', { x1: 1, y1: 14, x2: 7, y2: 14 }], ['line', { x1: 9, y1: 8, x2: 15, y2: 8 }], ['line', { x1: 17, y1: 16, x2: 23, y2: 16 }],
+  ],
+  Globe: [
+    ['circle', { cx: 12, cy: 12, r: 10 }],
+    ['line', { x1: 2, y1: 12, x2: 22, y2: 12 }],
+    ['path', { d: 'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' }],
+  ],
   Stop: [['rect', { x: 5, y: 5, width: 14, height: 14, rx: 2 }]],
   Record: [['circle', { cx: 12, cy: 12, r: 6, fill: 'currentColor', stroke: 'none' }]],
   Pause: [

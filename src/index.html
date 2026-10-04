@@ -1619,7 +1619,7 @@ function App() {
         setTheme={setTheme} theme={theme}
         toast={toast}
       />}
-      {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} headless={headless} setHeadless={setHeadless} toast={toast} />}
+      {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} toast={toast} />}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       <Modals isOpen={modal.isOpen} type={modal.type} tcId={modal.tcId} flowId={modal.flowId} description={modal.description} reviewData={modal.reviewData} jiraType={modal.jiraType} onClose={() => setModal({ isOpen: false, type: null })} toast={toast} />
 
@@ -2890,7 +2890,7 @@ function BenchPanel({ toast }) {
     (async () => {
       try {
         const cfg = await window.ats.getConfig();
-        const provs = Object.keys((cfg && cfg.llm && cfg.llm.providers) || {}).filter(p => p !== 'mock');
+        const provs = Object.keys((cfg && cfg.llm && cfg.llm.providers) || {});
         setProviders(provs);
         if (provs.length) setProvider(provs[0]);
         const st = await window.ats.benchStatus();
@@ -4649,136 +4649,368 @@ function CommandPalette({ onClose, modules, openTab, runSelected, setSettingsOpe
   );
 }
 
+/* Searchable model picker: catalog suggestions + the provider's live model list.
+   Free text stays allowed so any model ID the provider accepts can be used. */
+function ModelPicker({ value, placeholder, suggested, state, onChange, onRefresh, filterNote }) {
+  const [openList, setOpenList] = useState(false);
+  const [filter, setFilter] = useState(null);   // null = show everything (input just focused)
+  const [hi, setHi] = useState(0);
+  const picked = useRef(false);   // a list pick wins over the blur-commits-typed-text path
+  const st = state || {};
+  const live = st.list || [];
+  const liveIds = new Set(live.map(m => m.id));
+  const sugg = (suggested || []).filter(m => !liveIds.has(m.id)).map(m => ({ ...m, suggested: true }));
+  const q = (filter || '').trim().toLowerCase();
+  const match = m => !q || m.id.toLowerCase().includes(q) || (m.label || '').toLowerCase().includes(q);
+  const items = [...sugg.filter(match), ...live.filter(match)];
+  const shown = items.slice(0, 200);
+  const pick = (id) => { picked.current = true; onChange(id); setOpenList(false); setFilter(null); };
+  const fmtCtx = n => !n ? '' : n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M ctx` : `${Math.round(n / 1000)}K ctx`;
+  return (
+    <div className="model-picker">
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input value={filter != null ? filter : (value || '')} placeholder={placeholder || 'model id'} style={{ flex: 1 }}
+          onFocus={() => { picked.current = false; setOpenList(true); setFilter(null); setHi(0); }}
+          onBlur={() => setTimeout(() => {
+            setOpenList(false);
+            if (!picked.current && filter != null && filter.trim() && filter.trim() !== value) onChange(filter.trim());
+            setFilter(null);
+          }, 150)}
+          onChange={e => { setFilter(e.target.value); setOpenList(true); setHi(0); }}
+          onKeyDown={e => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => Math.min(h + 1, shown.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(h - 1, 0)); }
+            else if (e.key === 'Enter') { e.preventDefault(); if (shown[hi]) pick(shown[hi].id); else if (filter && filter.trim()) pick(filter.trim()); e.currentTarget.blur(); }
+            else if (e.key === 'Escape') { setOpenList(false); setFilter(null); e.currentTarget.blur(); }
+          }} />
+        {onRefresh && <button className="editor-action" style={{ height: 26 }} title="Reload the provider's model list" disabled={st.loading} onMouseDown={e => e.preventDefault()} onClick={onRefresh}><I.RefreshCw size={11} /></button>}
+      </div>
+      <div className="pref-desc" style={{ marginTop: 3 }}>
+        {st.needsKey ? "Save your API key to load the provider's full model list."
+          : st.loading ? 'Loading models from provider…'
+          : st.error ? <span style={{ color: 'var(--fail)' }}>{st.error}</span>
+          : st.listed === false ? "This provider doesn't publish a model list — type the model ID."
+          : live.length ? `${live.length} models available${filterNote ? ` (${filterNote})` : ''} · type to search`
+          : ''}
+      </div>
+      {openList && (shown.length > 0 || (filter && filter.trim())) && (
+        <div className="model-picker-list" onMouseDown={e => e.preventDefault()}>
+          {shown.map((m, i) => (
+            <div key={(m.suggested ? 's:' : 'l:') + m.id} className={'model-picker-item' + (i === hi ? ' hi' : '') + (m.id === value ? ' sel' : '')}
+              onMouseEnter={() => setHi(i)} onClick={() => pick(m.id)}>
+              <div className="mp-id">{m.id}</div>
+              <div className="mp-meta">
+                {m.label && m.label !== m.id && <span>{m.label}</span>}
+                {fmtCtx(m.context) && <span>{fmtCtx(m.context)}</span>}
+                {m.vision && <span>vision</span>}
+                {m.suggested && <span className="mp-tag">suggested</span>}
+              </div>
+            </div>
+          ))}
+          {items.length > shown.length && <div className="model-picker-more">{items.length - shown.length} more — keep typing to narrow down</div>}
+          {!shown.length && <div className="model-picker-more">No match — press Enter to use “{filter.trim()}”</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+   AI / LLM providers (BYOK) — presets from engine/provider_catalog.json
+   ────────────────────────────────────────────────────────────── */
+function LlmSettings({ config, setConfig, toast }) {
+  const LP = window.LlmProviders;
+  const [ready, setReady] = useState(false);
+  const [secretStatus, setSecretStatus] = useState({});
+  const [keyDraft, setKeyDraft] = useState({});     // { profileId: 'sk-…' } — never persisted in React beyond this sheet
+  const [testState, setTestState] = useState({});   // { profileId: {busy, ok, message} }
+  const [models, setModels] = useState({});         // { profileId: {loading, error, list, listed, sig} }
+  const [open, setOpen] = useState(null);
+  const [addPreset, setAddPreset] = useState('mimo');
+
+  const refreshSecrets = () => window.ats.getSecretStatus().then(r => setSecretStatus((r && r.keys) || {})).catch(() => {});
+  useEffect(() => {
+    window.ats.getProviderCatalog().then(c => { LP.setCatalog(c); setReady(true); }).catch(() => setReady(true));
+    refreshSecrets();
+  }, []);
+
+  const llm = config.llm || {};
+  const setLlm = (patch) => setConfig(prev => ({ ...prev, llm: { ...(prev.llm || {}), schema: 2, ...patch } }));
+  const setProfile = (id, patch) => setConfig(prev => {
+    const l = prev.llm || {}; const providers = { ...(l.providers || {}) };
+    const next = { ...(providers[id] || {}), ...patch };
+    for (const k of Object.keys(patch)) if (patch[k] === '' || patch[k] == null) delete next[k];
+    providers[id] = next;
+    return { ...prev, llm: { ...l, schema: 2, providers } };
+  });
+  // Fetch the provider's own model list when its card is opened (cached in main for a few minutes).
+  const loadModels = (id, refresh) => {
+    const r = LP.resolve(id, config);
+    const p = LP.listFromConfig(config).find(x => x.id === id);
+    if (!r || !p) return;
+    const sig = `${r.base_url}|${!p.needsKey || !!secretStatus[p.api_key_env]}`;
+    if (!refresh && models[id] && models[id].sig === sig && !models[id].error) return;
+    if (p.needsKey && !secretStatus[p.api_key_env]) { setModels(m => ({ ...m, [id]: { sig, error: '', list: [], needsKey: true } })); return; }
+    setModels(m => ({ ...m, [id]: { ...(m[id] || {}), sig, loading: true, error: '' } }));
+    window.ats.listLlmModels({ id, profile: (config.llm?.providers || {})[id], refresh: !!refresh }).then(res => {
+      setModels(m => ({ ...m, [id]: { sig, loading: false, listed: res.listed, list: res.ok ? (res.models || []) : [], error: res.ok ? '' : (res.message || 'Could not load models') } }));
+    }).catch(err => setModels(m => ({ ...m, [id]: { sig, loading: false, list: [], error: String(err && err.message || err) } })));
+  };
+  useEffect(() => { if (ready && open) loadModels(open, false); }, [ready, open, secretStatus, (config.llm?.providers || {})[open]?.endpoint, (config.llm?.providers || {})[open]?.base_url]);
+
+  if (!ready) return <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading providers…</div>;
+
+  const list = LP.listFromConfig(config);
+  const defaultId = LP.defaultFromConfig(config);
+
+  const addProvider = () => {
+    const { id, profile } = LP.newProfile(addPreset, config);
+    setConfig(prev => {
+      const l = prev.llm || {};
+      const providers = { ...(l.providers || {}), [id]: profile };
+      // Decision models (Jev) bind the decision role; generative ones become the default planner.
+      if ((LP.preset(addPreset) || {}).role === 'decision') {
+        const roles = { ...(l.roles || {}) };
+        if (!roles.decision || !providers[roles.decision]) roles.decision = id;
+        return { ...prev, llm: { ...l, schema: 2, providers, roles } };
+      }
+      const keep = l.default_provider && providers[l.default_provider];
+      return { ...prev, llm: { ...l, schema: 2, providers, default_provider: keep ? l.default_provider : id } };
+    });
+    setOpen(id);
+  };
+  const removeProvider = (id) => setConfig(prev => {
+    const l = prev.llm || {}; const providers = { ...(l.providers || {}) }; delete providers[id];
+    const roles = { ...(l.roles || {}) }; for (const r of Object.keys(roles)) if (roles[r] === id) delete roles[r];
+    const next = { ...prev, llm: { ...l, schema: 2, providers, roles } };
+    if (l.default_provider === id) next.llm.default_provider = LP.defaultFromConfig(next);
+    return next;
+  });
+
+  const saveAndTest = async (p) => {
+    const draftKey = (keyDraft[p.id] || '').trim();
+    setTestState(t => ({ ...t, [p.id]: { busy: true } }));
+    const res = await window.ats.testLlmProvider({ id: p.id, profile: (config.llm?.providers || {})[p.id], key: draftKey || undefined });
+    if (res.ok && res.endpointChanged) setProfile(p.id, { endpoint: res.endpoint });
+    if (res.ok && res.models) setModels(m => ({ ...m, [p.id]: { ...(m[p.id] || {}), loading: false, error: '', listed: res.listed, list: res.models } }));
+    if (res.ok && draftKey && p.api_key_env) {
+      const saved = await window.ats.setSecret({ key: p.api_key_env, value: draftKey });
+      if (saved && saved.status === 'error') res.message = `Connected, but the key could not be saved: ${saved.message}`;
+      setKeyDraft(d => ({ ...d, [p.id]: '' }));
+      refreshSecrets();
+    }
+    setTestState(t => ({ ...t, [p.id]: { ok: res.ok, message: res.message || (res.ok ? `Connected${res.models && res.models.length ? ` · ${res.models.length} models available` : ''}` : 'Failed') } }));
+  };
+  const clearKey = async (p) => {
+    await window.ats.setSecret({ key: p.api_key_env, value: '' });
+    refreshSecrets();
+    toast && toast('Key removed from keychain');
+  };
+
+  const badge = (text, color, bg) => <span style={{ fontSize: 10, color, background: bg, padding: '1px 6px', borderRadius: 8, marginLeft: 6, fontWeight: 600 }}>{text}</span>;
+
+  return (
+    <div>
+      <div className="pref-group-title">Providers</div>
+      {list.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-2)', padding: '10px 12px', border: '1px dashed var(--border-2)', borderRadius: 4, marginBottom: 10 }}>
+          No AI provider yet. Add one below to use the AI agent — e.g. <b>Xiaomi MiMo</b>, Claude, OpenAI or Gemini with your own API key.
+        </div>
+      )}
+      {list.map(p => {
+        const own = (llm.providers || {})[p.id] || {};
+        const r = LP.resolve(p.id, config);
+        const pre = LP.preset(p.preset) || {};
+        const hasKey = !p.needsKey || !!secretStatus[p.api_key_env];
+        const ts = testState[p.id] || {};
+        const isOpen = open === p.id;
+        const endpoints = pre.endpoints || [];
+        const isCustom = !p.preset || p.preset === 'custom';
+        return (
+          <div key={p.id} style={{ border: '1px solid ' + (isOpen ? 'var(--accent-bd)' : 'var(--border)'), borderRadius: 4, marginBottom: 8, background: 'var(--editor)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', cursor: 'pointer' }} onClick={() => setOpen(isOpen ? null : p.id)}>
+              {isOpen ? <I.ChevronDown size={12} /> : <I.ChevronRight size={12} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                  {p.label}
+                  {p.id === defaultId && badge('DEFAULT', 'var(--accent)', 'var(--accent-bg)')}
+                  {!p.canPlan && badge(llm.roles?.decision === p.id ? 'DECISION MODEL' : 'DECISION ONLY', 'var(--text-2)', 'var(--bg)')}
+                  {p.needsKey && !hasKey && badge('KEY NEEDED', 'var(--warn)', 'var(--warn-bg)')}
+                  {ts.ok && badge('CONNECTED', 'var(--pass)', 'var(--pass-bg)')}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.model || 'no model selected'}{p.thinking ? ` · thinking ${p.thinking}` : ''}</div>
+              </div>
+              {p.canPlan && p.id !== defaultId && <button className="editor-action" onClick={e => { e.stopPropagation(); setLlm({ default_provider: p.id }); }}>Set default</button>}
+              <button className="editor-action" title="Remove provider" onClick={e => { e.stopPropagation(); removeProvider(p.id); }}><I.Trash size={11} /></button>
+            </div>
+            {isOpen && (
+              <div style={{ padding: '4px 12px 10px 28px', borderTop: '1px solid var(--border)' }}>
+                {endpoints.length > 1 && (
+                  <div className="field"><label>Plan / region</label>
+                    <select value={p.endpoint || ''} onChange={e => setProfile(p.id, { endpoint: e.target.value })}>
+                      {endpoints.map(ep => <option key={ep.id} value={ep.id}>{ep.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                {(isCustom || p.protocol === 'ollama') && (
+                  <div className="field"><label>Base URL</label><input value={own.base_url || ''} onChange={e => setProfile(p.id, { base_url: e.target.value.trim() })} placeholder={r.base_url || 'https://your-endpoint/v1'} /></div>
+                )}
+                {p.needsKey && (
+                  <div className="field"><label>API key</label>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input style={{ flex: 1 }} type="password" autoComplete="off" value={keyDraft[p.id] || ''} onChange={e => setKeyDraft(d => ({ ...d, [p.id]: e.target.value }))} placeholder={hasKey ? '•••••••• stored in keychain — paste to replace' : 'Paste your API key'} />
+                      {hasKey && <button className="editor-action" style={{ height: 26 }} onClick={() => clearKey(p)}>Clear</button>}
+                    </div>
+                  </div>
+                )}
+                <div className="field"><label>Model</label>
+                  <ModelPicker value={own.model || ''} placeholder={pre.default_model || 'model id'} suggested={pre.models}
+                    state={models[p.id]}
+                    filterNote={p.preset === 'openrouter' ? 'with tool calling' : ''}
+                    onChange={v => setProfile(p.id, { model: v })} onRefresh={hasKey ? () => loadModels(p.id, true) : null} />
+                </div>
+                {pre.thinking && (
+                  <div className="field"><label>Thinking</label>
+                    <select value={p.thinking || 'on'} onChange={e => setProfile(p.id, { thinking: e.target.value })}>
+                      <option value="on">On (recommended)</option>
+                      <option value="off">Off — faster, cheaper</option>
+                    </select>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '6px 0 4px' }}>
+                  <button className="editor-action" style={{ height: 26, whiteSpace: 'nowrap', flexShrink: 0 }} disabled={ts.busy} onClick={() => saveAndTest(p)}>
+                    <I.RefreshCw size={11} /> {ts.busy ? 'Testing…' : (keyDraft[p.id] ? 'Save key & test' : 'Test connection')}
+                  </button>
+                  {pre.key_url && <a href="#" style={{ fontSize: 11, whiteSpace: 'nowrap', flexShrink: 0 }} onClick={e => { e.preventDefault(); window.ats.openExternal(pre.key_url); }}>{p.protocol === 'ollama' ? 'Install Ollama' : 'Get an API key'} <I.ExternalLink size={10} /></a>}
+                  {ts.message && <span style={{ fontSize: 11, color: ts.ok ? 'var(--pass)' : 'var(--fail)' }}>● {ts.message}</span>}
+                </div>
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer' }}>Advanced</summary>
+                  <div style={{ marginTop: 6 }}>
+                    <div className="field"><label>Display name</label><input value={own.label || ''} onChange={e => setProfile(p.id, { label: e.target.value })} placeholder={pre.label || p.id} /></div>
+                    {isCustom && (
+                      <div className="field"><label>API protocol</label>
+                        <select value={own.protocol || 'openai'} onChange={e => setProfile(p.id, { protocol: e.target.value })}>
+                          <option value="openai">OpenAI-compatible Chat Completions</option>
+                          <option value="openai_responses">OpenAI Responses API</option>
+                          <option value="anthropic">Anthropic Messages</option>
+                          <option value="ollama">Ollama</option>
+                          <option value="typesafe">TypeSafe Jev (decision only)</option>
+                          <option value="openrouter_decisions">OpenRouter Jev (decision only)</option>
+                        </select>
+                      </div>
+                    )}
+                    {!isCustom && p.protocol !== 'ollama' && (
+                      <div className="field"><label>Base URL override</label><input value={own.base_url || ''} onChange={e => setProfile(p.id, { base_url: e.target.value.trim() })} placeholder={r.base_url} /></div>
+                    )}
+                    <div className="field"><label>Output token cap</label><input type="number" min="0" value={own.max_tokens ?? ''} onChange={e => setProfile(p.id, { max_tokens: e.target.value === '' ? '' : Math.max(0, Number(e.target.value) || 0) })} placeholder={String(r.max_tokens || 'provider default')} /></div>
+                    {isCustom && p.protocol === 'openai' && (
+                      <div className="field"><label>Token parameter</label>
+                        <select value={own.token_parameter || 'max_tokens'} onChange={e => setProfile(p.id, { token_parameter: e.target.value })}>
+                          <option value="max_tokens">max_tokens</option><option value="max_completion_tokens">max_completion_tokens</option>
+                        </select>
+                      </div>
+                    )}
+                    {isCustom && <label style={{ fontSize: 12, display: 'block', marginBottom: 6 }}><input type="checkbox" checked={own.supports_temperature ?? true} onChange={e => setProfile(p.id, { supports_temperature: e.target.checked })} /> Model accepts a temperature parameter</label>}
+                    {p.needsKey && <div className="field"><label>Key env variable</label><input value={own.api_key_env || ''} onChange={e => setProfile(p.id, { api_key_env: e.target.value.trim() })} placeholder={r.api_key_env || 'MY_PROVIDER_KEY'} /></div>}
+                    <p style={{ fontSize: 11, color: 'var(--text-3)', margin: 0 }}>The key is read from the OS keychain, or from this environment variable when running the engine from a terminal / CI.</p>
+                  </div>
+                </details>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 12px' }}>
+        <select value={addPreset} onChange={e => setAddPreset(e.target.value)} style={{ background: 'var(--editor)', border: '1px solid var(--border)', borderRadius: 3, padding: '4px 7px', fontSize: 12 }}>
+          <optgroup label="AI agent (planner) models">
+            {LP.presetIds().filter(id => LP.preset(id).role !== 'decision').map(id => <option key={id} value={id}>{LP.preset(id).label}</option>)}
+          </optgroup>
+          <optgroup label="Decision models (fast browser actions)">
+            {LP.presetIds().filter(id => LP.preset(id).role === 'decision').map(id => <option key={id} value={id}>{LP.preset(id).label}</option>)}
+          </optgroup>
+        </select>
+        <button className="editor-action" style={{ height: 26 }} onClick={addProvider}><I.Plus size={11} /> Add provider</button>
+      </div>
+      {list.length > 0 && (
+        <>
+          <div className="pref-group-title">Which model does what</div>
+          <div className="field"><label>AI agent</label>
+            <select value={defaultId} onChange={e => setLlm({ default_provider: e.target.value })}>
+              {list.filter(p => p.canPlan).map(p => <option key={p.id} value={p.id}>{p.label} · {p.model}</option>)}
+            </select>
+          </div>
+          {[['decision', 'Decision model', 'Picks browser actions in the fast experimental modes (AI agent page).'],
+            ['extraction', 'Extraction', 'Reads requirement documents into test ideas.'],
+            ['vision', 'Vision', 'Answers questions about screenshots. Needs a vision-capable model.']].map(([role, title, hint]) => (
+            <div className="field" key={role} title={hint}><label>{title}</label>
+              <select value={llm.roles?.[role] || ''} onChange={e => setLlm({ roles: { ...(llm.roles || {}), [role]: e.target.value } })}>
+                <option value="">{role === 'extraction' ? 'Same as AI agent' : 'Not configured'}</option>
+                {list.filter(p => role === 'decision' || p.canPlan).map(p => <option key={p.id} value={p.id}>{p.label} · {p.model}</option>)}
+              </select>
+            </div>
+          ))}
+        </>
+      )}
+      <p className="pref-desc" style={{ marginTop: 12 }}>Keys are encrypted in your OS keychain and never written to config.json or the repo.</p>
+    </div>
+  );
+}
+
 /* ──────────────────────────────────────────────────────────────
    Settings Sheet
    ────────────────────────────────────────────────────────────── */
-function SettingsSheet({ onClose, headless, setHeadless, toast }) {
+/* One switch row in Preferences: title, one-line explanation, optional nested options. */
+function PrefToggle({ title, desc, checked, onChange, disabled, disabledHint, badge, children }) {
+  return (
+    <div className={'pref-toggle' + (disabled ? ' disabled' : '')}>
+      <label className="pref-toggle-row">
+        <input type="checkbox" checked={!!checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
+        <div>
+          <div className="pref-toggle-title">{title}{badge && <span className="pref-badge">{badge}</span>}</div>
+          {desc && <div className="pref-desc">{desc}</div>}
+          {disabled && disabledHint && <div className="pref-desc pref-hint">{disabledHint}</div>}
+        </div>
+      </label>
+      {children && checked && !disabled && <div className="pref-nested">{children}</div>}
+    </div>
+  );
+}
+
+const PREF_CATEGORIES = [
+  { id: 'models', label: 'AI models', icon: 'Sparkle', blurb: 'Bring your own API keys for the AI agent and the decision model.',
+    keywords: 'provider api key byok model mimo xiaomi claude anthropic openai gpt gemini google openrouter deepseek ollama local jev typesafe decision vision extraction thinking token' },
+  { id: 'agent', label: 'AI agent', icon: 'Zap', blurb: 'How the agent drives the browser. Experimental modes trade generality for speed.',
+    keywords: 'agent browsing speed fast decision controller jev decision-owned multi-app cross-app experimental contract review compact observations' },
+  { id: 'runs', label: 'Test runs', icon: 'ListChecks', blurb: 'How runs are judged and what diagnostics are kept.',
+    keywords: 'pass fail verdict criteria critical threshold skipped checkpoints flaky retries trace tracing diagnostics self-healing' },
+  { id: 'integrations', label: 'Integrations', icon: 'Layers', blurb: 'Connect external tools.',
+    keywords: 'jira bug ticket atlassian issue integration token' },
+];
+
+function SettingsSheet({ onClose, toast }) {
   const [config, setConfig] = useState({});
   const [loading, setLoading] = useState(true);
   const [jiraStatus, setJiraStatus] = useState('');
   const [jiraStatusColor, setJiraStatusColor] = useState('var(--text-3)');
-  const [secretStatus, setSecretStatus] = useState({});
-  const [keyDraft, setKeyDraft] = useState({});  // { ATS_ANTHROPIC_KEY: '...' }
-  const [profileDraft, setProfileDraft] = useState('');
-
-  useEffect(() => {
-    if (window.ats && window.ats.getSecretStatus) {
-      window.ats.getSecretStatus().then(r => setSecretStatus((r && r.keys) || {})).catch(() => {});
-    }
-  }, []);
-  const saveKey = async (envName) => {
-    const val = keyDraft[envName];
-    if (val == null) return;
-    await window.ats.setSecret({ key: envName, value: val });
-    const r = await window.ats.getSecretStatus();
-    setSecretStatus((r && r.keys) || {});
-    setKeyDraft(d => ({ ...d, [envName]: undefined }));
-    toast && toast(val ? 'Key saved to OS keychain' : 'Key cleared');
-  };
-  const updateLlm = (k, v) => setConfig(prev => ({ ...prev, llm: { ...(prev.llm || {}), [k]: v } }));
-  const updateLlmModel = (provider, model) => setConfig(prev => {
-    const llm = prev.llm || {}; const providers = { ...(llm.providers || {}) };
-    providers[provider] = { ...(providers[provider] || {}), model };
-    return { ...prev, llm: { ...llm, providers } };
-  });
-  const updateLlmField = (provider, field, value) => setConfig(prev => {
-    const llm = prev.llm || {}; const providers = { ...(llm.providers || {}) };
-    providers[provider] = { ...(providers[provider] || {}), [field]: value };
-    return { ...prev, llm: { ...llm, providers } };
-  });
+  const [category, setCategory] = useState('models');
+  const [query, setQuery] = useState('');
   const updatePassCriteria = (k, v) => setConfig(prev => ({ ...prev, pass_criteria: { ...(prev.pass_criteria || {}), [k]: v } }));
+  const updateExec = (k, v) => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), [k]: v } }));
+  const updateJira = (k, v) => setConfig(prev => ({ ...prev, jira: { ...(prev.jira || {}), [k]: v } }));
 
   useEffect(() => {
     if (window.ats && window.ats.getConfig) {
-      window.ats.getConfig().then(c => {
-        setConfig(c || {});
-        setLoading(false);
-      }).catch(() => setLoading(false));
+      window.ats.getConfig().then(c => { setConfig(c || {}); setLoading(false); }).catch(() => setLoading(false));
     } else {
       setLoading(false);
     }
   }, []);
 
   const handleSave = async () => {
-    if (window.ats && window.ats.saveConfig) {
-      await window.ats.saveConfig(config);
-      // Reload USERS and ADMINS in window context
-      window.USERS = (config.platforms?.seller?.users || []).map((u, i) => ({
-        id: `seller-${i}`,
-        name: u.label || `Seller ${i + 1}`,
-        email: u.email || '',
-        password: u.password || '',
-      }));
-      window.ADMINS = (config.platforms?.admin?.users || []).map((u, i) => ({
-        id: `admin-${i}`,
-        name: u.label || `Admin ${i + 1}`,
-        email: u.email || '',
-        password: u.password || '',
-      }));
-    }
-    if (toast) {
-      toast('Settings saved successfully.');
-    }
+    if (window.ats && window.ats.saveConfig) await window.ats.saveConfig(config);
+    toast && toast('Settings saved.');
     onClose();
-  };
-
-  const updateJira = (k, v) => {
-    setConfig(prev => ({
-      ...prev,
-      jira: { ...(prev.jira || {}), [k]: v }
-    }));
-  };
-
-  const updateSellerUser = (index, k, v) => {
-    setConfig(prev => {
-      const users = [...(prev.platforms?.seller?.users || prev.users || [])];
-      if (users[index]) {
-        users[index] = { ...users[index], [k]: v };
-      }
-      return {
-        ...prev,
-        platforms: {
-          ...(prev.platforms || {}),
-          seller: {
-            ...(prev.platforms?.seller || {}),
-            users
-          }
-        }
-      };
-    });
-  };
-
-  const updateAdminUser = (index, k, v) => {
-    setConfig(prev => {
-      const users = [...(prev.platforms?.admin?.users || prev.admin_users || [])];
-      if (users[index]) {
-        users[index] = { ...users[index], [k]: v };
-      }
-      return {
-        ...prev,
-        platforms: {
-          ...(prev.platforms || {}),
-          admin: {
-            ...(prev.platforms?.admin || {}),
-            users
-          }
-        }
-      };
-    });
-  };
-
-  const updateSchedule = (v) => {
-    setConfig(prev => ({
-      ...prev,
-      schedule: v
-    }));
-  };
-
-  const updateTracing = (v) => {
-    setConfig(prev => ({
-      ...prev,
-      tracing: { ...(prev.tracing || {}), mode: v }
-    }));
   };
 
   const testJira = async () => {
@@ -4787,213 +5019,142 @@ function SettingsSheet({ onClose, headless, setHeadless, toast }) {
     try {
       await window.ats.saveConfig(config);
       const res = await window.ats.testJiraConnection();
-      if (res.success) {
-        setJiraStatus(`● Connected as ${res.user}`);
-        setJiraStatusColor('var(--pass)');
-      } else {
-        setJiraStatus(`● Failed: ${res.error}`);
-        setJiraStatusColor('var(--fail)');
-      }
+      if (res.success) { setJiraStatus(`● Connected as ${res.user}`); setJiraStatusColor('var(--pass)'); }
+      else { setJiraStatus(`● Failed: ${res.error}`); setJiraStatusColor('var(--fail)'); }
     } catch (err) {
       setJiraStatus(`● Failed: ${err.message || String(err)}`);
       setJiraStatusColor('var(--fail)');
     }
   };
 
-  if (loading) {
-    return (
+  const q = query.trim().toLowerCase();
+  const visible = PREF_CATEGORIES.filter(c => !q || (c.label + ' ' + c.blurb + ' ' + c.keywords).toLowerCase().split(/\s+/).some(w => w.includes(q)) || (c.label + ' ' + c.blurb).toLowerCase().includes(q));
+  const active = visible.find(c => c.id === category) || visible[0] || null;
+
+  const exec = config.agent_execution || {};
+  const hasDecisionModel = !!config.llm?.roles?.decision && !!config.llm?.providers?.[config.llm.roles.decision];
+
+  const renderCategory = (id) => {
+    if (id === 'models') return <LlmSettings config={config} setConfig={setConfig} toast={toast} />;
+    if (id === 'agent') return (
       <>
-        <div className="sheet-overlay" onClick={onClose}></div>
-        <div className="sheet">
-          <div className="sheet-head">
-            <h2>Preferences</h2>
-            <button className="close-btn" onClick={onClose}><I.X size={14} /></button>
-          </div>
-          <div className="sheet-body" style={{ display: 'grid', placeItems: 'center', height: '100%' }}>
-            <div style={{ color: 'var(--text-3)' }}>Loading preferences...</div>
-          </div>
-        </div>
+        <div className="pref-group-title">Fast browsing with a decision model</div>
+        <PrefToggle badge="EXPERIMENTAL" title="Let the decision model choose browser actions"
+          desc="A small, fast decision model (e.g. Jev) picks clicks and fills instead of the main agent. It stops when unsure; tests still need assertions and replay."
+          checked={exec.hybrid_enabled} onChange={v => updateExec('hybrid_enabled', v)}
+          disabled={!hasDecisionModel && !exec.hybrid_enabled}
+          disabledHint={<>Add a decision model first in <a href="#" onClick={e => { e.preventDefault(); setCategory('models'); setQuery(''); }}>AI models</a> (e.g. Jev via OpenRouter).</>}>
+          <PrefToggle title="Decision-owned browsing" desc="The agent only states the goal and expected outcomes; the decision model drives every step. Read-only, single app."
+            checked={exec.decision_loop_enabled} onChange={v => updateExec('decision_loop_enabled', v)}>
+            <PrefToggle title="Compact page observations" desc="Lossless column encoding of what the decision model sees. Smaller input; not a guaranteed cost or speed win."
+              checked={exec.decision_context_format === 'columns'} onChange={v => updateExec('decision_context_format', v ? 'columns' : 'objects')} />
+            <PrefToggle title="Review outcomes before browsing" desc="The decision model checks the compiled goal against your request first. Adds API calls; stops when uncertain."
+              checked={exec.decision_contract_review} onChange={v => updateExec('decision_contract_review', v)} />
+          </PrefToggle>
+        </PrefToggle>
+        <div className="pref-group-title">Multiple applications</div>
+        <PrefToggle badge="EXPERIMENTAL" title="Multi-app recording tools"
+          desc="Record workflows that span several apps or user roles, each in its own session. Set app and actor IDs in Project Settings first."
+          checked={exec.multi_app_enabled} onChange={v => updateExec('multi_app_enabled', v)}>
+          <PrefToggle title="Decision-owned cross-app workflows" desc="The decision model controls actions, record capture and app switches. Takes priority over single-app browsing."
+            checked={exec.multi_app_decision_loop_enabled} onChange={v => updateExec('multi_app_decision_loop_enabled', v)}
+            disabled={!exec.hybrid_enabled} disabledHint="Requires “Let the decision model choose browser actions” above." />
+        </PrefToggle>
+        <div className="pref-note"><I.RefreshCw size={11} /> Changes apply to new agent sessions. Restart running sessions after saving.</div>
       </>
     );
-  }
-
-  const sellerUsers = config.platforms?.seller?.users || config.users || [];
-  const adminUsers = config.platforms?.admin?.users || config.admin_users || [];
+    if (id === 'runs') return (
+      <>
+        <div className="pref-group-title">Pass / fail</div>
+        <div className="field">
+          <label>Verdict rule</label>
+          <select value={config.pass_criteria?.mode || 'critical_only'} onChange={e => updatePassCriteria('mode', e.target.value)}>
+            <option value="critical_only">Critical checks must pass (others warn)</option>
+            <option value="all">Any failure fails the test</option>
+            <option value="threshold">Pass above a threshold %</option>
+          </select>
+        </div>
+        {config.pass_criteria?.mode === 'threshold' && (
+          <div className="field"><label>Pass threshold %</label><input type="number" min="0" max="100" value={config.pass_criteria?.threshold_pct ?? 90} onChange={e => updatePassCriteria('threshold_pct', Number(e.target.value))} /></div>
+        )}
+        <div className="field">
+          <label>Skipped checkpoints</label>
+          <select value={config.pass_criteria?.treat_skipped_as || 'ignore'} onChange={e => updatePassCriteria('treat_skipped_as', e.target.value)}>
+            <option value="ignore">Ignore</option><option value="fail">Count as fail</option><option value="pass">Count as pass</option>
+          </select>
+        </div>
+        <div className="field"><label>Flaky retries</label><input type="number" min="0" max="3" value={config.pass_criteria?.retries ?? 1} onChange={e => updatePassCriteria('retries', Number(e.target.value))} /></div>
+        <div className="pref-group-title">Diagnostics</div>
+        <div className="field">
+          <label>Trace recording</label>
+          <select value={config.tracing?.mode || 'retain-on-failure'} onChange={e => setConfig(prev => ({ ...prev, tracing: { ...(prev.tracing || {}), mode: e.target.value } }))}>
+            <option value="retain-on-failure">On failure only (recommended)</option>
+            <option value="on">Every test</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div className="pref-desc">Traces capture DOM snapshots, network and console for every step; open them with the <b>Trace</b> button on a run. Self-healing locators are always on, and any auto-heals are listed per run.</div>
+      </>
+    );
+    if (id === 'integrations') return (
+      <>
+        <div className="pref-group-title">Jira</div>
+        <div className="field"><label>Jira URL</label><input value={config.jira?.url || ''} onChange={e => updateJira('url', e.target.value)} placeholder="https://your-org.atlassian.net" /></div>
+        <div className="field"><label>Email</label><input value={config.jira?.email || ''} onChange={e => updateJira('email', e.target.value)} placeholder="you@example.com" /></div>
+        <div className="field"><label>API token</label><input type="password" value={config.jira?.apiToken || ''} onChange={e => updateJira('apiToken', e.target.value)} placeholder="Paste API token" /></div>
+        <div className="field"><label>Project key</label><input value={config.jira?.projectKey || ''} onChange={e => updateJira('projectKey', e.target.value)} placeholder="PROJ" /></div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+          <button className="editor-action" style={{ height: 26 }} onClick={testJira}><I.RefreshCw size={11} /> Test connection</button>
+          {jiraStatus && <span style={{ fontSize: 11, color: jiraStatusColor }}>{jiraStatus}</span>}
+        </div>
+        <div className="pref-desc" style={{ marginTop: 10 }}>Used to file bugs from failed runs. The token is stored in config.json; prefer the <code>JIRA_API_KEY</code> environment variable on shared machines.</div>
+      </>
+    );
+    return null;
+  };
 
   return (
     <>
       <div className="sheet-overlay" onClick={onClose}></div>
-      <div className="sheet">
-        <div className="sheet-head">
+      <div className="prefs" role="dialog" aria-label="Preferences">
+        <div className="prefs-head">
           <h2>Preferences</h2>
-          <button className="close-btn" onClick={onClose}><I.X size={14} /></button>
+          <button className="close-btn" onClick={onClose} title="Close"><I.X size={14} /></button>
         </div>
-        <div className="sheet-body">
-          <div className="sheet-section">
-            <h3>Seller Credentials</h3>
-            {sellerUsers.map((u, i) => (
-              <div className="cred-row" key={i}>
-                <span className="name">{u.label || `Seller ${i + 1}`}</span>
-                <input value={u.email || ''} onChange={e => updateSellerUser(i, 'email', e.target.value)} placeholder="Email" />
-                <input type="password" value={u.password || ''} onChange={e => updateSellerUser(i, 'password', e.target.value)} placeholder="Password" />
+        {loading ? (
+          <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--text-3)' }}>Loading preferences...</div>
+        ) : (
+          <div className="prefs-main">
+            <nav className="prefs-nav">
+              <div className="prefs-search">
+                <I.Search size={12} />
+                <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search settings" />
               </div>
-            ))}
-          </div>
-
-          <div className="sheet-section">
-            <h3>Admin Credentials</h3>
-            {adminUsers.map((u, i) => (
-              <div className="cred-row" key={i}>
-                <span className="name">{u.label || `Admin ${i + 1}`}</span>
-                <input value={u.email || ''} onChange={e => updateAdminUser(i, 'email', e.target.value)} placeholder="Email" />
-                <input type="password" value={u.password || ''} onChange={e => updateAdminUser(i, 'password', e.target.value)} placeholder="Password" />
-              </div>
-            ))}
-          </div>
-
-          <div className="sheet-section">
-            <h3>Jira Integration</h3>
-            <div className="field"><label>Jira URL</label><input value={config.jira?.url || ''} onChange={e => updateJira('url', e.target.value)} placeholder="https://your-org.atlassian.net" /></div>
-            <div className="field"><label>Email</label><input value={config.jira?.email || ''} onChange={e => updateJira('email', e.target.value)} placeholder="you@example.com" /></div>
-            <div className="field"><label>API token</label><input type="password" value={config.jira?.apiToken || ''} onChange={e => updateJira('apiToken', e.target.value)} placeholder="••••••••••••••" /></div>
-            <div className="field"><label>Project key</label><input value={config.jira?.projectKey || ''} onChange={e => updateJira('projectKey', e.target.value)} placeholder="PROJ" /></div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-              <button className="editor-action" style={{ height: 26 }} onClick={testJira}><I.RefreshCw size={11} /> Test connection</button>
-              {jiraStatus && <span style={{ fontSize: 11, color: jiraStatusColor }}>{jiraStatus}</span>}
+              {visible.map(c => {
+                const Icon = I[c.icon] || I.Settings;
+                return (
+                  <button key={c.id} className={'prefs-nav-item' + (active && active.id === c.id ? ' active' : '')} onClick={() => setCategory(c.id)}>
+                    <Icon size={13} /> {c.label}
+                  </button>
+                );
+              })}
+              {!visible.length && <div className="pref-desc" style={{ padding: '6px 10px' }}>No settings match “{query}”.</div>}
+              <div className="prefs-nav-foot">App logins and URLs are set per project in <b>Project Settings</b>.</div>
+            </nav>
+            <div className="prefs-content">
+              {active && (
+                <>
+                  <h3 className="prefs-title">{active.label}</h3>
+                  <p className="prefs-blurb">{active.blurb}</p>
+                  {renderCategory(active.id)}
+                </>
+              )}
             </div>
           </div>
-
-          <div className="sheet-section">
-            <h3>Scheduled runs <span style={{ marginLeft: 6, fontSize: 9.5, color: 'var(--accent)', background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)', fontWeight: 600 }}>NEW</span></h3>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)', marginBottom: 8 }}>Run test suites automatically on a schedule.</p>
-            <div className="field">
-              <label>Schedule</label>
-              <select value={config.schedule || 'off'} onChange={e => updateSchedule(e.target.value)}>
-                <option value="off">Off</option>
-                <option value="daily">Daily at 9:00 AM</option>
-                <option value="hourly">Hourly during work hours</option>
-                <option value="custom">Custom cron…</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="sheet-section">
-            <h3>Diagnostics &amp; Self-Healing <span style={{ marginLeft: 6, fontSize: 9.5, color: 'var(--accent)', background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)', fontWeight: 600 }}>NEW</span></h3>
-            <div className="field">
-              <label>Trace recording</label>
-              <select value={config.tracing?.mode || 'retain-on-failure'} onChange={e => updateTracing(e.target.value)}>
-                <option value="retain-on-failure">On failure only (recommended)</option>
-                <option value="on">Every test</option>
-                <option value="off">Off</option>
-              </select>
-            </div>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 6 }}>
-              Traces capture DOM snapshots, network &amp; console for every step — open them with the <strong>Trace</strong> button on a run, or <code style={{ fontFamily: 'var(--mono)' }}>playwright show-trace</code>. Self-healing locators are always on; any auto-heals appear per run in the results view.
-            </p>
-          </div>
-
-          <div className="sheet-section">
-            <h3>AI / LLM <span style={{ marginLeft: 6, fontSize: 9.5, color: 'var(--accent)', background: 'var(--accent-bg)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)', fontWeight: 600 }}>BYOK</span></h3>
-            <div className="field">
-              <label>Default provider</label>
-              <select value={config.llm?.default_provider || (window.LlmProviders ? window.LlmProviders.defaultFromConfig(config) : 'mock')} onChange={e => updateLlm('default_provider', e.target.value)}>
-                {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).filter(p => p.canPlan).map(p => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).map(p => (
-              <div key={p.id}>
-                <div className="field"><label>{p.label} API protocol</label>
-                  <select value={p.protocol} onChange={e => updateLlmField(p.id, 'protocol', e.target.value)}>
-                    <option value="openai">OpenAI-compatible Chat Completions</option>
-                    <option value="anthropic">Native Anthropic Messages</option>
-                    <option value="ollama">Local Ollama</option>
-                    <option value="typesafe">TypeSafe Jev (decision only)</option>
-                    <option value="openrouter_decisions">OpenRouter Jev (decision only)</option>
-                    <option value="mock">Mock (offline)</option>
-                  </select>
-                </div>
-                {p.id !== 'mock' && (
-                  <div className="field"><label>{p.label} model</label><input value={config.llm?.providers?.[p.id]?.model || ''} onChange={e => updateLlmModel(p.id, e.target.value)} placeholder={p.model || p.id} /></div>
-                )}
-                {p.protocol !== 'mock' && (
-                  <React.Fragment>
-                    <div className="field"><label>{p.label} base URL</label><input value={p.base_url} onChange={e => updateLlmField(p.id, 'base_url', e.target.value)} placeholder={p.protocol === 'typesafe' ? 'https://api.typesafe.ai/v1' : p.protocol === 'openrouter_decisions' ? 'https://openrouter.ai/api/alpha' : 'Provider API base URL'} /></div>
-                    <div className="field"><label>Key environment variable (name only)</label><input value={p.api_key_env} onChange={e => updateLlmField(p.id, 'api_key_env', e.target.value.trim())} placeholder="ATS_MY_MODEL_KEY" /></div>
-                    <div className="field"><label>Output token cap (0 = agent default)</label><input type="number" min="0" value={config.llm?.providers?.[p.id]?.max_tokens || 0} onChange={e => updateLlmField(p.id, 'max_tokens', Math.max(0, Number(e.target.value) || 0))} /></div>
-                    {p.protocol === 'openai' && <div className="field"><label>Output token API parameter</label><select value={config.llm?.providers?.[p.id]?.token_parameter || (['mimo', 'mimo-ultraspeed'].includes(p.id) ? 'max_completion_tokens' : 'max_tokens')} onChange={e => updateLlmField(p.id, 'token_parameter', e.target.value)}><option value="max_tokens">max_tokens</option><option value="max_completion_tokens">max_completion_tokens</option></select></div>}
-                    {!['typesafe', 'openrouter_decisions'].includes(p.protocol) && <label style={{ fontSize: 12 }}><input type="checkbox" checked={config.llm?.providers?.[p.id]?.supports_temperature ?? !['mimo', 'mimo-ultraspeed'].includes(p.id)} onChange={e => updateLlmField(p.id, 'supports_temperature', e.target.checked)} /> Supports temperature parameter</label>}
-                  </React.Fragment>
-                )}
-              </div>
-            ))}
-            <div className="field"><label>Add model profile</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input value={profileDraft} onChange={e => setProfileDraft(e.target.value)} placeholder="e.g. fast-planner or jev" />
-                <button className="editor-action" disabled={!/^[a-z][a-z0-9_-]*$/.test(profileDraft) || !!config.llm?.providers?.[profileDraft]} onClick={() => {
-                  updateLlm('providers', { ...(config.llm?.providers || {}), [profileDraft]: { protocol: 'openai', model: '', api_key_env: 'ATS_' + profileDraft.toUpperCase().replace(/-/g, '_') + '_KEY' } });
-                  setProfileDraft('');
-                }}>Add</button>
-              </div>
-            </div>
-            {['extraction', 'decision', 'vision'].map(role => (
-              <div className="field" key={role}><label>{role} model profile</label>
-                <select value={config.llm?.roles?.[role] || ''} onChange={e => updateLlm('roles', { ...(config.llm?.roles || {}), [role]: e.target.value })}>
-                  <option value="">{role === 'extraction' ? 'Use default provider' : 'Not configured / legacy settings'}</option>
-                  {(window.LlmProviders ? window.LlmProviders.listFromConfig(config) : []).filter(p => role === 'decision' || !['typesafe', 'openrouter_decisions'].includes(p.protocol)).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
-              </div>
-            ))}
-            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.hybrid_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), hybrid_enabled: e.target.checked } }))} /> Enable experimental bounded decision controller</label>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>Choose a decision profile above before enabling. Restart the agent after saving. The controller stops on uncertainty; completed actions still require assertions and test replay.</p>
-            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.decision_loop_enabled} disabled={!config.agent_execution?.hybrid_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), decision_loop_enabled: e.target.checked } }))} /> Experimental decision-owned browsing</label>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>The planner supplies outcomes; the decision profile chooses browser actions. Read-only by default, single application. Local form writes require a separately configured disposable-demo allowlist. Multi-app transitions are not supported in this mode. Restart after saving.</p>
-            <label style={{ fontSize: 12 }}><input type="checkbox" checked={config.agent_execution?.decision_context_format === 'columns'} disabled={!config.agent_execution?.decision_loop_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), decision_context_format: e.target.checked ? 'columns' : 'objects' } }))} /> Compact single-app decision observations (experimental)</label>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>Lossless column encoding retains every observed element and available candidate. Smaller page evidence does not guarantee lower total cost or faster completion.</p>
-            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.decision_contract_review} disabled={!config.agent_execution?.decision_loop_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), decision_contract_review: e.target.checked } }))} /> Review single-app outcomes before browsing (experimental)</label>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>The decision profile checks the compiled contract against the original text request before any action. Uncertain reviews stop the attempt. This adds API calls and does not replace coverage checks or replay. Restart after saving.</p>
-            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.multi_app_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), multi_app_enabled: e.target.checked } }))} /> Enable experimental multi-app recording tools</label>
-            <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!config.agent_execution?.multi_app_decision_loop_enabled} disabled={!config.agent_execution?.hybrid_enabled || !config.agent_execution?.multi_app_enabled} onChange={e => setConfig(prev => ({ ...prev, agent_execution: { ...(prev.agent_execution || {}), multi_app_decision_loop_enabled: e.target.checked } }))} /> Decision-owned cross-app workflows</label>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>When enabled, this takes priority over single-app browsing. The planner supplies outcomes and the decision profile controls actions, record capture and app switches. Each actor uses a separate session; preconfigured authentication stays local. Restart after saving.</p>
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)' }}>Save app/actor IDs in Project Settings first, then restart the agent. Separate sessions; data-testid targets only; password/OTP recording unsupported. Enable the bounded decision controller above to route multi-app click/fill through its decision profile. Exported tests still need replay.</p>
-            {(window.LlmProviders ? window.LlmProviders.keyFieldsFromConfig(config) : []).map(({ env, usedBy }) => (
-              <div className="field" key={env}>
-                <label>{usedBy.join(' / ')} API key ({env}) {secretStatus[env] && <span style={{ color: 'var(--pass)', fontSize: 10 }}>● set</span>}</label>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input type="password" value={keyDraft[env] || ''} onChange={e => setKeyDraft(d => ({ ...d, [env]: e.target.value }))} placeholder={secretStatus[env] ? '•••••••• (stored)' : `paste key or set ${env} in your environment`} />
-                  <button className="editor-action" style={{ height: 26 }} onClick={() => saveKey(env)}>Save</button>
-                </div>
-              </div>
-            ))}
-            <p style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 6 }}>Bring your own key — encrypted in your OS keychain, never written to config or the repo. Default <code style={{ fontFamily: 'var(--mono)' }}>mock</code> works offline with no key. Cloud providers need a key here or via the matching env var.</p>
-          </div>
-
-          <div className="sheet-section">
-            <h3>Pass / Fail criteria</h3>
-            <div className="field">
-              <label>Verdict rule</label>
-              <select value={config.pass_criteria?.mode || 'critical_only'} onChange={e => updatePassCriteria('mode', e.target.value)}>
-                <option value="critical_only">Critical must pass (others warn)</option>
-                <option value="all">Any failure fails</option>
-                <option value="threshold">Threshold %</option>
-              </select>
-            </div>
-            {config.pass_criteria?.mode === 'threshold' && (
-              <div className="field"><label>Pass threshold %</label><input type="number" value={config.pass_criteria?.threshold_pct ?? 90} onChange={e => updatePassCriteria('threshold_pct', Number(e.target.value))} /></div>
-            )}
-            <div className="field">
-              <label>Skipped checkpoints</label>
-              <select value={config.pass_criteria?.treat_skipped_as || 'ignore'} onChange={e => updatePassCriteria('treat_skipped_as', e.target.value)}>
-                <option value="ignore">Ignore</option><option value="fail">Count as fail</option><option value="pass">Count as pass</option>
-              </select>
-            </div>
-            <div className="field"><label>Flaky retries</label><input type="number" min="0" max="3" value={config.pass_criteria?.retries ?? 1} onChange={e => updatePassCriteria('retries', Number(e.target.value))} /></div>
-          </div>
-        </div>
+        )}
         <div className="sheet-foot">
           <button onClick={onClose} className="editor-action" style={{ height: 28 }}>Cancel</button>
-          <button onClick={handleSave} className="editor-action" style={{ height: 28, background: 'var(--text)', color: 'var(--bg)', borderColor: 'var(--text)' }}>
+          <button onClick={handleSave} disabled={loading} className="editor-action" style={{ height: 28, background: 'var(--text)', color: 'var(--bg)', borderColor: 'var(--text)' }}>
             <I.Check size={12} /> Save changes
           </button>
         </div>

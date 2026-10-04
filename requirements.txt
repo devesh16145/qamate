@@ -22,9 +22,11 @@ pytest-playwright==0.7.2
 
 # ── Conversational AI agent + PRD extraction / test synthesis ─────────────────
 # Pydantic AI is the harness for the chat agent (engine/agent_chat.py). The
-# [openai] extra covers every OpenAI-compatible provider we use: Xiaomi MiMo
-# (default), OpenAI, and Ollama. API keys come from the environment, never config.
-pydantic-ai-slim[openai,anthropic]==1.104.0
+# Extras: [openai] covers every OpenAI-compatible preset (Xiaomi MiMo, OpenAI,
+# OpenRouter, DeepSeek, Ollama, custom); [anthropic] and [google] are the native
+# Claude and Gemini adapters. Presets live in engine/provider_catalog.json.
+# API keys come from the environment (injected from the OS keychain), never config.
+pydantic-ai-slim[openai,anthropic,google]==1.104.0
 
 # ── Attachment / context-file text extraction (AI agent file context) ─────────
 # The agent inlines document text from attachments + the project context folder.

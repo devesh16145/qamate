@@ -491,175 +491,303 @@
     return 'var(--text-3)';
   }
 
-  /* ── Shared session chrome: ONE status chip, ONE mode chip, ONE setup bar.
-     Used identically in the start composer, the stopped-session bar, and the
-     live header, so controls never change shape or disappear. ─────────────── */
+  /* ── Shared chrome: status, menus, header and the one composer used everywhere ── */
   const STATUS_LABEL = {
-    idle: 'stopped', starting: 'starting…', ready: 'ready',
-    busy: 'working…', awaiting_input: 'needs your answer', error: 'error',
+    idle: 'Paused', starting: 'Starting…', ready: 'Ready',
+    busy: 'Working…', awaiting_input: 'Needs your answer', error: 'Error',
   };
-  function StatusChip({ rt }) {
+  function StatusDot({ rt }) {
     const st = (rt && rt.status) || 'idle';
     const pulse = st === 'busy' || st === 'starting';
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600, color: statusColor(rt, false), border: '1px solid var(--accent-bg)', borderRadius: 20, padding: '2px 9px', userSelect: 'none', whiteSpace: 'nowrap' }}>
-        {pulse ? <span className="live-dot"></span>
-               : <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor(rt, false), flexShrink: 0 }}></span>}
+      <span className="ag-status" title={STATUS_LABEL[st] || st} style={{ color: statusColor(rt, false) }}>
+        {pulse ? <span className="live-dot"></span> : <span className="ag-dot" style={{ background: statusColor(rt, false) }}></span>}
         {STATUS_LABEL[st] || st}
       </span>
     );
   }
-  function ModeChip({ mode, onToggle, disabled }) {
-    const guided = mode === 'guided';
-    return (
-      <button onClick={onToggle} disabled={disabled}
-        title={guided
-          ? 'GUIDED — the agent pauses for your input on any value you did not provide, and on skips. Click for AUTO.'
-          : 'AUTO — the agent proceeds freely; made-up values are reported as assumptions for review. Click for GUIDED.'}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', background: guided ? 'rgba(245,158,11,0.10)' : 'transparent', color: guided ? '#f59e0b' : 'var(--text-2)', border: '1px solid ' + (guided ? '#f59e0b' : 'var(--border)'), borderRadius: 20, padding: '2px 9px', opacity: disabled ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-        {guided ? <Ic.Pause size={9} /> : <Ic.Play size={9} />}{guided ? 'GUIDED' : 'AUTO'}
-      </button>
-    );
+
+  /* Close a floating panel on outside click / Escape. */
+  function useDismiss(open, setOpen) {
+    const ref = useRef(null);
+    useEffect(() => {
+      if (!open) return;
+      const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+      const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+      document.addEventListener('mousedown', onDown);
+      document.addEventListener('keydown', onKey);
+      return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+    }, [open]);
+    return ref;
   }
-  /* Session setup controls — identical everywhere a session can be (re)started. */
-  function SetupBar({ provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget, mode, onToggleMode, children }) {
-    const LP = window.LlmProviders;
-    const list = (providerList || (LP && llmConfig ? LP.listFromConfig(llmConfig) : [])).filter(p => p.canPlan !== false);
-    const configured = !LP || !llmConfig || LP.isConfigured(provider, llmConfig, secretKeys || {});
+  /* Button + floating panel. `up` opens above the trigger (composer), else below (header). */
+  function Pop({ button, children, up, align, width, className }) {
+    const [open, setOpen] = useState(false);
+    const ref = useDismiss(open, setOpen);
     return (
-      <React.Fragment>
-        <select value={provider} onChange={(e) => setProvider(e.target.value)} title="LLM provider for this session" style={{ fontSize: 11, padding: '3px 6px', borderColor: configured ? undefined : 'var(--fail, #dc2626)' }}>
-          {list.map((p) => <option key={p.id} value={p.id}>{p.label}{p.needsKey && secretKeys && !LP.isConfigured(p.id, llmConfig, secretKeys) ? ' (key needed)' : ''}</option>)}
-        </select>
-        {!configured && LP && (
-          <span title={LP.missingKeyMessage(provider, llmConfig)} style={{ fontSize: 10, color: 'var(--fail, #dc2626)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Key required</span>
+      <div className={'ag-pop ' + (className || '')} ref={ref}>
+        {button({ open, toggle: () => setOpen((o) => !o) })}
+        {open && (
+          <div className={'ag-pop-panel' + (up ? ' up' : '') + (align === 'right' ? ' right' : '')} style={width ? { width } : undefined}>
+            {typeof children === 'function' ? children(() => setOpen(false)) : children}
+          </div>
         )}
-        <ModeChip mode={mode} onToggle={onToggleMode} />
-        <label style={{ fontSize: 11.5, color: 'var(--text-2)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Show the automation browser window while the agent works">
-          <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} style={{ marginRight: 5, verticalAlign: 'middle' }} />
-          Watch live
-        </label>
-        <label style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }} title="Max tool calls per turn before the agent pauses and summarises. 'Never' runs until it finishes.">
-          <Ic.Zap size={11} />
-          <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ fontSize: 11, padding: '3px 6px' }}>
-            <option value={30}>30 steps</option>
-            <option value={50}>50 steps</option>
-            <option value={100}>100 steps</option>
-            <option value={0}>Never pause</option>
-          </select>
-        </label>
-        <span style={{ flex: 1 }}></span>
-        {children}
-      </React.Fragment>
+      </div>
     );
   }
-  /* Header action button — one consistent shape for Context/Memory/Browser/Reset/Stop. */
-  function HBtn({ onClick, title, danger, disabled, children }) {
+  function MenuItem({ icon, label, hint, onClick, danger, disabled, checked }) {
+    const Icon = icon && Ic[icon];
     return (
-      <button className="rv-cta" onClick={onClick} disabled={disabled} title={title}
-        style={danger ? { color: 'var(--fail, #dc2626)', borderColor: 'rgba(220,38,38,0.4)' } : undefined}>
-        {children}
+      <button className={'ag-menu-item' + (danger ? ' danger' : '')} onClick={onClick} disabled={disabled}>
+        <span className="ag-menu-ic">{checked ? <Ic.Check size={13} /> : (Icon ? <Icon size={13} /> : null)}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="ag-menu-label">{label}</span>
+          {hint && <span className="ag-menu-hint">{hint}</span>}
+        </span>
       </button>
     );
   }
 
-  /* ── Session list (left sidebar in window mode; full-width "page 1" when docked) ── */
-  function SessionSidebar({ projects, projectId, setProjectId, sessions, activeId, runtimeMap,
-                            onSelect, onNew, onRename, onDelete, full, onUndock, onClose }) {
+  /* Model picker pill. Locked while a session runs (the model is fixed at start). */
+  function ModelMenu({ provider, setProvider, providerList, secretKeys, llmConfig, lockedModel }) {
+    const LP = window.LlmProviders;
+    const list = (providerList || []).filter((p) => p.canPlan !== false);
+    if (lockedModel) {
+      return <span className="ag-pill static" title="The model is fixed while this session runs. Start a new chat to switch."><Ic.Sparkle size={12} />{lockedModel}</span>;
+    }
+    if (llmConfig && !list.length) {
+      return <span className="ag-pill warn" title="Open Preferences → AI models in the main window, add a provider and save."><Ic.AlertCircle size={12} />No model — add one in Preferences</span>;
+    }
+    const cur = list.find((p) => p.id === provider);
+    const configured = !LP || !llmConfig || LP.isConfigured(provider, llmConfig, secretKeys || {});
+    return (
+      <Pop up width={300} className="shrink" button={({ toggle }) => (
+        <button className={'ag-pill' + (configured ? '' : ' warn')} onClick={toggle} title={configured ? 'Choose the model for new sessions' : LP.missingKeyMessage(provider, llmConfig)}>
+          {configured ? <Ic.Sparkle size={12} /> : <Ic.AlertCircle size={12} />}
+          <span className="ag-pill-text">{cur ? (cur.model || cur.label) : 'Choose model'}</span><Ic.ChevronDown size={11} />
+        </button>
+      )}>
+        {(close) => (
+          <React.Fragment>
+            <div className="ag-menu-head">Model</div>
+            {list.map((p) => {
+              const ok = !p.needsKey || !secretKeys || LP.isConfigured(p.id, llmConfig, secretKeys);
+              return <MenuItem key={p.id} checked={p.id === provider} label={p.model || p.label} hint={p.label + (ok ? '' : ' · key needed')} onClick={() => { setProvider(p.id); close(); }} />;
+            })}
+            <div className="ag-menu-foot">Add or change models in Preferences → AI models.</div>
+          </React.Fragment>
+        )}
+      </Pop>
+    );
+  }
+
+  const MODES = {
+    auto: { label: 'Auto', icon: 'Play', hint: 'Works without stopping. Values it had to invent are reported as assumptions for review.' },
+    guided: { label: 'Guided', icon: 'Pause', hint: 'Pauses to ask you for any value you did not provide, and before skipping a step.' },
+  };
+  function ModeMenu({ mode, onChange, disabled }) {
+    const m = MODES[mode] || MODES.auto;
+    const Icon = Ic[m.icon];
+    return (
+      <Pop up width={280} button={({ toggle }) => (
+        <button className={'ag-pill' + (mode === 'guided' ? ' guided' : '')} onClick={toggle} disabled={disabled} title={m.hint}>
+          <Icon size={10} />{m.label}<Ic.ChevronDown size={11} />
+        </button>
+      )}>
+        {(close) => (
+          <React.Fragment>
+            <div className="ag-menu-head">When the agent needs information</div>
+            {Object.keys(MODES).map((k) => (
+              <MenuItem key={k} checked={k === mode} label={MODES[k].label} hint={MODES[k].hint} onClick={() => { onChange(k); close(); }} />
+            ))}
+          </React.Fragment>
+        )}
+      </Pop>
+    );
+  }
+  function OptionsMenu({ headed, setHeaded, toolBudget, setToolBudget }) {
+    return (
+      <Pop up width={260} button={({ toggle, open }) => (
+        <button className={'ag-icon-btn' + (open ? ' on' : '')} onClick={toggle} aria-label="Session options" title="Session options"><Ic.Sliders size={14} /></button>
+      )}>
+        <div className="ag-menu-head">Session options</div>
+        <label className="ag-opt">
+          <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} />
+          <span><span className="ag-menu-label">Watch live</span><span className="ag-menu-hint">Show the browser window while the agent works.</span></span>
+        </label>
+        <div className="ag-opt">
+          <Ic.Zap size={13} style={{ marginTop: 2, color: 'var(--text-3)' }} />
+          <span style={{ flex: 1 }}>
+            <span className="ag-menu-label">Check in after</span>
+            <span className="ag-menu-hint">Steps per turn before the agent pauses and summarises.</span>
+            <select value={toolBudget} onChange={(e) => setToolBudget(Number(e.target.value))} style={{ marginTop: 5, fontSize: 11.5, padding: '3px 6px', width: '100%' }}>
+              <option value={30}>30 steps</option><option value={50}>50 steps</option>
+              <option value={100}>100 steps</option><option value={0}>Never — run until done</option>
+            </select>
+          </span>
+        </div>
+        <div className="ag-menu-foot">Applies when a session starts or resumes.</div>
+      </Pop>
+    );
+  }
+
+  /* The one composer: attachments, auto-growing textarea, toolbar inside the box. */
+  function Composer({ value, onChange, onKeyDown, taRef, onBlur, placeholder, attachments, onRemoveAttachment, onAttach,
+                      canSend, onSend, busy, onStop, highlight, overlay, left, right, note }) {
+    const autoGrow = (e) => { try { e.target.style.height = 'auto'; e.target.style.height = Math.min(180, e.target.scrollHeight) + 'px'; } catch (err) { /* ignore */ } };
+    return (
+      <div className="ag-composer-wrap">
+        {note}
+        <div className={'ag-composer' + (highlight ? ' highlight' : '')}>
+          {overlay}
+          {attachments && attachments.length > 0 && (
+            <div className="ag-atts">
+              {attachments.map((a) => (
+                <span key={a.path || a.name} className="ag-att">
+                  {isImg(a.ext) ? <Ic.File size={10} /> : <Ic.FileText size={10} />}
+                  <span className="nm" title={a.name}>{a.name}</span>
+                  <button onClick={() => onRemoveAttachment(a)} title="Remove"><Ic.X size={11} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea ref={taRef} value={value} rows={1} placeholder={placeholder}
+            onChange={(e) => { autoGrow(e); onChange(e); }} onKeyDown={onKeyDown} onBlur={onBlur} />
+          <div className="ag-toolbar">
+            <button className="ag-icon-btn" onClick={onAttach} aria-label="Attach documents or images (or drop files)" title="Attach documents or images (or drop files)"><Ic.Paperclip size={14} /></button>
+            {left}
+            <span style={{ flex: 1 }}></span>
+            {right}
+            {busy
+              ? <button className="ag-send stop" onClick={onStop} aria-label="Stop the agent (you can resume the session later)" title="Stop the agent (you can resume the session later)"><Ic.Stop size={12} fill="currentColor" /></button>
+              : <button className="ag-send" onClick={onSend} disabled={!canSend} aria-label="Send (Enter)" title="Send (Enter)"><Ic.ArrowUp size={15} stroke={2.2} /></button>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* Header: title + status on the left; new chat, history (docked), more, pop-out, close. */
+  function AgentHeader({ title, rt, extra, menu, chrome, onRename }) {
+    const [editing, setEditing] = useState(false);
+    const [text, setText] = useState(title || '');
+    return (
+      <div className="ag-head">
+        {editing && onRename ? (
+          <input className="ag-title-edit" autoFocus value={text} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { onRename(text); setEditing(false); } if (e.key === 'Escape') setEditing(false); }}
+            onBlur={() => { onRename(text); setEditing(false); }} />
+        ) : (
+          <div className="ag-title" title={onRename ? 'Double-click to rename' : title} onDoubleClick={() => { if (onRename) { setText(title || ''); setEditing(true); } }}>{title}</div>
+        )}
+        {rt && <StatusDot rt={rt} />}
+        {extra}
+        <span style={{ flex: 1 }}></span>
+        {chrome.onNew && <button className="ag-icon-btn" onClick={chrome.onNew} aria-label="New chat" title="New chat"><Ic.PenSquare size={15} /></button>}
+        {chrome.history}
+        {menu && (
+          <Pop align="right" width={240} button={({ toggle, open }) => (
+            <button className={'ag-icon-btn' + (open ? ' on' : '')} onClick={toggle} aria-label="More" title="More"><Ic.MoreHorizontal size={16} /></button>
+          )}>{menu}</Pop>
+        )}
+        {chrome.onUndock && <button className="ag-icon-btn" onClick={chrome.onUndock} aria-label="Open in its own window" title="Open in its own window"><Ic.ExternalLink size={14} /></button>}
+        {chrome.onClose && <button className="ag-icon-btn" onClick={chrome.onClose} aria-label="Close the agent panel" title="Close the agent panel"><Ic.X size={15} /></button>}
+      </div>
+    );
+  }
+
+  /* ── Session history: sidebar in window mode, popover from the header when docked ── */
+  function SessionList({ projects, projectId, setProjectId, sessions, activeId, runtimeMap, onSelect, onNew, onRename, onDelete, compact }) {
     const [search, setSearch] = useState('');
     const [editing, setEditing] = useState(null);
     const [editText, setEditText] = useState('');
     const [confirmDel, setConfirmDel] = useState(null);
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
-      if (!q) return sessions;
-      return sessions.filter((s) => (s.title || '').toLowerCase().includes(q));
+      return q ? sessions.filter((s) => (s.title || '').toLowerCase().includes(q)) : sessions;
     }, [sessions, search]);
-
     return (
-      <aside className={'ses-sidebar' + (full ? ' full' : '')}>
-        <div className="ses-head">
-          <Ic.MessageSquare size={15} style={{ color: 'var(--accent)' }} />
-          <b>AI Agent</b>
-          <span style={{ flex: 1 }}></span>
-          {onUndock && <button className="ses-hbtn" onClick={onUndock} title="Pop out to its own window"><Ic.ExternalLink size={14} /></button>}
-          {onClose && <button className="ses-hbtn" onClick={onClose} title="Close the agent panel"><Ic.X size={15} /></button>}
+      <div className={'ag-history' + (compact ? ' compact' : '')}>
+        <div className="ag-history-top">
+          <label className="ag-proj" title="Project — sessions, memory and context folder are per project">
+            <Ic.Folder size={12} />
+            <select value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)}>
+              <option value="">No project</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
+            </select>
+            <Ic.ChevronDown size={11} />
+          </label>
+          {onNew && <button className="ag-new" onClick={onNew}><Ic.PenSquare size={13} /> New chat</button>}
+          <div className="ag-search"><Ic.Search size={12} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats" /></div>
         </div>
-        <div className="ses-controls">
-          <select className="ses-proj" value={projectId || ''} onChange={(e) => setProjectId(e.target.value || null)} title="Project">
-            <option value="">Default (no project)</option>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
-          </select>
-          <div className="ses-row2">
-            <input className="ses-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions…" />
-            <button className="rv-cta primary ses-new" onClick={onNew} title="New session"><Ic.Plus size={14} /> New</button>
-          </div>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 8px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {filtered.length === 0 && (
-            <div style={{ color: 'var(--text-3)', fontSize: 11.5, padding: '10px 6px', lineHeight: 1.5 }}>
-              No sessions yet. Click <b>New session</b> to start the agent on this project — each session
-              keeps its own browser, memory, and transcript, and you can resume it later.
-            </div>
-          )}
+        <div className="ag-history-list">
+          {filtered.length === 0 && <div className="ag-empty-note">{search ? 'No chats match.' : 'No chats yet in this project.'}</div>}
           {filtered.map((s) => {
             const rt = runtimeMap[s.id];
             const live = !!s.live || (rt && (rt.status === 'busy' || rt.status === 'ready' || rt.status === 'starting'));
             return (
-              <div key={s.id} className={'ses-row' + (s.id === activeId ? ' active' : '')} onClick={() => onSelect(s.id)}>
-                <span className="ses-dot" style={{ background: statusColor(rt, live) }}></span>
+              <div key={s.id} className={'ag-hrow' + (s.id === activeId ? ' active' : '')} onClick={() => onSelect(s.id)}>
+                <span className="ag-dot" style={{ background: statusColor(rt, live) }}></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {editing === s.id ? (
-                    <input autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
+                    <input autoFocus value={editText} onChange={(e) => setEditText(e.target.value)} onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => { if (e.key === 'Enter') { onRename(s.id, editText); setEditing(null); } if (e.key === 'Escape') setEditing(null); }}
-                      onBlur={() => { onRename(s.id, editText); setEditing(null); }}
-                      style={{ width: '100%', fontSize: 12, padding: '1px 4px' }} />
+                      onBlur={() => { onRename(s.id, editText); setEditing(null); }} className="ag-title-edit" />
                   ) : (
-                    <div onDoubleClick={(e) => { e.stopPropagation(); setEditing(s.id); setEditText(s.title || ''); }}
-                      style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={s.title}>{s.title || 'Untitled'}</div>
+                    <div className="ag-hrow-title" title={s.title} onDoubleClick={(e) => { e.stopPropagation(); setEditing(s.id); setEditText(s.title || ''); }}>{s.title || 'Untitled'}</div>
                   )}
-                  <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
-                    {live ? 'running' : (s.message_count ? s.message_count + ' msgs' : 'new')}{s.updated_at ? ' · ' + relTime(s.updated_at) : ''}{(s.tokens && s.tokens.total) ? ' · ' + fmtTok(s.tokens.total) + ' tok' : ''}
+                  <div className="ag-hrow-meta">
+                    {live ? 'running' : (s.message_count ? s.message_count + ' msgs' : 'empty')}{s.updated_at ? ' · ' + relTime(s.updated_at) : ''}{(s.tokens && s.tokens.total) ? ' · ' + fmtTok(s.tokens.total) + ' tok' : ''}
                   </div>
                 </div>
                 {confirmDel === s.id ? (
-                  <span style={{ display: 'inline-flex', gap: 3 }} onClick={(e) => e.stopPropagation()}>
-                    <button className="ses-x" style={{ opacity: 1, color: 'var(--fail)' }} title="Confirm delete"
-                      onClick={() => { setConfirmDel(null); onDelete(s.id); }}><Ic.Check size={13} /></button>
-                    <button className="ses-x" style={{ opacity: 1 }} title="Cancel" onClick={() => setConfirmDel(null)}><Ic.X size={13} /></button>
+                  <span style={{ display: 'inline-flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
+                    <button className="ag-row-btn" style={{ color: 'var(--fail)', opacity: 1 }} title="Confirm delete" onClick={() => { setConfirmDel(null); onDelete(s.id); }}><Ic.Check size={13} /></button>
+                    <button className="ag-row-btn" style={{ opacity: 1 }} title="Cancel" onClick={() => setConfirmDel(null)}><Ic.X size={13} /></button>
                   </span>
                 ) : (
-                  <button className="ses-x" title="Delete session" onClick={(e) => { e.stopPropagation(); setConfirmDel(s.id); }}><Ic.Trash size={13} /></button>
+                  <button className="ag-row-btn" title="Delete chat" onClick={(e) => { e.stopPropagation(); setConfirmDel(s.id); }}><Ic.Trash size={13} /></button>
                 )}
               </div>
             );
           })}
         </div>
-      </aside>
+      </div>
     );
   }
 
-  /* ── "No session selected" placeholder (window mode, chat column) ─────────── */
-  function NoSession() {
+  /* ── Welcome / empty state with starter prompts ──────────────────────────── */
+  const STARTERS = [
+    { icon: 'Globe', title: 'Explore the app', text: 'Explore the app and list its main user flows, with the pages each flow touches.' },
+    { icon: 'ListChecks', title: 'Write a test', text: 'Log in and write a test for the login flow, including a wrong-password check.' },
+    { icon: 'Search', title: 'Check a feature', text: 'Open the orders area and write a test that verifies the order list, filters and order details.' },
+    { icon: 'Zap', title: 'Autonomous run', text: null, hint: 'Map the app and author a test for every flow, unsupervised.' },
+  ];
+  function Welcome({ projectName, onPick, onAuto }) {
     return (
-      <div className="agent-pane" style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, padding: 16 }}>
-          <Ic.MessageSquare size={28} style={{ color: 'var(--accent)', marginBottom: 10 }} />
-          <h2 style={{ fontSize: 15, margin: '0 0 6px', color: 'var(--text-1)' }}>No session selected</h2>
-          <p style={{ fontSize: 12, lineHeight: 1.5 }}>Create a <b>New session</b> or pick one from the list.
-          Each session drives its own browser, keeps memory, and can run alongside others.</p>
+      <div className="ag-welcome">
+        <div className="ag-welcome-mark"><Ic.Sparkle size={22} /></div>
+        <h2>What should we test?</h2>
+        <p>The agent drives its own browser, records what it does and turns it into a replayable test{projectName ? <> for <b>{projectName}</b></> : null}.</p>
+        <div className="ag-starters">
+          {STARTERS.map((s) => {
+            const Icon = Ic[s.icon];
+            return (
+              <button key={s.title} className="ag-starter" onClick={() => (s.text ? onPick(s.text) : onAuto())}>
+                <Icon size={14} />
+                <span><b>{s.title}</b><span>{s.text || s.hint}</span></span>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
   }
 
-  /* ── Active session chat (ALWAYS rendered with a real session — no conditional
-     hooks; the "no session" case is handled by AgentApp, never here) ────────── */
+  /* ── Active session (ALWAYS rendered with a real session — no conditional hooks) ── */
   function SessionChat({ session, rt, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
-                         startMode, setStartMode, onStart, onStartAuto, onSend, onStop, onReset, onOpenBrowser,
-                         onToggleMode, setInput, setAttachments, projectId, toast, onBack }) {
+                         startMode, setStartMode, onStart, onStartAuto, onSend, onResumeWithMessage, onStop, onReset, onOpenBrowser,
+                         onToggleMode, setInput, setAttachments, projectId, projectName, toast, chrome, onRename }) {
     const scrollRef = useRef(null);
     const taRef = useRef(null);
     const [confirmReset, setConfirmReset] = useState(false);
@@ -695,7 +823,7 @@
         setCtxLevel({ dirs: (r && r.dirs) || [], files: (r && r.files) || [] });
       } catch (e) { setCtxLevel({ dirs: [], files: [] }); }
     };
-    const toggleCtx = () => { const n = !ctxOpen; setCtxOpen(n); if (n) loadCtx(ctxSubdir); };
+    const openCtx = () => { setCtxOpen(true); loadCtx(ctxSubdir); };
     const applyCtxResult = (r) => { if (!r) return; setCtxDir(r.dir || ''); setCtxSubdir(''); setCtxLevel({ dirs: r.dirs || [], files: r.files || [] }); setAtFiles(null); };
     const addCtx = async () => {
       try { const r = await window.ats.agentContextAdd({ projectId: ctxPid() }); applyCtxResult(r); if (r && r.added) toast(`Added ${r.added} file(s) to context`); }
@@ -732,8 +860,6 @@
     const onComposerChange = (e) => {
       const v = e.target.value;
       setInput(v);
-      // Auto-grow the borderless composer textarea (caps at 140px, then scrolls).
-      try { e.target.style.height = 'auto'; e.target.style.height = Math.min(140, e.target.scrollHeight) + 'px'; } catch (err) { /* ignore */ }
       const caret = e.target.selectionStart != null ? e.target.selectionStart : v.length;
       const m = v.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
       if (m) { setAtQuery(m[1]); setAtIndex(0); setAtOpen(true); ensureAtFiles(); }
@@ -767,7 +893,7 @@
       try { const r = await window.ats.agentPickFiles(); if (r && r.status === 'success' && r.files && r.files.length) mergeAttachments(r.files); }
       catch (e) { toast('Could not open file picker'); }
     };
-    const removeAttachment = (p) => setAttachments(attachments.filter((a) => a.path !== p));
+    const removeAttachment = (a) => setAttachments(attachments.filter((x) => x.path !== a.path));
     const onDrop = (e) => {
       e.preventDefault(); setDragOver(false);
       const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
@@ -779,6 +905,13 @@
       if (!metas.length) { toast('Could not read dropped file path'); return; }
       mergeAttachments(metas);
     };
+    // Sending while paused resumes the session and delivers the message once it is ready.
+    const canSend = !!((rt.input || '').trim() || attachments.length) && (connected ? (status === 'ready' || awaitingInput) : status !== 'starting');
+    const send = () => {
+      if (!canSend) return;
+      if (connected) onSend();
+      else onResumeWithMessage((rt.input || '').trim(), attachments);
+    };
     const onKey = (e) => {
       if (atOpen && atMatches.length) {
         if (e.key === 'ArrowDown') { e.preventDefault(); setAtIndex((i) => (i + 1) % atMatches.length); return; }
@@ -786,7 +919,7 @@
         if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertAtMatch(atMatches[atIndex] || atMatches[0]); return; }
         if (e.key === 'Escape') { e.preventDefault(); setAtOpen(false); return; }
       }
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     };
 
     /* Document-style chat: no avatars. User = right-aligned soft pill;
@@ -794,7 +927,7 @@
     const bubble = (m) => {
       if (m.role === 'user') return (
         <div key={m.id} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <div style={{ maxWidth: '72%', background: 'var(--accent-bg)', color: 'var(--text)', padding: '8px 14px', borderRadius: 16, fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          <div className="ag-user-msg">
             {m.text}
             {m.attachments && m.attachments.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
@@ -848,44 +981,37 @@
       );
     };
 
+    const usageTitle = `Primary-model tokens this session${rt.usage?.usage_incomplete ? ' (usage missing for some requests; not a complete total)' : ((rt.usage && rt.usage.estimated) ? ' (legacy estimate)' : '')} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, reported total ${(rt.usage && rt.usage.total) || 0}. Decision-model usage is recorded separately in the event log.`;
+    const usageText = rt.usage?.usage_incomplete ? (rt.usage.total ? fmtTok(rt.usage.total) + '+?' : '?') : ((rt.usage?.estimated ? '~' : '') + fmtTok(rt.usage?.total || 0));
+
+    const menu = (close) => (
+      <React.Fragment>
+        <MenuItem icon="Folder" label="Context folder" hint="Docs the agent can read and you can @-mention" onClick={() => { close(); openCtx(); }} />
+        <MenuItem icon="FileText" label="Agent memory" hint="What the agent remembers about this project" onClick={() => { close(); window.ats.agentMemoryOpen({ projectId: ctxPid() }); }} />
+        <MenuItem icon="Globe" label={connected ? "Show the agent's browser" : 'Open the app in your browser'} onClick={() => { close(); onOpenBrowser(); }} />
+        <MenuItem icon="Zap" label="Autonomous run…" hint="Map the app and author tests for every flow" onClick={() => { close(); setAutoOpen(true); }} />
+        <div className="ag-menu-sep"></div>
+        {messages.length > 0 && (confirmReset
+          ? <MenuItem danger icon="Trash" label="Click again to clear" hint="Removes this chat's conversation" onClick={() => { setConfirmReset(false); close(); onReset(); }} />
+          : <MenuItem icon="RefreshCw" label="Clear conversation" disabled={busy} onClick={() => setConfirmReset(true)} />)}
+        {connected && <MenuItem danger icon="Stop" label="Stop session" hint="Closes its browser; you can resume later" onClick={() => { close(); onStop(); }} />}
+      </React.Fragment>
+    );
+
     return (
       <div className="agent-pane">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--accent-bg)', position: 'relative', flexWrap: 'wrap' }}>
-          {onBack && <HBtn onClick={onBack} title="Back to sessions"><Ic.ChevronLeft size={13} /></HBtn>}
-          <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }} title={session.title}>{session.title || 'Untitled session'}</b>
-          <StatusChip rt={rt} />
-          {info && !info.auth && (
-            <span title="NOT logged in — set credentials in Settings or capture a login for this project"
-              style={{ fontSize: 10.5, color: 'var(--fail, #dc2626)', fontFamily: 'var(--mono)' }}>no auth</span>
-          )}
-          {connected && (
-            <span title={`Primary-model tokens this session${rt.usage?.usage_incomplete ? ' (usage missing for some requests; not a complete total)' : ((rt.usage && rt.usage.estimated) ? ' (legacy estimate)' : '')} — in ${(rt.usage && rt.usage.input) || 0}, out ${(rt.usage && rt.usage.output) || 0}, reported total ${(rt.usage && rt.usage.total) || 0}. Decision-model usage is recorded separately in the event log.`}
-              style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'var(--mono)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <Ic.Activity size={10} />{rt.usage?.usage_incomplete ? (rt.usage.total ? fmtTok(rt.usage.total) + '+?' : '?') : ((rt.usage?.estimated ? '~' : '') + fmtTok(rt.usage?.total || 0))} tok
-            </span>
-          )}
-          <span style={{ flex: 1 }}></span>
-          <HBtn onClick={toggleCtx} title="Scoped project folder the agent explores"><Ic.Folder size={12} /> Context</HBtn>
-          <HBtn onClick={() => window.ats.agentMemoryOpen({ projectId: ctxPid() })} title="Open the agent's memory file (AGENT_MEMORY.md)"><Ic.FileText size={12} /> Memory</HBtn>
-          <HBtn onClick={onOpenBrowser} title="Show the agent's browser (or open the app under test)"><Ic.ExternalLink size={12} /> Browser</HBtn>
-          {connected && (confirmReset ? (
-            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-              <span style={{ fontSize: 10.5, color: 'var(--fail, #dc2626)' }}>Clear chat?</span>
-              <HBtn danger onClick={() => { setConfirmReset(false); onReset(); }} title="Yes — clear this session's conversation"><Ic.Check size={12} /></HBtn>
-              <HBtn onClick={() => setConfirmReset(false)} title="Cancel"><Ic.X size={12} /></HBtn>
-            </span>
-          ) : (
-            <HBtn onClick={() => setConfirmReset(true)} disabled={busy} title="Clear this session's conversation (asks to confirm)"><Ic.RefreshCw size={12} /></HBtn>
-          ))}
-          {connected && <HBtn danger onClick={onStop} title="Stop this session and close its browser (you can resume later)"><Ic.Pause size={12} /> Stop</HBtn>}
+        <div style={{ position: 'relative' }}>
+          <AgentHeader title={session.title || 'New chat'} rt={rt} chrome={chrome} onRename={onRename}
+            menu={(close) => menu(close)}
+            extra={info && !info.auth && <span className="ag-badge warn" title="Not logged in — set app credentials in Project Settings or capture a login for this project">not logged in</span>} />
           {ctxOpen && (
-            <div style={{ position: 'absolute', top: '100%', right: 12, zIndex: 30, width: 340, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: 10 }}>
+            <div className="ag-ctx-panel">
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                <b style={{ fontSize: 11 }}>Project folder</b><span style={{ flex: 1 }}></span>
+                <b style={{ fontSize: 11.5 }}>Context folder</b><span style={{ flex: 1 }}></span>
                 <button className="rv-cta" onClick={useFolder} title="Point this project at an existing folder on disk"><Ic.FolderOpen size={11} /> Use folder…</button>
                 <button className="rv-cta" onClick={addCtx} title="Copy individual files into the managed context folder"><Ic.Plus size={11} /> Add files</button>
-                <button className="rv-cta" onClick={() => window.ats.agentContextOpen({ projectId: ctxPid() })} title="Open the folder in your file explorer"><Ic.FolderOpen size={11} /></button>
-                <button className="rv-cta" onClick={() => setCtxOpen(false)}><Ic.X size={11} /></button>
+                <button className="rv-cta" onClick={() => window.ats.agentContextOpen({ projectId: ctxPid() })} title="Open the folder in Finder / Explorer"><Ic.ExternalLink size={11} /></button>
+                <button className="rv-cta" onClick={() => setCtxOpen(false)} title="Close"><Ic.X size={11} /></button>
               </div>
               {ctxDir
                 ? <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginBottom: 4, wordBreak: 'break-all' }} title={ctxDir}>{ctxDir}</div>
@@ -921,12 +1047,12 @@
           )}
         </div>
 
-        <div ref={scrollRef}
+        <div ref={scrollRef} className="ag-scroll"
           onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
           onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
           onDrop={onDrop}
-          style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '16px 18px', outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
-          <div style={{ maxWidth: 780, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}>
+          style={{ outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -6 }}>
+          <div className="ag-column">
             <PlanCard plan={rt.plan || []} />
             {rt.browsing && <div role="status" style={{ border: '1px solid var(--border)', padding: 12, borderRadius: 8, fontSize: 12 }}>
               <strong>{rt.browsing.state}</strong>
@@ -936,10 +1062,7 @@
               <div style={{ color: 'var(--text-2)' }}>Decision tokens: {fmtTok(rt.browsing.decisionTokens || 0)}{rt.browsing.usageMissing ? ' + unknown usage' : ''}</div>
             </div>}
             {messages.length === 0 && !connected && (
-              <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-3)', maxWidth: 420, fontSize: 12.5, lineHeight: 1.6 }}>
-                {canResume ? 'This session is paused. Resume it to continue from where you left off — its memory is restored.'
-                           : 'New session. Start the agent below, then tell it what to do — e.g. "explore the orders area and write a test for the full order lifecycle."'}
-              </div>
+              <Welcome projectName={projectName} onPick={(t) => { setInput(t); setTimeout(() => taRef.current && taRef.current.focus(), 0); }} onAuto={() => setAutoOpen(true)} />
             )}
             {groupMessages(messages).map(g =>
               g.type === 'batch'
@@ -950,124 +1073,83 @@
           </div>
         </div>
 
-        {busy && rt.lastLog && (
-          <div style={{ padding: '2px 16px', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rt.lastLog}</div>
+        {autoOpen && (
+          <RunAutoModal projectId={projectId} onClose={() => setAutoOpen(false)}
+            onConfirm={(msg) => { setAutoOpen(false); onStartAuto(msg, []); }} />
         )}
-
-        {!connected ? (
-          <div style={{ padding: '10px 18px 14px' }}>
-            {autoOpen && onStartAuto && (
-              <RunAutoModal projectId={projectId} onClose={() => setAutoOpen(false)}
-                onConfirm={(msg) => { setAutoOpen(false); onStartAuto(msg, []); }} />
-            )}
-            <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '12px 14px' }}>
-              <SetupBar provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
-                headed={headed} setHeaded={setHeaded}
-                toolBudget={toolBudget} setToolBudget={setToolBudget}
-                mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
-                {onStartAuto && (
-                  <button className="rv-cta" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised (starts a new session)">
-                    <Ic.Zap size={12} /> Auto
-                  </button>
-                )}
-                <button className="rv-cta primary" onClick={onStart} disabled={status === 'starting'}>
-                  <Ic.Play size={13} /> {status === 'starting' ? 'Starting…' : (canResume ? 'Resume session' : 'Start session')}
-                </button>
-              </SetupBar>
-            </div>
-          </div>
-        ) : (
-          <div style={{ padding: '6px 18px 14px' }}>
-            <div style={{ maxWidth: 780, margin: '0 auto', position: 'relative', background: 'var(--bg)', border: awaitingInput ? '1.5px solid #f59e0b' : '1px solid var(--border)', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '10px 12px 8px', transition: 'border-color 0.15s' }}>
-              {atOpen && atMatches.length > 0 && (
-                <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 8, maxHeight: 210, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.22)', zIndex: 40, fontSize: 11.5, fontFamily: 'var(--mono)' }}>
-                  <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-3)', borderBottom: '1px solid var(--accent-bg)' }}>Reference a file — ↑↓ then Enter</div>
-                  {atMatches.map((p, i) => (
-                    <div key={p} onMouseDown={(e) => { e.preventDefault(); insertAtMatch(p); }} onMouseEnter={() => setAtIndex(i)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', cursor: 'pointer', background: i === atIndex ? 'var(--accent-bg)' : 'transparent' }}>
-                      <Ic.FileText size={11} style={{ color: 'var(--text-3)' }} />
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p}>{p}</span>
-                    </div>
-                  ))}
+        <Composer taRef={taRef} value={rt.input || ''} onChange={onComposerChange} onKeyDown={onKey}
+          onBlur={() => setTimeout(() => setAtOpen(false), 120)}
+          placeholder={awaitingInput ? 'The agent is waiting — type your answer…'
+            : busy ? 'The agent is working… you can type your next message'
+            : connected ? 'Ask a follow-up…  (@ to reference a file)'
+            : canResume ? 'Message to resume this chat…' : 'Describe what to test…'}
+          attachments={attachments} onRemoveAttachment={removeAttachment} onAttach={addAttachments}
+          canSend={canSend} onSend={send} busy={busy} onStop={onStop} highlight={awaitingInput}
+          note={busy ? (
+            <div className="ag-working"><span className="live-dot"></span><span className="ag-working-text">{rt.lastLog || 'Working…'}</span></div>
+          ) : (!connected && canResume) ? (
+            <div className="ag-working paused">Paused — your next message resumes this chat with its memory. <a href="#" onClick={(e) => { e.preventDefault(); onStart(); }}>Resume without a message</a></div>
+          ) : null}
+          overlay={atOpen && atMatches.length > 0 && (
+            <div className="ag-at-list">
+              <div className="ag-menu-head">Reference a file — ↑↓ then Enter</div>
+              {atMatches.map((p, i) => (
+                <div key={p} onMouseDown={(e) => { e.preventDefault(); insertAtMatch(p); }} onMouseEnter={() => setAtIndex(i)}
+                  className={'ag-at-item' + (i === atIndex ? ' hi' : '')} title={p}>
+                  <Ic.FileText size={11} /><span>{p}</span>
                 </div>
-              )}
-              {attachments.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
-                  {attachments.map((a) => (
-                    <span key={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontFamily: 'var(--mono)', background: 'var(--accent-bg)', borderRadius: 6, padding: '2px 4px 2px 7px' }}>
-                      {isImg(a.ext) ? <Ic.File size={10} /> : <Ic.FileText size={10} />}
-                      <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
-                      <button onClick={() => removeAttachment(a.path)} title="Remove" style={{ display: 'inline-flex', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text-3)' }}><Ic.X size={11} /></button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <textarea ref={taRef} value={rt.input} onChange={onComposerChange} onKeyDown={onKey}
-                onBlur={() => setTimeout(() => setAtOpen(false), 120)}
-                rows={1}
-                placeholder={awaitingInput ? 'The agent is waiting — type your answer and press Enter…' : status === 'ready' ? 'Write a message…  (@ to reference a file · drop files to attach)' : 'The agent is working…'}
-                disabled={status !== 'ready' && status !== 'awaiting_input'}
-                style={{ display: 'block', width: '100%', boxSizing: 'border-box', minHeight: 30, maxHeight: 140, resize: 'none', fontSize: 13.5, padding: '4px 4px 6px', fontFamily: 'inherit', background: 'transparent', color: 'var(--text)', border: 'none', outline: 'none', lineHeight: 1.55 }} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                <button className="rv-cta" onClick={addAttachments} disabled={status !== 'ready'} title="Attach documents or images"
-                  style={{ border: 'none', background: 'transparent', padding: '3px 5px' }}><Ic.Plus size={16} /></button>
-                <span style={{ flex: 1 }}></span>
-                {info && <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', userSelect: 'none' }} title={`Provider: ${info.provider}`}>{info.model}</span>}
-                <ModeChip mode={rt.mode} onToggle={onToggleMode} disabled={busy} />
-                <button className="rv-cta primary" onClick={onSend}
-                  disabled={(status !== 'ready' && status !== 'awaiting_input') || (!(rt.input || '').trim() && !attachments.length)}
-                  title="Send (Enter)" style={{ borderRadius: 10 }}><Ic.Play size={13} /></button>
-              </div>
+              ))}
             </div>
-          </div>
-        )}
+          )}
+          left={<React.Fragment>
+            <ModelMenu provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig} lockedModel={connected && info ? info.model : null} />
+            <ModeMenu mode={connected ? (rt.mode || 'auto') : startMode} disabled={connected && busy}
+              onChange={(m) => { if (connected) { if (m !== (rt.mode || 'auto')) onToggleMode(); } else setStartMode(m); }} />
+            {!connected && <OptionsMenu headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} />}
+          </React.Fragment>}
+          right={connected && <span className="ag-tokens" title={usageTitle}><Ic.Activity size={10} />{usageText}</span>} />
       </div>
     );
   }
 
-  /* ── Root ────────────────────────────────────────────────────────────────── */
-  /* ── Chat initiator: compose a first message to start a brand-new session ──── */
-  function StartComposer({ onStart, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
-                           startMode, setStartMode, onOpenBrowser, projectId }) {
+  /* ── New chat (no session yet): welcome + composer that creates the session on send ── */
+  function NewChat({ onStart, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
+                     startMode, setStartMode, onOpenBrowser, projectId, projectName, chrome }) {
     const [text, setText] = useState('');
     const [atts, setAtts] = useState([]);
     const [autoOpen, setAutoOpen] = useState(false);
-    const go = () => { const t = text.trim(); if (!t && !atts.length) return; onStart(t, atts); setText(''); setAtts([]); };
-    const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } };
+    const taRef = useRef(null);
+    const canSend = !!(text.trim() || atts.length);
+    const go = () => { if (!canSend) return; onStart(text.trim(), atts); setText(''); setAtts([]); };
     const addFiles = async () => { const r = await window.ats.agentPickFiles(); const files = (r && r.files) || []; if (files.length) setAtts((a) => [...a, ...files]); };
+    const menu = (close) => (
+      <React.Fragment>
+        <MenuItem icon="Globe" label="Open the app in your browser" onClick={() => { close(); onOpenBrowser(); }} />
+        <MenuItem icon="Zap" label="Autonomous run…" hint="Map the app and author tests for every flow" onClick={() => { close(); setAutoOpen(true); }} />
+      </React.Fragment>
+    );
     return (
-      <div className="ses-initiator">
-        {autoOpen && (
-          <RunAutoModal
-            projectId={projectId}
-            onClose={() => setAutoOpen(false)}
-            onConfirm={(msg) => { setAutoOpen(false); onStart(msg, []); }}
-          />
-        )}
-        {atts.length > 0 && (
-          <div className="ses-init-atts">
-            {atts.map((a, i) => (
-              <span key={i} className="att-chip"><Ic.File size={10} /><span className="nm">{a.name}</span>
-                <button onClick={() => setAtts((x) => x.filter((_, j) => j !== i))}><Ic.X size={10} /></button></span>
-            ))}
+      <div className="agent-pane">
+        <AgentHeader title="New chat" chrome={{ ...chrome, onNew: null }} menu={menu} />
+        <div className="ag-scroll">
+          <div className="ag-column">
+            <Welcome projectName={projectName} onPick={(t) => { setText(t); setTimeout(() => taRef.current && taRef.current.focus(), 0); }} onAuto={() => setAutoOpen(true)} />
           </div>
-        )}
-        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
-          className="ses-init-ta"
-          placeholder={'Message the agent to start a new session… e.g. "log in, open Orders, and write a test for the order lifecycle." (Enter to send)'} />
-        <div className="ses-init-bar">
-          <button className="rv-cta sm" onClick={addFiles} title="Attach documents or images"><Ic.Upload size={13} /></button>
-          <button className="rv-cta sm" onClick={onOpenBrowser} title="Open the app under test in your browser"><Ic.ExternalLink size={13} /></button>
-          <SetupBar provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
-            headed={headed} setHeaded={setHeaded}
-            toolBudget={toolBudget} setToolBudget={setToolBudget}
-            mode={startMode} onToggleMode={() => setStartMode(startMode === 'guided' ? 'auto' : 'guided')}>
-            <button className="rv-cta sm" onClick={() => setAutoOpen(true)} title="Autonomous mode: map the app, extract flows from a spec, and author all tests unsupervised">
-              <Ic.Zap size={12} /> Auto
-            </button>
-            <button className="rv-cta primary sm" onClick={go} disabled={!text.trim() && !atts.length}><Ic.Play size={13} /> Start</button>
-          </SetupBar>
         </div>
+        {autoOpen && (
+          <RunAutoModal projectId={projectId} onClose={() => setAutoOpen(false)}
+            onConfirm={(msg) => { setAutoOpen(false); onStart(msg, []); }} />
+        )}
+        <Composer taRef={taRef} value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } }}
+          placeholder='Describe what to test — e.g. "log in, open Orders and write a test for the order lifecycle"'
+          attachments={atts} onRemoveAttachment={(a) => setAtts((x) => x.filter((y) => y !== a))} onAttach={addFiles}
+          canSend={canSend} onSend={go}
+          left={<React.Fragment>
+            <ModelMenu provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig} />
+            <ModeMenu mode={startMode} onChange={setStartMode} />
+            <OptionsMenu headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} />
+          </React.Fragment>} />
       </div>
     );
   }
@@ -1256,7 +1338,7 @@
     const [sessions, setSessions] = useState([]);
     const [activeId, setActiveId] = useState(null);
     const [runtime, setRuntime] = useState({});
-    const [provider, setProvider] = useState('mock');
+    const [provider, setProvider] = useState('');
     const [llmConfig, setLlmConfig] = useState(null);
     const [secretKeys, setSecretKeys] = useState({});
     const providerList = useMemo(() => {
@@ -1292,13 +1374,23 @@
         setProjects((r && r.projects) || []);
         if (r && r.active) setProjectId(r.active);
       }).catch(() => {});
-      Promise.all([window.ats.getConfig(), window.ats.getSecretStatus()]).then(([cfg, st]) => {
+      loadLlm(true);
+      // Providers are added in the main window's Settings; pick changes up on focus.
+      const onFocus = () => loadLlm(false);
+      window.addEventListener('focus', onFocus);
+      return () => window.removeEventListener('focus', onFocus);
+    }, []);
+
+    const loadLlm = useCallback((initial) => {
+      Promise.all([window.ats.getProviderCatalog(), window.ats.getConfig(), window.ats.getSecretStatus()]).then(([catalog, cfg, st]) => {
+        const LP = window.LlmProviders;
+        if (LP) LP.setCatalog(catalog);
         const c = cfg || {};
         setLlmConfig(c);
-        const keys = (st && st.keys) || {};
-        setSecretKeys(keys);
-        const LP = window.LlmProviders;
-        if (LP) setProvider(LP.defaultFromConfig(c));
+        setSecretKeys((st && st.keys) || {});
+        if (!LP) return;
+        const ids = LP.listFromConfig(c).filter((p) => p.canPlan).map((p) => p.id);
+        setProvider((cur) => (!initial && ids.includes(cur)) ? cur : LP.defaultFromConfig(c));
       }).catch(() => {});
     }, []);
 
@@ -1354,14 +1446,6 @@
 
     const patchRt = (sid, patch) => setRuntime((prev) => ({ ...prev, [sid]: { ...(prev[sid] || emptyRuntime()), ...(typeof patch === 'function' ? patch(prev[sid] || emptyRuntime()) : patch) } }));
 
-    const onNew = async () => {
-      const r = await window.ats.agentNewSession({ projectId, title: '' });
-      if (!r || !r.session) return;
-      const s = { ...r.session, _placeholder: true };
-      setSessions((prev) => [s, ...prev]);
-      setActiveId(s.id);
-      setRuntime((prev) => ({ ...prev, [s.id]: emptyRuntime() }));
-    };
     const onStart = async () => {
       const sid = activeId; if (!sid) return;
       if (!(await ensureProviderKey())) return;
@@ -1384,6 +1468,18 @@
           { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' },
         ] } }));
       const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: '' });
+      if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
+    };
+    // Paused/never-started session: resume it and deliver the message once it is ready.
+    const resumeWithMessage = async (text, atts) => {
+      const sid = activeId; if (!sid) return;
+      if (!(await ensureProviderKey())) return;
+      const sess = sessions.find((s) => s.id === sid) || {};
+      patchRt(sid, (cur) => ({ status: 'starting', input: '', attachments: [], pendingSend: { text, atts: atts || [] },
+        messages: [...cur.messages,
+          ...(text ? [{ id: nextId(), role: 'user', text, attachments: (atts || []).map((a) => a.name) }] : []),
+          { id: nextId(), role: 'system', text: 'Resuming session (launching browser)…' }] }));
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: sess.title || '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Open the app under test (the agent's current page, else the seller URL from config) in the system browser.
@@ -1443,48 +1539,44 @@
 
     const activeSession = sessions.find((s) => s.id === activeId) || null;
     const activeRt = activeId ? (runtime[activeId] || emptyRuntime()) : null;
-    const renderChat = (onBack) => (
-      <SessionChat session={activeSession} rt={activeRt}
-        provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
-        headed={headed} setHeaded={setHeaded}
-        toolBudget={toolBudget} setToolBudget={setToolBudget}
-        startMode={startMode} setStartMode={setStartMode}
-        onStart={onStart} onStartAuto={startWithMessage} onSend={onSend} onStop={onStop} onReset={onReset}
-        onOpenBrowser={openBrowser} onToggleMode={onToggleMode}
+    const projectName = (projects.find((p) => p.id === projectId) || {}).name || '';
+    const onNewChat = () => setActiveId(null);   // a session is only created when the first message is sent
+
+    const historyProps = { projects, projectId, setProjectId, sessions, activeId, runtimeMap: runtime, onRename, onDelete };
+    // Docked: history lives in a header popover. Window: a permanent left sidebar.
+    const historyPopover = embedded ? (
+      <Pop align="right" width={300} className="ag-history-pop" button={({ toggle, open }) => (
+        <button className={'ag-icon-btn' + (open ? ' on' : '')} onClick={toggle} aria-label="Chat history" title="Chat history"><Ic.History size={15} /></button>
+      )}>
+        {(close) => <SessionList {...historyProps} compact onSelect={(id) => { setActiveId(id); close(); }} />}
+      </Pop>
+    ) : null;
+    const chrome = { onNew: onNewChat, history: historyPopover, onUndock: embedded ? onUndock : null, onClose: embedded ? onClose : null };
+    const shared = {
+      provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
+      startMode, setStartMode, onOpenBrowser: openBrowser, projectId, projectName, chrome,
+    };
+    const main = activeSession ? (
+      <SessionChat {...shared} session={activeSession} rt={activeRt}
+        onStart={onStart} onStartAuto={startWithMessage} onSend={onSend} onResumeWithMessage={resumeWithMessage}
+        onStop={onStop} onReset={onReset} onToggleMode={onToggleMode}
+        onRename={(title) => onRename(activeId, title)}
         setInput={(v) => patchRt(activeId, { input: v })}
         setAttachments={(v) => patchRt(activeId, { attachments: v })}
-        projectId={projectId} toast={toast} onBack={onBack} />
-    );
-    const initiator = <StartComposer onStart={startWithMessage}
-      provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig}
-      headed={headed} setHeaded={setHeaded}
-      toolBudget={toolBudget} setToolBudget={setToolBudget}
-      startMode={startMode} setStartMode={setStartMode}
-      onOpenBrowser={openBrowser} projectId={projectId} />;
-    const noSessionPane = (
-      <div className="agent-pane no-ses">
-        <div className="no-ses-msg">
-          <Ic.MessageSquare size={28} style={{ color: 'var(--accent)', marginBottom: 10 }} />
-          <h2>Start the agent</h2>
-          <p>Type a message below to start a new session — or pick one from the list. Each session drives its own browser and keeps its own memory.</p>
-        </div>
-        {initiator}
-      </div>
-    );
-    const list = (
-      <SessionSidebar projects={projects} projectId={projectId} setProjectId={setProjectId}
-        sessions={sessions} activeId={activeId} runtimeMap={runtime}
-        onSelect={setActiveId} onNew={onNew} onRename={onRename} onDelete={onDelete}
-        full={embedded} onUndock={embedded ? onUndock : undefined} onClose={embedded ? onClose : undefined} />
+        toast={toast} />
+    ) : (
+      <NewChat {...shared} onStart={startWithMessage} />
     );
 
     return (
       <div className={'agent-shell' + (embedded ? ' embedded' : '')}>
-        {embedded
-          /* Docked = 2 pages: page 1 is the session list + a chat initiator at the bottom, page 2 is the opened session (with Back). */
-          ? (activeSession ? renderChat(() => setActiveId(null)) : <React.Fragment>{list}{initiator}</React.Fragment>)
-          /* Window = list sidebar + chat (or the start pane + initiator when nothing is selected). */
-          : (<React.Fragment>{list}{activeSession ? renderChat(null) : noSessionPane}</React.Fragment>)}
+        {!embedded && (
+          <aside className="ag-sidebar">
+            <div className="ag-sidebar-brand"><Ic.MessageSquare size={15} /> <b>AI Agent</b></div>
+            <SessionList {...historyProps} onSelect={setActiveId} onNew={onNewChat} />
+          </aside>
+        )}
+        {main}
         <div style={{ position: 'fixed', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 80 }}>
           {toasts.map((t) => (
             <div key={t.id} style={{ background: 'var(--bg-2, var(--bg))', border: '1px solid var(--accent)', borderRadius: 8, padding: '7px 12px', fontSize: 12, boxShadow: '0 6px 18px rgba(0,0,0,0.2)' }}>{t.msg}</div>
