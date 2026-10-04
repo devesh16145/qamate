@@ -827,6 +827,7 @@ ipcMain.handle('agent-start', async (event, opts = {}) => {
       start_path: opts.startPath || '',
       agentMode: (opts.agentMode === 'guided') ? 'guided' : 'auto',
       tool_budget: (opts.toolBudget != null) ? Number(opts.toolBudget) : null,
+      engine: (opts.engine === 'classic') ? 'classic' : 'fast',
     });
   } catch (err) { return { status: 'error', message: err.message }; }
   return { status: 'success' };

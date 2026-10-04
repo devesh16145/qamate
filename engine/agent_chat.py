@@ -4668,12 +4668,24 @@ class AgentRuntime:
                     self.deps.plan[:] = meta0["plan"]
             except Exception:
                 pass
+        # Engine: "fast" (plan once, deterministic execution, replay-verified tests) or
+        # "classic" (the original tool-calling agent). Fast is the default.
+        ex_cfg = self.config.get("agent_execution") or {}
+        self.engine = str(cmd.get("engine") or ex_cfg.get("engine") or "fast").lower()
+        if self.engine not in ("fast", "classic"):
+            self.engine = "fast"
+        self.fast = None
+        self.fast_ctx = {"provider": pname, "base_url": base_url or start_url or None,
+                         "storage_state": load_state,
+                         "test_data": {k: v for k, v in (("username", creds[0]), ("password", creds[1])) if v}
+                                      if creds else {}}
         authed = info.get("authed", "none")
         self.ready_info = {"url": info.get("url", ""), "title": info.get("title", ""),
                            "provider": pname, "model": model_name,
                            "auth": authed != "none", "auth_via": authed,
                            "project": (project or {}).get("name") or project_id or None,
                            "project_id": project_id, "session_id": self.session_id}
+        self.ready_info["engine"] = self.engine
         emit({"event": "ready", **self.ready_info, "resumed": resumed, "mode": mode,
               "plan": list(self.deps.plan), "transcript": transcript, "tokens": self.session_tokens})
 
@@ -4699,6 +4711,9 @@ class AgentRuntime:
                 except Exception:
                     pass
         attachment_names = [name for _p, name in _attachment_paths(attachments)]
+        if getattr(self, "engine", "classic") == "fast":
+            await self._fast_chat(message, attachments, attachment_names)
+            return
         # Inline document text + attach images as multimodal parts. Falls back to a
         # plain string when there are no binary parts (so text-only models are unaffected).
         prompt = _build_user_prompt(
@@ -4758,6 +4773,76 @@ class AgentRuntime:
                 emit({"event": "error", "message": msg, "terminal": True})
                 emit({"event": "turn_complete", "status": "error", "text": msg})
                 log(traceback.format_exc())
+
+    async def _fast_chat(self, message, attachments, attachment_names):
+        """One chat turn on the fast engine: plan, execute, replay-verify, save."""
+        from qm_agent import FastAgent, summary_text
+        task = message or "Use the attached file(s) as the test requirements."
+        for path, name in _attachment_paths(attachments):
+            try:
+                text, _truncated = extract_file_text(path)
+                if text:
+                    task += f"\n\n[Attached: {name}]\n{text[:12000]}"
+            except Exception:
+                pass
+        loop = asyncio.get_running_loop()
+
+        def confirm(intent, element):
+            # Blocks the browser thread until the user answers in the chat.
+            self.deps._ask_state["waiting"] = True
+            emit({"event": "input_required",
+                  "question": f"This step looks irreversible: {element}. Run it? Reply yes or no."})
+            try:
+                answer = asyncio.run_coroutine_threadsafe(self._user_input_q.get(), loop).result(timeout=900)
+            except Exception:
+                answer = ""
+            finally:
+                self.deps._ask_state["waiting"] = False
+            return str(answer).strip().lower() in ("y", "yes", "ok", "okay", "go", "run it", "confirm", "sure")
+
+        def work():
+            if self.fast is None:
+                tests_root = (project_store.ensure_tests_scaffold(self.ats_root, self.project_id)
+                              if self.project_id else os.path.join(self.ats_root, "tests"))
+                self.fast = FastAgent(self.session.page, self.session.browser, self.config,
+                                      provider_name=self.fast_ctx["provider"], base_url=self.fast_ctx["base_url"],
+                                      tests_root=tests_root, storage_state=self.fast_ctx["storage_state"],
+                                      test_data=self.fast_ctx["test_data"], emit=emit, confirm=confirm)
+            return self.fast.run_task(task)
+
+        try:
+            result = await _bro(work)
+            text = summary_text(result)
+            usage = getattr(self.fast.planner, "usage", None) if self.fast else None
+            if usage:
+                for key in ("input", "output"):
+                    self.session_tokens[key] = self.session_tokens.get(key, 0) + usage.pop(key, 0)
+                self.session_tokens["total"] = self.session_tokens.get("input", 0) + self.session_tokens.get("output", 0)
+                emit({"event": "usage", **self.session_tokens})
+            emit({"event": "turn_complete", "text": text, "fast_result": {
+                k: result.get(k) for k in ("saved", "replay", "steps", "authoring_s", "stop_reason")}})
+            self._persist_fast_turn(message, attachment_names, text)
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            emit({"event": "error", "message": msg})
+            emit({"event": "turn_complete", "status": "error", "text": msg})
+            self._persist_fast_turn(message, attachment_names, msg)
+            log(traceback.format_exc())
+
+    def _persist_fast_turn(self, message, attachment_names, reply):
+        if not self.session_id:
+            return
+        try:
+            agent_sessions.append_bubbles(self.ats_root, self.project_id, self.session_id, [
+                agent_sessions.user_bubble(message, attachment_names), {"role": "assistant", "text": reply}])
+            meta = agent_sessions.read_session(self.ats_root, self.project_id, self.session_id) or {}
+            patch = {"message_count": int(meta.get("message_count") or 0) + 2, "status": "idle",
+                     "tokens": dict(self.session_tokens)}
+            if message and (not (meta.get("title") or "").strip() or meta.get("title") == "New session"):
+                patch["title"] = message.strip()[:80]
+            agent_sessions.update_session_meta(self.ats_root, self.project_id, self.session_id, patch)
+        except Exception as e:
+            log(f"[agent] persist failed: {e}")
 
     async def show_browser(self, cmd):
         """Switch the testing browser to headed (visible) mode so the user can watch.

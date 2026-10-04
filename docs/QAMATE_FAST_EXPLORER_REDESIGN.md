@@ -308,3 +308,18 @@ per-phase timers (startup / plan / execute / verify) and per-role tokens.
   caps, a quiet-DOM fallback, and the same waits emitted into the test.
 - **Scope.** Mitigation: build alongside the current engine, reuse what works, and measure
   every phase; legacy stays available until replaced.
+
+## 8. Progress log
+
+### 2026-10-04 — Phases 0–3 built (fast engine is the default; Classic stays selectable)
+
+| Phase | What landed | Evidence |
+|---|---|---|
+| 0 | Sync request interception removed from the decision loop; three replay bugs fixed (scroll, set_checked, macOS select-all) plus unrecorded key presses and visible-text checks; authoring verification without video/tracing; per-request planner timing and reasoning tokens | Regression tests fail on the old code, pass on the new; verification 3.2 s → 2.0 s on two demo tests |
+| 1 | `qm_runtime` (one implementation of every step, live and replay), `qm_observe` (Playwright AI snapshot), `qm_selectors` (Playwright-chosen locators, rendered as readable Python, verified to target the same element), `qm_steps`, `qm_testgen`, `qm_verify`; Playwright 1.58 → 1.63 | Dispatch Desk 11-step transfer: authoring 3.6 s, fresh replay 3.7 s, pytest replay with QAmate's conftest 5.0 s, stable over repeated runs |
+| 2 | `qm_ground` (deterministic ranking with item context for repeated controls), `qm_decide` (Jev over a short list with "none of these"), `qm_explorer` (precise stop reasons, destructive-action confirmation, loop stop, custom dropdowns) | SauceDemo login + two specific products + check from plain-language steps: 3.6–3.9 s, about 0.35 s per click/fill, no model calls |
+| 3 | `qm_planner` (compact page summary, plan-as-far-as-visible, re-plan on surprise), `qm_agent` (bounded rounds and time; saves a test only after a fresh-browser replay passes), wired into the agent runtime and panel (Engine: Fast / Classic) | Scripted-planner tests through a real agent session: plan → execute → replay → saved into the project suite → transcript persisted |
+
+Not yet measured: the live planner (MiMo) on the benchmark tasks — needs the user's keys. Next: run the
+benchmark tasks on the Fast engine with MiMo (and Jev for ambiguity), compare with the Classic
+baseline, then Phase 4 (app map and cached sequences) and Phase 5 (retire legacy modes).

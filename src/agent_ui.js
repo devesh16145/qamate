@@ -331,7 +331,9 @@
         <button onClick={() => setOpen(o => !o)}
           style={{ display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%', fontSize: 11, color: 'var(--text-3)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-            Worked with {pairs.length} tool call{pairs.length !== 1 ? 's' : ''} — {preview}
+            {names.length === 1 && names[0] === 'step'
+              ? `Ran ${pairs.length} step${pairs.length !== 1 ? 's' : ''}${pairs.some(p => p.result && /"ok": false/.test(p.result.text || '')) ? ' — one could not run' : ''}`
+              : `Worked with ${pairs.length} tool call${pairs.length !== 1 ? 's' : ''} — ${preview}`}
           </span>
           <span style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', opacity: 0.7 }}>›</span>
         </button>
@@ -605,12 +607,26 @@
       </Pop>
     );
   }
-  function OptionsMenu({ headed, setHeaded, toolBudget, setToolBudget }) {
+  function OptionsMenu({ headed, setHeaded, toolBudget, setToolBudget, engine, setEngine }) {
     return (
       <Pop up width={260} button={({ toggle, open }) => (
         <button className={'ag-icon-btn' + (open ? ' on' : '')} onClick={toggle} aria-label="Session options" title="Session options"><Ic.Sliders size={14} /></button>
       )}>
         <div className="ag-menu-head">Session options</div>
+        {setEngine && (
+          <div className="ag-opt" style={{ cursor: 'default' }}>
+            <Ic.Zap size={13} style={{ marginTop: 2, color: 'var(--text-3)' }} />
+            <span style={{ flex: 1 }}>
+              <span className="ag-menu-label">Engine</span>
+              <span className="ag-menu-hint">{engine === 'classic'
+                ? 'Classic: the original tool-calling agent.'
+                : 'Fast: plans once, acts without a model on clear steps, replays every test before saving.'}</span>
+              <select value={engine} onChange={(e) => setEngine(e.target.value)} style={{ marginTop: 5, fontSize: 11.5, padding: '3px 6px', width: '100%' }}>
+                <option value="fast">Fast (new)</option><option value="classic">Classic</option>
+              </select>
+            </span>
+          </div>
+        )}
         <label className="ag-opt">
           <input type="checkbox" checked={headed} onChange={(e) => setHeaded(e.target.checked)} />
           <span><span className="ag-menu-label">Watch live</span><span className="ag-menu-hint">Show the browser window while the agent works.</span></span>
@@ -785,7 +801,7 @@
   }
 
   /* ── Active session (ALWAYS rendered with a real session — no conditional hooks) ── */
-  function SessionChat({ session, rt, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
+  function SessionChat({ session, rt, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget, engine, setEngine,
                          startMode, setStartMode, onStart, onStartAuto, onSend, onResumeWithMessage, onStop, onReset, onOpenBrowser,
                          onToggleMode, setInput, setAttachments, projectId, projectName, toast, chrome, onRename }) {
     const scrollRef = useRef(null);
@@ -1105,7 +1121,7 @@
             <ModelMenu provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig} lockedModel={connected && info ? info.model : null} />
             <ModeMenu mode={connected ? (rt.mode || 'auto') : startMode} disabled={connected && busy}
               onChange={(m) => { if (connected) { if (m !== (rt.mode || 'auto')) onToggleMode(); } else setStartMode(m); }} />
-            {!connected && <OptionsMenu headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} />}
+            {!connected && <OptionsMenu headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} engine={engine} setEngine={setEngine} />}
           </React.Fragment>}
           right={connected && <span className="ag-tokens" title={usageTitle}><Ic.Activity size={10} />{usageText}</span>} />
       </div>
@@ -1113,7 +1129,7 @@
   }
 
   /* ── New chat (no session yet): welcome + composer that creates the session on send ── */
-  function NewChat({ onStart, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
+  function NewChat({ onStart, provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget, engine, setEngine,
                      startMode, setStartMode, onOpenBrowser, projectId, projectName, chrome }) {
     const [text, setText] = useState('');
     const [atts, setAtts] = useState([]);
@@ -1148,7 +1164,7 @@
           left={<React.Fragment>
             <ModelMenu provider={provider} setProvider={setProvider} providerList={providerList} secretKeys={secretKeys} llmConfig={llmConfig} />
             <ModeMenu mode={startMode} onChange={setStartMode} />
-            <OptionsMenu headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} />
+            <OptionsMenu headed={headed} setHeaded={setHeaded} toolBudget={toolBudget} setToolBudget={setToolBudget} engine={engine} setEngine={setEngine} />
           </React.Fragment>} />
       </div>
     );
@@ -1348,6 +1364,8 @@
     const [startMode, setStartMode] = useState('auto');   // initial GUIDED/AUTO for new sessions
     const [headed, setHeaded] = useState(false);
     const [toolBudget, setToolBudget] = useState(30);
+    const [engine, setEngineState] = useState(() => { try { return localStorage.getItem('qamate.engine') === 'classic' ? 'classic' : 'fast'; } catch (e) { return 'fast'; } });
+    const setEngine = (v) => { setEngineState(v); try { localStorage.setItem('qamate.engine', v); } catch (e) { /* ignore */ } };
     const [toasts, setToasts] = useState([]);
     const idRef = useRef(0);
     const nextId = () => (idRef.current += 1);
@@ -1451,7 +1469,7 @@
       if (!(await ensureProviderKey())) return;
       const sess = sessions.find((s) => s.id === sid) || {};
       patchRt(sid, (cur) => ({ status: 'starting', messages: [...cur.messages, { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' }] }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: sess.title || '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, engine, title: sess.title || '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Compose-to-start: create a session, start it, and queue the first message (sent on 'ready').
@@ -1467,7 +1485,7 @@
           ...(text ? [{ id: nextId(), role: 'user', text, attachments: (atts || []).map((a) => a.name) }] : []),
           { id: nextId(), role: 'system', text: 'Starting session (launching browser)…' },
         ] } }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, engine, title: '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Paused/never-started session: resume it and deliver the message once it is ready.
@@ -1479,7 +1497,7 @@
         messages: [...cur.messages,
           ...(text ? [{ id: nextId(), role: 'user', text, attachments: (atts || []).map((a) => a.name) }] : []),
           { id: nextId(), role: 'system', text: 'Resuming session (launching browser)…' }] }));
-      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, title: sess.title || '' });
+      const res = await window.ats.agentStart({ sessionId: sid, projectId, provider, headed, toolBudget, agentMode: startMode, engine, title: sess.title || '' });
       if (res && res.status === 'error') patchRt(sid, (cur) => ({ status: 'idle', pendingSend: null, messages: [...cur.messages, { id: nextId(), role: 'error', text: res.message }] }));
     };
     // Open the app under test (the agent's current page, else the seller URL from config) in the system browser.
@@ -1553,7 +1571,7 @@
     ) : null;
     const chrome = { onNew: onNewChat, history: historyPopover, onUndock: embedded ? onUndock : null, onClose: embedded ? onClose : null };
     const shared = {
-      provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget,
+      provider, setProvider, providerList, secretKeys, llmConfig, headed, setHeaded, toolBudget, setToolBudget, engine, setEngine,
       startMode, setStartMode, onOpenBrowser: openBrowser, projectId, projectName, chrome,
     };
     const main = activeSession ? (
