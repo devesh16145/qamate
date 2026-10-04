@@ -49,6 +49,7 @@ class Explorer:
         self.flow = Flow(page, base_url=base_url, timeout_ms=timeout_ms)
         self.check_timeout_ms = check_timeout_ms
         self.steps, self.data = [], {}
+        self.start_url = None      # page the first recorded action happened on
         self._history = {}
 
     # ── public ──────────────────────────────────────────────────────────────
@@ -119,7 +120,8 @@ class Explorer:
                     "detail": f"no element clearly matches {target!r}",
                     "candidates": [c.element.summary() for c in candidates[:5]]}
         element = pick.element
-        label = intent.get("label") or target or element.label
+        within = intent.get("within")
+        label = intent.get("label") or (f"{target} ({within})" if target and within else target) or element.label
         if op in ("click", "dblclick", "check", "press") and self._destructive(element, intent):
             if not (self.confirm and self.confirm(intent, element.summary())):
                 return {"ok": False, "reason": "needs_confirmation",
@@ -165,6 +167,8 @@ class Explorer:
         if step.get("data_key"):
             self.data[step["data_key"]] = step["value"]
         before = self.page.url
+        if not self.steps and step["op"] != "goto":
+            self.start_url = before
         if check:
             saved = self.flow.timeout_ms
             self.flow.timeout_ms = self.check_timeout_ms

@@ -32,15 +32,17 @@ Each STEP is one of:
   {"do": "expect_url", "url": "<path>"}             only when certain of the exact path
 
 Rules:
-- Use labels exactly as they appear in the page elements. For pages you haven't seen yet,
-  write the label a user would see.
+- Plan the WHOLE task in this reply whenever you can predict it, including pages you haven't
+  seen yet -- for those, write the labels a user would see. Each extra round trip costs time.
+  If a step doesn't match the real page, execution stops there and you'll be shown that page
+  with the closest elements, so you can adjust the rest.
+- On the current page, use labels exactly as they appear in its elements.
 - When several elements share a label (e.g. "Add to cart" on every product), say which one
   with "within": the item's name, row text or section.
-- Plan only the steps you can predict from the current page, then stop. You'll be shown the
-  new page after they run and can continue. Set "done": true only when the whole task is
-  achieved AND its outcomes are checked.
-- Check every outcome the task asks for with expect_* steps once the page showing it is
-  visible. Prefer stable visible text; never assert times, dates or generated ids exactly.
+- Set "done": true when your steps complete the whole task, including its checks. Use
+  "done": false only if you genuinely need to see a page before planning further.
+- Check every outcome the task asks for with expect_* steps. Prefer stable visible text;
+  never assert times, dates or generated ids exactly.
 - Use values from the task or the test data. Never invent credentials.
 - If you get a "problem" (a step that could not run), change your approach -- don't repeat
   the same step. The problem lists the closest matching elements.
@@ -74,6 +76,7 @@ class Planner:
         self.config, self.provider_name, self.emit = config, provider_name, emit
         self.provider = make_provider(config, provider_name, role="planner")
         self.usage = {"input": 0, "output": 0}   # running totals, drained by the caller
+        self.timings = []                        # per call: {ms, input, output, reasoning}
 
     def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
         message = {
@@ -89,6 +92,10 @@ class Planner:
             raw = complete_json(self.provider, SYSTEM, json.dumps(message, ensure_ascii=False), temperature=0.1)
         finally:
             usage = self.provider.last_usage or {}
+            self.timings.append({"ms": round((time.monotonic() - started) * 1000),
+                               "input": usage.get("prompt_tokens", usage.get("input_tokens")),
+                               "output": usage.get("completion_tokens", usage.get("output_tokens")),
+                               "reasoning": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")})
             self.usage["input"] += int(usage.get("prompt_tokens", usage.get("input_tokens")) or 0)
             self.usage["output"] += int(usage.get("completion_tokens", usage.get("output_tokens")) or 0)
             self.emit({"event": "model_usage", "role": "planner", "profile": self.provider_name,

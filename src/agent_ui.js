@@ -405,9 +405,15 @@
       if (msg.resumed && Array.isArray(msg.transcript)) {
         msgs = msg.transcript.map((b) => bubbleFromTranscript(b, nextId()));
       }
-      const authTxt = msg.auth ? ` · authenticated (${msg.auth_via})` : ' · NOT logged in — set credentials in settings';
+      const blank = !msg.url || msg.url === 'about:blank';
+      const engineTxt = msg.engine === 'fast' ? ' · Fast engine' : msg.engine === 'classic' ? ' · Classic engine' : '';
+      let where;
+      if (blank && !msg.project) where = msg.engine === 'fast'
+        ? " No project selected — I'll open the site your task names."
+        : ' No project selected — tell me which site to open.';
+      else where = `${msg.auth ? ` · logged in (${msg.auth_via})` : (msg.project ? ' · not logged in yet' : '')}. Browser open${msg.url ? ' at ' + msg.url : ''}.`;
       msgs = [...msgs, { id: nextId(), role: 'system',
-        text: `Connected to ${msg.provider} (${msg.model})${msg.project ? ' · ' + msg.project : ''}${authTxt}. Browser open${msg.url ? ' at ' + msg.url : ''}.${msg.resumed ? ' Resumed from saved memory.' : ''}` }];
+        text: `Connected to ${msg.provider} (${msg.model})${engineTxt}${msg.project ? ' · ' + msg.project : ''}${blank && !msg.project ? '.' : ''}${where}${msg.resumed ? ' Resumed from saved memory.' : ''}` }];
       return set({ status: 'ready', info, messages: msgs, usage: msg.tokens || rt.usage,
                    mode: msg.mode || rt.mode || 'auto',
                    plan: Array.isArray(msg.plan) && msg.plan.length ? msg.plan : (rt.plan || []) });

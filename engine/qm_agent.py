@@ -53,11 +53,11 @@ def next_tc_id(tests_root, flow):
 class FastAgent:
     def __init__(self, page, browser, config, *, provider_name=None, base_url=None, tests_root=None,
                  storage_state=None, test_data=None, emit=lambda e: None, confirm=None,
-                 max_rounds=8, max_seconds=300):
+                 max_rounds=8, max_seconds=300, log_dir=None):
         self.page, self.browser, self.config = page, browser, config
         self.base_url, self.tests_root, self.storage_state = base_url, tests_root, storage_state
         self.test_data, self.emit, self.confirm = test_data or {}, emit, confirm
-        self.max_rounds, self.max_seconds = max_rounds, max_seconds
+        self.max_rounds, self.max_seconds, self.log_dir = max_rounds, max_seconds, log_dir
         self.planner = Planner(config, provider_name, emit=emit)
         self.history = []   # short summaries of earlier tasks in this chat
 
@@ -65,11 +65,15 @@ class FastAgent:
         started = time.monotonic()
         explorer = Explorer(self.page, base_url=self.base_url, config=self.config,
                             emit=self.emit, confirm=self.confirm)
-        # Every test starts from a known page: reopen where this task begins.
-        start = explorer.run_intent({"do": "goto", "url": self.page.url if self.page.url != "about:blank"
-                                     else (self.base_url or "about:blank"), "name": "Open the app"})
-        if not start["ok"]:
-            return self._finish(task, explorer, started, error=f"could not open the app: {start.get('detail')}")
+        self.planner.timings = []
+        self.trace = []   # one entry per executed intent: what ran, how, how long
+        # Every test starts from a known page: reopen where this task begins. A blank
+        # browser (no project URL) has none -- the planner's first step opens the app.
+        start_url = self.page.url if self.page.url not in ("", "about:blank") else self.base_url
+        if start_url:
+            start = explorer.run_intent({"do": "goto", "url": start_url, "name": "Open the app"})
+            if not start["ok"]:
+                return self._finish(task, explorer, started, error=f"could not open the app: {start.get('detail')}")
         problem, meta, plan_items, stop_reason = None, {"flow": "agent", "title": ""}, [], None
         for round_no in range(self.max_rounds):
             if time.monotonic() - started > self.max_seconds:
@@ -102,6 +106,9 @@ class FastAgent:
                 self.emit({"event": "plan", "steps": plan_items})
                 self.emit({"event": "tool_call", "tool": "step", "args": intent})
                 outcome = explorer.run_intent(intent)   # asks self.confirm before destructive actions
+                self.trace.append({"intent": intent, "ok": outcome["ok"], "ms": outcome.get("ms"),
+                                   "how": outcome.get("how"), "reason": outcome.get("reason"),
+                                   "detail": outcome.get("detail")})
                 self.emit({"event": "tool_result", "tool": "step", "outcome": "ok" if outcome["ok"] else "error",
                            "summary": json.dumps(_brief(outcome), ensure_ascii=False)[:1500]})
                 item["status"] = "done" if outcome["ok"] else "failed"
@@ -118,8 +125,20 @@ class FastAgent:
     def _finish(self, task, explorer, started, *, meta=None, stop_reason=None, problem=None, error=None):
         meta = meta or {"flow": "agent", "title": ""}
         steps, data = explorer.steps, explorer.data
+        # A test must open a real page first, once.
+        while len(steps) >= 2 and steps[0]["op"] == "goto" and steps[1]["op"] == "goto":
+            steps.pop(0)
+        if steps and steps[0]["op"] != "goto" and explorer.start_url:
+            steps.insert(0, {"op": "goto", "value": explorer._url_value(explorer.start_url), "name": "Open the app"})
+        trace = getattr(self, "trace", [])
+        calls = list(getattr(self.planner, "timings", []))
         result = {"task": task, "steps": len(steps), "authoring_s": round(time.monotonic() - started, 1),
-                  "stop_reason": stop_reason or error, "saved": None, "replay": None}
+                  "stop_reason": stop_reason or error, "saved": None, "replay": None,
+                  "timing": {"planner_calls": len(calls), "planner_s": round(sum(c["ms"] for c in calls) / 1000, 1),
+                             "browser_s": round(sum((t.get("ms") or 0) for t in trace) / 1000, 1),
+                             "replay_s": None},
+                  "replanned": [{"step": _intent_text(t["intent"]), "reason": t["reason"], "detail": t["detail"]}
+                                for t in trace if not t["ok"]]}
         meaningful = [s for s in steps if s["op"] != "goto"]
         if error or not meaningful:
             result["summary"] = error or stop_reason or "Nothing was recorded."
@@ -127,6 +146,7 @@ class FastAgent:
             return result
         verify = replay(self.browser, steps, data, base_url=self.base_url, storage_state=self.storage_state)
         result["replay"] = {"ok": verify["ok"], "ms": verify["ms"], "failed_step": verify["failed_step"]}
+        result["timing"]["replay_s"] = round(verify["ms"] / 1000, 1)
         if verify["ok"] and not stop_reason and self.tests_root:
             flow = slug(meta.get("flow") or "agent")
             tc_id = next_tc_id(self.tests_root, flow)
@@ -135,7 +155,21 @@ class FastAgent:
             result["saved"] = {"tc_id": tc_id, "flow": flow, "path": path}
         result["code"] = [render(s) for s in steps]
         self.history.append(f"{task[:80]} -> {result['saved']['tc_id'] if result['saved'] else 'not saved'}")
+        self._write_log(result, calls, trace)
         return result
+
+    def _write_log(self, result, calls, trace):
+        """One JSON file per task: planner calls, every executed step, replay -- for tuning."""
+        if not self.log_dir:
+            return
+        try:
+            os.makedirs(self.log_dir, exist_ok=True)
+            name = time.strftime("%Y%m%d-%H%M%S") + "-" + ((result.get("saved") or {}).get("tc_id") or "unsaved") + ".json"
+            with open(os.path.join(self.log_dir, name), "w", encoding="utf-8") as f:
+                json.dump({**result, "planner_calls": calls, "trace": trace}, f, indent=2, ensure_ascii=False, default=str)
+            result["log"] = os.path.join(self.log_dir, name)
+        except Exception:
+            pass
 
 
 def _brief(outcome):
@@ -163,6 +197,15 @@ def summary_text(result):
         lines.append(f"Not saved: {result.get('summary') or result.get('stop_reason') or 'the task did not finish'}.")
     if result.get("stop_reason") and result.get("saved") is None and result.get("replay"):
         lines.append(f"Stopped early: {result['stop_reason']}.")
+    t = result.get("timing") or {}
+    if t.get("planner_calls") is not None:
+        parts = [f"planning {t['planner_s']} s ({t['planner_calls']} call{'s' if t['planner_calls'] != 1 else ''})",
+                 f"browser {t['browser_s']} s"]
+        if t.get("replay_s") is not None:
+            parts.append(f"replay {t['replay_s']} s")
+        lines.append("Time: " + " · ".join(parts) + ".")
+    for r in (result.get("replanned") or [])[:3]:
+        lines.append(f"Re-planned after: {r['step']} — {r['reason']}" + (f" ({r['detail'][:120]})" if r.get("detail") else ""))
     if result.get("code"):
         lines.append("\n```python\n" + "\n".join(result["code"]) + "\n```")
     return "\n".join(lines)

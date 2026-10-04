@@ -147,3 +147,27 @@ def test_planner_sends_a_compact_page_and_parses_steps(monkeypatch, browser, ser
     assert len(json.dumps(msg)) < 6000           # a compact page, not a DOM dump
     assert events[0]["role"] == "planner" and events[0]["input"] == 900
     page.close()
+
+
+def test_blank_start_without_project_records_the_real_first_page(monkeypatch, browser, server, tmp_path):
+    """Regression (first live run): a session with no project starts on about:blank;
+    the saved test must open the site itself, not about:blank."""
+    page = browser.new_page()
+    assert page.url == "about:blank"
+    scripted = ScriptedPlanner([
+        {"steps": [{"do": "goto", "url": server + "operations.html#/transfers"},
+                   {"do": "click", "target": "New transfer"},
+                   {"do": "expect_text", "value": "New transfer"}], "done": True, "test": {"flow": "transfers"}},
+    ])
+    monkeypatch.setattr(qm_agent, "Planner", lambda *a, **k: scripted)
+    agent = FastAgent(page, browser, {}, base_url=None, tests_root=str(tmp_path / "tests"),
+                      log_dir=str(tmp_path / "logs"))
+    result = agent.run_task("Open the new transfer form")
+    assert result["saved"], result
+    source = open(result["saved"]["path"], encoding="utf-8").read()
+    assert "about:blank" not in source
+    assert f'flow.goto("{server}operations.html#/transfers"' in source.split("flow = Flow")[1].splitlines()[1]
+    assert result["timing"]["planner_calls"] == 0 or result["timing"]["browser_s"] >= 0
+    log = json.load(open(result["log"], encoding="utf-8"))
+    assert log["trace"] and log["replay"]["ok"]
+    page.close()
