@@ -14,9 +14,12 @@
     "start": "electron .",
     "icon": "node scripts/generate-icon.js",
     "prepare:python": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-bundle.ps1",
+    "prepare:python:mac": "bash scripts/prepare-bundle.sh",
     "dist": "electron-builder --win",
     "dist:dir": "electron-builder --win --dir",
-    "screenshots": "venv\\Scripts\\python scripts\\capture-website-screenshots.py",
+    "dist:mac": "electron-builder --mac",
+    "dist:mac:dir": "electron-builder --mac --dir",
+    "screenshots": "node scripts/run-python.js scripts/capture-website-screenshots.py",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -48,6 +51,8 @@
       "config.example.json",
       "run_qamate.bat",
       "run_engine_tests.bat",
+      "run_qamate.sh",
+      "run_engine_tests.sh",
       "tests/__init__.py",
       "tests/conftest.py",
       "tests/flows/README.md",
@@ -82,6 +87,21 @@
       "artifactName": "QAmate-Setup-${version}.${ext}",
       "signAndEditExecutable": false
     },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/branding/qamate-mark-1024.png",
+      "category": "public.app-category.developer-tools",
+      "artifactName": "QAmate-${version}-${arch}.${ext}",
+      "identity": null
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -100,7 +120,7 @@
     "@babel/preset-react": "^7.29.7"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
+    "electron": "^44.5.1",
     "electron-builder": "^25.1.8",
     "png-to-ico": "^2.1.8",
     "sharp": "^0.33.5"

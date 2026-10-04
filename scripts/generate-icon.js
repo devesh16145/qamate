@@ -57,6 +57,14 @@ async function main() {
 
   fs.writeFileSync(path.join(OUT_DIR, 'qamate-mark-256.png'), pngBuffers[256]);
   console.log(`✓ ${path.relative(ROOT, path.join(OUT_DIR, 'qamate-mark-256.png'))}`);
+
+  // macOS: electron-builder converts a >=512px PNG into the .icns.
+  const png1024 = await sharp(svg, { density: 384 })
+    .resize(1024, 1024, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+  fs.writeFileSync(path.join(OUT_DIR, 'qamate-mark-1024.png'), png1024);
+  console.log(`✓ ${path.relative(ROOT, path.join(OUT_DIR, 'qamate-mark-1024.png'))}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

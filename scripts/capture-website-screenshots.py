@@ -7,7 +7,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ELECTRON = ROOT / "node_modules" / "electron" / "dist" / "electron.exe"
+_DIST = ROOT / "node_modules" / "electron" / "dist"
+if sys.platform == "win32":
+    ELECTRON = _DIST / "electron.exe"
+elif sys.platform == "darwin":
+    ELECTRON = _DIST / "Electron.app" / "Contents" / "MacOS" / "Electron"
+else:
+    ELECTRON = _DIST / "electron"
 OUT = ROOT / "website" / "assets" / "screenshots"
 
 

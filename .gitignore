@@ -17,6 +17,7 @@ test-results/
 # ...but keep the generated brand marks tracked (built from SVG by `npm run icon`)
 !assets/branding/qamate-mark-32.png
 !assets/branding/qamate-mark-256.png
+!assets/branding/qamate-mark-1024.png
 !website/assets/screenshots/*.png
 
 # Recording session auth (saved cookies/localStorage — reused across recordings)
@@ -88,3 +89,6 @@ tests/flows/account_statement/
 tests/flows/bench_catalog/
 engine/cart_create_compare.py
 engine/backend_compare.py
+
+# Agent runtime session state
+.agent_context/
