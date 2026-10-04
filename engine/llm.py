@@ -91,9 +91,54 @@ class BaseProvider:
     def complete(self, system, user, max_tokens=None, temperature=0.2):
         raise NotImplementedError
 
+    def stream(self, system, user, on_text, max_tokens=None, temperature=0.2):
+        """Like complete(), but hands the reply to `on_text(piece)` as it is generated, so a
+        caller can act on the start of a long answer before the end is written. When
+        `on_text` returns False the request is abandoned (the connection is closed, which
+        stops generation). Returns the text received. Providers without streaming deliver
+        the whole reply in one piece."""
+        text = self.complete(system, user, max_tokens=max_tokens, temperature=temperature)
+        on_text(text)
+        return text
+
+
+def _http_stream_lines(url, headers, payload, timeout=120):
+    """POST and yield the response body line by line (server-sent events / NDJSON)."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={**headers, "Content-Type": "application/json"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "ignore")[:600]
+        raise LLMError(f"HTTP {e.code} from {url}: {body}", status_code=e.code)
+    except urllib.error.URLError as e:
+        raise LLMError(f"could not reach {url}: {e.reason}")
+    except Exception as e:
+        raise LLMError(f"request to {url} failed: {e}")
+    with resp:
+        for raw in resp:
+            line = raw.decode("utf-8", "ignore").strip()
+            if line:
+                yield line
+
+
+def _sse_events(lines):
+    """`data: {...}` lines of a server-sent-event stream, parsed; stops at [DONE]."""
+    for line in lines:
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return
+        try:
+            yield json.loads(data)
+        except ValueError:
+            continue
+
 
 class AnthropicProvider(BaseProvider):
-    def complete(self, system, user, max_tokens=None, temperature=0.2):
+    def _request(self, system, user, max_tokens, temperature):
         payload = {
             "model": self.cfg["model"],
             "max_tokens": max_tokens or self.cfg.get("max_tokens", 4096),
@@ -108,9 +153,38 @@ class AnthropicProvider(BaseProvider):
         headers = {"x-api-key": self._key(), "anthropic-version": "2023-06-01"}
         base = (self.cfg.get("base_url") or "https://api.anthropic.com").rstrip("/")
         endpoint = base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+        return endpoint, headers, payload
+
+    def complete(self, system, user, max_tokens=None, temperature=0.2):
+        endpoint, headers, payload = self._request(system, user, max_tokens, temperature)
         resp = _http_post_json(endpoint, headers, payload, timeout=self.cfg.get("timeout", 60))
         self.last_usage = resp.get("usage")
         return "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+
+    def stream(self, system, user, on_text, max_tokens=None, temperature=0.2):
+        endpoint, headers, payload = self._request(system, user, max_tokens, temperature)
+        payload["stream"] = True
+        text, usage = [], {}
+        self.last_usage = None
+        lines = _http_stream_lines(endpoint, headers, payload, timeout=self.cfg.get("timeout", 60))
+        try:
+            for event in _sse_events(lines):
+                kind = event.get("type")
+                if kind == "message_start":
+                    usage.update((event.get("message") or {}).get("usage") or {})
+                elif kind == "message_delta":
+                    usage.update(event.get("usage") or {})
+                elif kind == "content_block_delta" and (event.get("delta") or {}).get("type") == "text_delta":
+                    piece = event["delta"].get("text") or ""
+                    text.append(piece)
+                    if on_text(piece) is False:
+                        break
+                elif kind == "error":
+                    raise LLMError(f"stream error from {endpoint}: {json.dumps(event.get('error'))[:400]}")
+        finally:
+            lines.close()   # abandoning the stream closes the connection, which stops generation
+        self.last_usage = usage or None
+        return "".join(text)
 
 
 class OpenAIProvider(BaseProvider):
@@ -119,7 +193,7 @@ class OpenAIProvider(BaseProvider):
     def _base(self):
         return (self.cfg.get("base_url") or self.default_base).rstrip("/")
 
-    def complete(self, system, user, max_tokens=None, temperature=0.2):
+    def _request(self, system, user, max_tokens, temperature):
         payload = {
             "model": self.cfg["model"],
             "max_tokens": max_tokens or self.cfg.get("max_tokens", 4096),
@@ -135,9 +209,50 @@ class OpenAIProvider(BaseProvider):
         # Preset request extras, e.g. MiMo/DeepSeek {"thinking": {"type": "enabled"}}.
         payload.update(((self.cfg.get("model_settings") or {}).get("extra_body")) or {})
         headers = {"Authorization": f"Bearer {self._key()}", **(self.cfg.get("headers") or {})}
-        resp = _http_post_json(f"{self._base()}/chat/completions", headers, payload, timeout=self.cfg.get("timeout", 60))
+        return f"{self._base()}/chat/completions", headers, payload
+
+    def complete(self, system, user, max_tokens=None, temperature=0.2):
+        endpoint, headers, payload = self._request(system, user, max_tokens, temperature)
+        resp = _http_post_json(endpoint, headers, payload, timeout=self.cfg.get("timeout", 60))
         self.last_usage = resp.get("usage")
         return resp["choices"][0]["message"]["content"]
+
+    def stream(self, system, user, on_text, max_tokens=None, temperature=0.2):
+        endpoint, headers, payload = self._request(system, user, max_tokens, temperature)
+        payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
+        try:
+            lines = _http_stream_lines(endpoint, headers, payload, timeout=self.cfg.get("timeout", 60))
+            first = next(lines, None)
+        except LLMError as exc:
+            if exc.status_code != 400:
+                raise
+            payload.pop("stream_options")   # an endpoint that doesn't know usage-in-stream
+            lines = _http_stream_lines(endpoint, headers, payload, timeout=self.cfg.get("timeout", 60))
+            first = next(lines, None)
+        text, usage = [], None
+        self.last_usage = None
+        try:
+            for chunk in _sse_events(_chain(first, lines)):
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                if chunk.get("error"):
+                    raise LLMError(f"stream error from {endpoint}: {json.dumps(chunk['error'])[:400]}")
+                piece = "".join(((c.get("delta") or {}).get("content") or "") for c in chunk.get("choices") or [])
+                if piece:
+                    text.append(piece)
+                    if on_text(piece) is False:
+                        break
+        finally:
+            lines.close()   # abandoning the stream closes the connection, which stops generation
+        self.last_usage = usage
+        return "".join(text)
+
+
+def _chain(first, rest):
+    if first is not None:
+        yield first
+    yield from rest
 
 
 class GeminiProvider(OpenAIProvider):
@@ -151,20 +266,49 @@ class GeminiProvider(OpenAIProvider):
 
 class OllamaProvider(BaseProvider):
     """Local models — no key required."""
-    def complete(self, system, user, max_tokens=None, temperature=0.2):
+    def _request(self, system, user, temperature, stream):
         base = (self.cfg.get("base_url") or "http://localhost:11434").rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3]
         payload = {
             "model": self.cfg["model"],
-            "stream": False,
+            "stream": stream,
             "options": {"temperature": temperature},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
-        resp = _http_post_json(f"{base}/api/chat", {}, payload, timeout=self.cfg.get("timeout", 60))
+        return f"{base}/api/chat", payload
+
+    def _usage(self, resp):
         if "prompt_eval_count" in resp or "eval_count" in resp:
             self.last_usage = {"input_tokens": resp.get("prompt_eval_count"), "output_tokens": resp.get("eval_count")}
+
+    def complete(self, system, user, max_tokens=None, temperature=0.2):
+        endpoint, payload = self._request(system, user, temperature, False)
+        resp = _http_post_json(endpoint, {}, payload, timeout=self.cfg.get("timeout", 60))
+        self._usage(resp)
         return (resp.get("message") or {}).get("content", "")
+
+    def stream(self, system, user, on_text, max_tokens=None, temperature=0.2):
+        endpoint, payload = self._request(system, user, temperature, True)
+        text = []
+        self.last_usage = None
+        lines = _http_stream_lines(endpoint, {}, payload, timeout=self.cfg.get("timeout", 60))
+        try:
+            for line in lines:
+                try:
+                    chunk = json.loads(line)
+                except ValueError:
+                    continue
+                piece = (chunk.get("message") or {}).get("content") or ""
+                if piece:
+                    text.append(piece)
+                    if on_text(piece) is False:
+                        break
+                if chunk.get("done"):
+                    self._usage(chunk)
+        finally:
+            lines.close()
+        return "".join(text)
 
 
 _PROVIDERS = {

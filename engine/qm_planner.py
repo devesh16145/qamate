@@ -7,16 +7,18 @@ tool list and full DOM dumps. It plans only as far as it can see; after those st
 it is shown the new page.
 """
 import json
+import queue
 import re
+import threading
 import time
 
-from llm import make_provider, complete_json, LLMError
+from llm import make_provider, extract_json, LLMError
 from qm_runtime import relative_url
 
 SYSTEM = """You plan the steps of a browser test for QAmate, a test-automation tool.
 You get the task, test data and the CURRENT page (its interactive elements and visible text).
-Reply with ONLY a JSON object:
-{"steps": [STEP, ...], "done": false, "test": {"flow": "orders", "title": "Short test title"}}
+Reply with ONLY a JSON object, keys in this order:
+{"test": {"flow": "orders", "title": "Short test title"}, "steps": [STEP, ...], "done": false}
 
 Each STEP is one of:
   {"do": "goto", "url": "<path or URL>"}            only the app's start URL or a link you can see
@@ -76,51 +78,189 @@ class Planner:
         self.config, self.provider_name, self.emit = config, provider_name, emit
         self.provider = make_provider(config, provider_name, role="planner")
         self.usage = {"input": 0, "output": 0}   # running totals, drained by the caller
-        self.timings = []                        # per call: {ms, input, output, reasoning}
+        self.timings = []                        # per call: {ms, first_step_ms, input, output, reasoning}
 
-    def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
-        message = {
+    def _message(self, task, observation, done_steps, problem, test_data, history):
+        return json.dumps({
             "task": task,
             "test_data": test_data or {},
             "page": page_summary(observation),
             "steps_done": [s.get("name") or s["op"] for s in done_steps][-30:],
             "problem": problem,
             "earlier_tasks": list(history)[-5:],
-        }
-        started = time.monotonic()
+        }, ensure_ascii=False)
+
+    def plan(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
+        """The whole plan in one go (blocks until the model has finished writing it)."""
+        stream = self.start(task, observation, done_steps=done_steps, problem=problem,
+                            test_data=test_data, history=history)
+        for _ in stream.steps():
+            pass
+        return stream.result()
+
+    def start(self, task, observation, *, done_steps=(), problem=None, test_data=None, history=()):
+        """Start planning and return a PlanStream: its steps can be executed while the model
+        is still writing the rest of the plan."""
+        return PlanStream(self, self._message(task, observation, done_steps, problem, test_data, history))
+
+    def _account(self, started, first_step_ms, cancelled):
+        usage = self.provider.last_usage or {}
+        tokens_in = usage.get("prompt_tokens", usage.get("input_tokens"))
+        tokens_out = usage.get("completion_tokens", usage.get("output_tokens"))
+        reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        ms = round((time.monotonic() - started) * 1000)
+        self.timings.append({"ms": ms, "first_step_ms": first_step_ms, "input": tokens_in, "output": tokens_out,
+                             "reasoning": reasoning, "cancelled": cancelled})
+        self.usage["input"] += int(tokens_in or 0)
+        self.usage["output"] += int(tokens_out or 0)
+        self.emit({"event": "model_usage", "role": "planner", "profile": self.provider_name,
+                   "input": tokens_in, "output": tokens_out, "reasoning_tokens": reasoning,
+                   "duration_ms": ms, "first_step_ms": first_step_ms})
+
+
+class StepScanner:
+    """Pulls each complete step object out of a reply that is still being written:
+    {"steps": [{...}, {...}, ...  -> yields every {...} as soon as its closing brace arrives."""
+
+    _STEPS = re.compile(r'"steps"\s*:\s*\[')
+
+    def __init__(self):
+        self.text, self.pos, self.depth, self.start = "", None, 0, None
+        self.in_string = self.escaped = self.closed = False
+
+    def feed(self, piece):
+        self.text += piece
+        found = []
+        if self.pos is None:
+            match = self._STEPS.search(self.text)
+            if not match:
+                return found
+            self.pos = match.end()
+        i, text = self.pos, self.text
+        while i < len(text) and not self.closed:
+            ch = text[i]
+            if self.in_string:
+                if self.escaped:
+                    self.escaped = False
+                elif ch == "\\":
+                    self.escaped = True
+                elif ch == '"':
+                    self.in_string = False
+            elif ch == '"':
+                self.in_string = True
+            elif ch == "{":
+                if self.depth == 0:
+                    self.start = i
+                self.depth += 1
+            elif ch == "}" and self.depth > 0:
+                self.depth -= 1
+                if self.depth == 0 and self.start is not None:
+                    try:
+                        found.append(json.loads(text[self.start:i + 1]))
+                    except ValueError:
+                        pass
+                    self.start = None
+            elif ch == "]" and self.depth == 0:
+                self.closed = True
+            i += 1
+        self.pos = i
+        return [s for s in (normalize_step(f) for f in found) if s]
+
+
+class PlanStream:
+    """One planner call, streamed on a worker thread. `steps()` yields each step as soon as
+    the model has written it; `cancel()` abandons the rest (the plan stopped matching the
+    page, so the model would only be writing steps that won't be used); `result()` gives
+    the final {steps, done, blocked, test}."""
+
+    def __init__(self, planner, message):
+        self.planner, self.message = planner, message
+        self.queue, self.scanner = queue.Queue(), StepScanner()
+        self.started = time.monotonic()
+        self.first_step_ms = None
+        self.cancelled = False
+        self.text, self.error = "", None
+        self.thread = threading.Thread(target=self._run, name="qm-planner", daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        prompt = self.message + "\n\nRespond with ONLY valid JSON. No prose, no code fences."
+        provider = self.planner.provider
         try:
-            raw = complete_json(self.provider, SYSTEM, json.dumps(message, ensure_ascii=False), temperature=0.1)
+            if hasattr(provider, "stream"):
+                self.text = provider.stream(SYSTEM, prompt, self._on_text, temperature=0.1)
+            else:   # a provider that can only answer in one piece
+                self.text = provider.complete(SYSTEM, prompt, temperature=0.1)
+                self._on_text(self.text)
+        except Exception as exc:   # surfaced by result(); the caller decides what it means
+            self.error = exc
         finally:
-            usage = self.provider.last_usage or {}
-            self.timings.append({"ms": round((time.monotonic() - started) * 1000),
-                               "input": usage.get("prompt_tokens", usage.get("input_tokens")),
-                               "output": usage.get("completion_tokens", usage.get("output_tokens")),
-                               "reasoning": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")})
-            self.usage["input"] += int(usage.get("prompt_tokens", usage.get("input_tokens")) or 0)
-            self.usage["output"] += int(usage.get("completion_tokens", usage.get("output_tokens")) or 0)
-            self.emit({"event": "model_usage", "role": "planner", "profile": self.provider_name,
-                       "input": usage.get("prompt_tokens", usage.get("input_tokens")),
-                       "output": usage.get("completion_tokens", usage.get("output_tokens")),
-                       "reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
-                       "duration_ms": round((time.monotonic() - started) * 1000)})
-        return normalize_plan(raw)
+            self.queue.put(None)
+
+    def _on_text(self, piece):
+        if self.cancelled:
+            return False
+        for step in self.scanner.feed(piece):
+            if self.first_step_ms is None:
+                self.first_step_ms = round((time.monotonic() - self.started) * 1000)
+            self.queue.put(step)
+        return True
+
+    def steps(self):
+        while True:
+            step = self.queue.get()
+            if step is None:
+                return
+            yield step
+
+    def pending(self):
+        """Steps already written but not yet taken by steps() -- shown as upcoming."""
+        return [s for s in list(self.queue.queue) if s is not None]
+
+    def cancel(self):
+        self.cancelled = True
+
+    def result(self, timeout=None):
+        self.thread.join(timeout)
+        self.planner._account(self.started, self.first_step_ms, self.cancelled)
+        if self.error is not None and not self.cancelled:
+            raise self.error if isinstance(self.error, LLMError) else LLMError(str(self.error))
+        try:
+            if not self.cancelled:
+                return normalize_plan(extract_json(self.text))
+        except LLMError:
+            if self.first_step_ms is None:
+                raise
+        # Abandoned (or cut off) after some steps: keep what the reply said about the test.
+        match = re.search(r'"test"\s*:\s*(\{[^{}]*\})', self.scanner.text)
+        try:
+            test = json.loads(match.group(1)) if match else {}
+        except ValueError:
+            test = {}
+        return {"steps": [], "done": False, "blocked": None, "test": _test_meta(test), "partial": True}
+
+
+def normalize_step(step):
+    if not isinstance(step, dict) or not step.get("do"):
+        return None
+    step = dict(step)
+    if step["do"] == "expect_text" and not step.get("target"):
+        step["do"] = "expect_page_text"
+    return step
+
+
+def _test_meta(test):
+    test = test if isinstance(test, dict) else {}
+    return {"flow": slug(test.get("flow") or "agent"), "title": str(test.get("title") or "").strip()[:120]}
 
 
 def normalize_plan(raw):
     """Defensive parse of the planner's JSON into {steps, done, blocked, test}."""
     if not isinstance(raw, dict):
         raise LLMError("planner did not return a JSON object")
-    steps = []
-    for step in raw.get("steps") or []:
-        if not isinstance(step, dict) or not step.get("do"):
-            continue
-        step = dict(step)
-        if step["do"] == "expect_text" and not step.get("target"):
-            step["do"] = "expect_page_text"
-        steps.append(step)
-    test = raw.get("test") if isinstance(raw.get("test"), dict) else {}
+    steps = [s for s in (normalize_step(step) for step in raw.get("steps") or []) if s]
     return {"steps": steps, "done": bool(raw.get("done")), "blocked": raw.get("blocked") or None,
-            "test": {"flow": slug(test.get("flow") or "agent"), "title": str(test.get("title") or "").strip()[:120]}}
+            "test": _test_meta(raw.get("test"))}
 
 
 def slug(text):

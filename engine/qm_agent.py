@@ -81,46 +81,69 @@ class FastAgent:
                 break
             obs = observe(self.page)
             try:
-                plan = self.planner.plan(task, obs, done_steps=explorer.steps, problem=problem,
-                                         test_data=self.test_data, history=self.history)
+                stream = self._start_plan(task, obs, explorer, problem)
             except Exception as exc:
                 stop_reason = f"planner error: {str(exc)[:200]}"
                 break
-            if plan["test"]["flow"] != "agent" or not meta["title"]:
-                meta = {**meta, **{k: v for k, v in plan["test"].items() if v}}
-            if plan["blocked"]:
-                stop_reason = f"blocked: {plan['blocked']}"
-                break
-            if not plan["steps"]:
-                if plan["done"]:
-                    break
-                problem = {"reason": "empty_plan", "detail": "no steps were proposed; propose the next steps or set done"}
-                continue
-            plan_items = [p for p in plan_items if p["status"] == "done"] + \
-                         [{"step": _intent_text(s), "status": "pending"} for s in plan["steps"]]
-            self.emit({"event": "plan", "steps": plan_items})
-            problem = None
-            for intent in plan["steps"]:
-                item = next(p for p in plan_items if p["status"] == "pending")
-                item["status"] = "active"
-                self.emit({"event": "plan", "steps": plan_items})
+            # Steps run as soon as the planner has written them, while it writes the rest.
+            plan_items = [p for p in plan_items if p["status"] == "done"]
+            problem, ran = None, 0
+            for intent in stream.steps():
+                item = {"step": _intent_text(intent), "status": "active"}
+                plan_items.append(item)
+                self._emit_plan(plan_items, stream)
                 self.emit({"event": "tool_call", "tool": "step", "args": intent})
                 outcome = explorer.run_intent(intent)   # asks self.confirm before destructive actions
+                ran += 1
                 self.trace.append({"intent": intent, "ok": outcome["ok"], "ms": outcome.get("ms"),
                                    "how": outcome.get("how"), "reason": outcome.get("reason"),
                                    "detail": outcome.get("detail")})
                 self.emit({"event": "tool_result", "tool": "step", "outcome": "ok" if outcome["ok"] else "error",
                            "summary": json.dumps(_brief(outcome), ensure_ascii=False)[:1500]})
                 item["status"] = "done" if outcome["ok"] else "failed"
-                self.emit({"event": "plan", "steps": plan_items})
+                self._emit_plan(plan_items, stream)
                 if not outcome["ok"]:
                     problem = {"step": intent, **_brief(outcome)}
+                    stream.cancel()   # the rest was planned for a page that turned out different
                     break
-            if problem is None and plan["done"]:
+            try:
+                plan = stream.result()
+            except Exception as exc:
+                if ran and problem is None:   # the reply broke off after some steps ran: carry on
+                    problem = {"reason": "planner_error", "detail": str(exc)[:200]}
+                    continue
+                stop_reason = f"planner error: {str(exc)[:200]}"
+                break
+            if plan["test"]["flow"] != "agent":
+                meta["flow"] = plan["test"]["flow"]
+            if plan["test"]["title"] and (not meta["title"] or plan["test"]["flow"] != "agent"):
+                meta["title"] = plan["test"]["title"]
+            if plan["blocked"]:
+                stop_reason = f"blocked: {plan['blocked']}"
+                break
+            if problem is not None:
+                continue
+            if not ran:
+                if plan["done"]:
+                    break
+                problem = {"reason": "empty_plan", "detail": "no steps were proposed; propose the next steps or set done"}
+                continue
+            if plan["done"]:
                 break
         else:
             stop_reason = f"stopped after {self.max_rounds} planning rounds"
         return self._finish(task, explorer, started, meta=meta, stop_reason=stop_reason, problem=problem)
+
+    def _start_plan(self, task, observation, explorer, problem):
+        kwargs = {"done_steps": explorer.steps, "problem": problem, "test_data": self.test_data,
+                  "history": self.history}
+        if hasattr(self.planner, "start"):
+            return self.planner.start(task, observation, **kwargs)
+        return _Planned(self.planner.plan(task, observation, **kwargs))
+
+    def _emit_plan(self, items, stream):
+        upcoming = [{"step": _intent_text(s), "status": "pending"} for s in stream.pending()]
+        self.emit({"event": "plan", "steps": items + upcoming})
 
     def _finish(self, task, explorer, started, *, meta=None, stop_reason=None, problem=None, error=None):
         meta = meta or {"flow": "agent", "title": ""}
@@ -135,6 +158,8 @@ class FastAgent:
         result = {"task": task, "steps": len(steps), "authoring_s": round(time.monotonic() - started, 1),
                   "stop_reason": stop_reason or error, "saved": None, "replay": None,
                   "timing": {"planner_calls": len(calls), "planner_s": round(sum(c["ms"] for c in calls) / 1000, 1),
+                             "first_step_s": (round(calls[0]["first_step_ms"] / 1000, 1)
+                                              if calls and calls[0].get("first_step_ms") is not None else None),
                              "browser_s": round(sum((t.get("ms") or 0) for t in trace) / 1000, 1),
                              "replay_s": None},
                   "replanned": [{"step": _intent_text(t["intent"]), "reason": t["reason"], "detail": t["detail"]}
@@ -172,6 +197,27 @@ class FastAgent:
             pass
 
 
+class _Planned:
+    """A finished plan behind the PlanStream interface, for planners that don't stream."""
+
+    def __init__(self, plan):
+        self.plan, self.taken = plan, 0
+
+    def steps(self):
+        for step in self.plan["steps"]:
+            self.taken += 1
+            yield step
+
+    def pending(self):
+        return self.plan["steps"][self.taken:]
+
+    def cancel(self):
+        pass
+
+    def result(self):
+        return self.plan
+
+
 def _brief(outcome):
     keep = ("ok", "reason", "detail", "how", "confidence", "element", "candidates", "url", "ms")
     out = {k: outcome[k] for k in keep if k in outcome and outcome[k] not in (None, "", [])}
@@ -199,8 +245,10 @@ def summary_text(result):
         lines.append(f"Stopped early: {result['stop_reason']}.")
     t = result.get("timing") or {}
     if t.get("planner_calls") is not None:
-        parts = [f"planning {t['planner_s']} s ({t['planner_calls']} call{'s' if t['planner_calls'] != 1 else ''})",
-                 f"browser {t['browser_s']} s"]
+        calls = f"{t['planner_calls']} call{'s' if t['planner_calls'] != 1 else ''}"
+        if t.get("first_step_s") is not None:
+            calls += f", first step running at {t['first_step_s']} s"
+        parts = [f"planning {t['planner_s']} s ({calls})", f"browser {t['browser_s']} s"]
         if t.get("replay_s") is not None:
             parts.append(f"replay {t['replay_s']} s")
         lines.append("Time: " + " · ".join(parts) + ".")
