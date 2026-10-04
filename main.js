@@ -1247,9 +1247,12 @@ ipcMain.handle('bench-run', async (event, opts) => {
   if (!fs.existsSync(VENV_PYTHON)) return { ok: false, error: `Python not found at ${VENV_PYTHON}` };
   const provider = (opts && opts.provider) || '';
   const only = (opts && opts.only) || '';
-  const args = [path.join(APP_ROOT, 'engine', 'agent_bench.py')];
+  const fast = (opts && opts.engine) === 'fast';
+  // Fast engine: engine/qm_bench.py (ten workflows, ~10-20 min); classic: engine/agent_bench.py.
+  const args = [path.join(APP_ROOT, 'engine', fast ? 'qm_bench.py' : 'agent_bench.py')];
   if (provider) args.push('--provider', provider);
   if (only) args.push('--only', only);
+  if (fast && opts.warm) args.push('--warm');
   benchProcess = spawn(VENV_PYTHON, args, {
     cwd: DATA_ROOT,
     env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT, PYTHONPATH: APP_ROOT, ..._llmEnv(),
@@ -1277,7 +1280,7 @@ ipcMain.handle('bench-run', async (event, opts) => {
     benchProcess = null;
     benchBroadcast({ type: 'exit', code });
   });
-  benchBroadcast({ type: 'started', provider, pid });
+  benchBroadcast({ type: 'started', provider, pid, engine: fast ? 'fast' : 'classic' });
   return { ok: true, pid };
 });
 
@@ -1313,7 +1316,7 @@ ipcMain.handle('bench-results', async () => {
     if (!fs.existsSync(p)) continue;
     try {
       const sc = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      out.push({ id: d, generated: sc.generated, provider: sc.provider, env: sc.env,
+      out.push({ id: d, generated: sc.generated, provider: sc.provider, env: sc.env, engine: sc.engine || 'classic',
                  scorecard: sc.scorecard, tasks: sc.tasks, folder: path.join(benchDir, d) });
     } catch { /* partial write — skip */ }
   }

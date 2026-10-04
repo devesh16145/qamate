@@ -2895,12 +2895,20 @@ window.nowTs = nowTs;
 const BENCH_VERDICT_COLOR = {
   reliable: 'var(--green, #16a34a)', flaky: '#c2410c', failing: 'var(--red, #dc2626)',
   not_delivered: 'var(--red, #dc2626)', timeout: '#c2410c', infra_error: '#7c3aed',
-  delivered_unverified: 'var(--text-3)', skipped: 'var(--text-3)',
+  delivered_unverified: 'var(--text-3)', skipped: 'var(--text-3)', error: '#7c3aed',
 };
+
+const BENCH_SCOPES = [
+  { id: '', label: 'All 10 tasks' }, { id: 'crm', label: 'Atomic CRM (3)' },
+  { id: 'saucedemo', label: 'SauceDemo (4)' }, { id: 'dispatch', label: 'Dispatch Desk (3)' },
+];
 
 function BenchPanel({ toast }) {
   const [providers, setProviders] = useState([]);
   const [provider, setProvider] = useState('');
+  const [engine, setEngine] = useState('fast');
+  const [scope, setScope] = useState('');
+  const [warm, setWarm] = useState(false);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState([]);
   const [results, setResults] = useState([]);
@@ -2928,7 +2936,7 @@ function BenchPanel({ toast }) {
         setLog(prev => [...prev.slice(-400), ev.line]);
       } else if (ev.type === 'started') {
         setRunning(true);
-        setLog(prev => [...prev, `— benchmark started (provider: ${ev.provider || 'config default'}, pid ${ev.pid}) —`]);
+        setLog(prev => [...prev, `— ${ev.engine === 'fast' ? 'fast-engine ' : ''}benchmark started (provider: ${ev.provider || 'config default'}, pid ${ev.pid}) —`]);
       } else if (ev.type === 'exit') {
         setRunning(false);
         setLog(prev => [...prev, ev.stopped ? '— benchmark stopped —' : `— benchmark finished (exit ${ev.code}) —`]);
@@ -2943,7 +2951,7 @@ function BenchPanel({ toast }) {
   }, [log]);
 
   const start = async () => {
-    const r = await window.ats.benchRun({ provider });
+    const r = await window.ats.benchRun(engine === 'fast' ? { provider, engine, only: scope, warm } : { provider, engine });
     if (!r || !r.ok) toast((r && r.error) || 'could not start benchmark');
   };
   const stop = async () => { await window.ats.benchStop(); };
@@ -2955,8 +2963,26 @@ function BenchPanel({ toast }) {
       {/* Run controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>Authoring benchmark</span>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>10 fixed tasks · agent authors + verifies live · independently re-verified</span>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>fixed tasks · agent authors + verifies live · independently re-verified</span>
         <div style={{ flex: 1 }}></div>
+        <label style={{ fontSize: 11, color: 'var(--text-3)' }}>Engine</label>
+        <select value={engine} onChange={e => setEngine(e.target.value)} disabled={running}
+                style={{ fontSize: 12, padding: '4px 8px' }}>
+          <option value="fast">Fast</option>
+          <option value="classic">Classic</option>
+        </select>
+        {engine === 'fast' && (
+          <React.Fragment>
+            <select value={scope} onChange={e => setScope(e.target.value)} disabled={running}
+                    style={{ fontSize: 12, padding: '4px 8px' }} title="Which tasks to run">
+              {BENCH_SCOPES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}
+                   title="Tasks on the same app share what earlier tasks learned about its pages">
+              <input type="checkbox" checked={warm} onChange={e => setWarm(e.target.checked)} disabled={running} /> Warm memory
+            </label>
+          </React.Fragment>
+        )}
         <label style={{ fontSize: 11, color: 'var(--text-3)' }}>Provider</label>
         <select value={provider} onChange={e => setProvider(e.target.value)} disabled={running}
                 style={{ fontSize: 12, padding: '4px 8px' }}>
@@ -2973,8 +2999,10 @@ function BenchPanel({ toast }) {
         )}
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: -8 }}>
-        A full run drives the LIVE app for 1–3 hours and recreates the bench_* flows. Scorecards land in
-        <span style={{ fontFamily: 'var(--mono)' }}> results/_agent_bench/</span>.
+        {engine === 'fast'
+          ? 'Fast engine: the ten frozen-gate workflows (Atomic CRM, SauceDemo, Dispatch Desk) in isolated test projects, each saved test re-run twice through pytest. About 10–20 minutes for all ten. Your saved tests are not touched.'
+          : 'A full run drives the LIVE app for 1–3 hours and recreates the bench_* flows.'}
+        {' '}Scorecards land in <span style={{ fontFamily: 'var(--mono)' }}>results/_agent_bench/</span>.
       </div>
 
       {/* Live log */}
@@ -3004,6 +3032,7 @@ function BenchPanel({ toast }) {
                 <th style={{ padding: '4px 6px' }}>Score</th>
                 <th style={{ padding: '4px 6px' }}>Delivered</th>
                 <th style={{ padding: '4px 6px' }}>First-try</th>
+                <th style={{ padding: '4px 6px' }}>Median time</th>
                 <th style={{ padding: '4px 6px' }}>Tokens</th>
                 <th></th>
               </tr>
@@ -3018,7 +3047,7 @@ function BenchPanel({ toast }) {
                   <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
                       onClick={() => setOpenRun(isOpen ? null : r.id)}>
                     <td style={{ padding: '6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{r.id}</td>
-                    <td style={{ padding: '6px' }}>{r.provider}</td>
+                    <td style={{ padding: '6px' }}>{r.provider}{r.engine === 'fast' ? <span style={{ color: 'var(--text-3)' }}> · fast{r.env === 'warm' ? ' · warm' : ''}</span> : null}</td>
                     <td style={{ padding: '6px', fontWeight: 700,
                                  color: (sc.benchmark_score || 0) >= 70 ? 'var(--green, #16a34a)' : (sc.benchmark_score || 0) >= 40 ? '#c2410c' : 'var(--red, #dc2626)' }}>
                       {sc.benchmark_score != null ? `${sc.benchmark_score}%` : '—'}
@@ -3026,6 +3055,7 @@ function BenchPanel({ toast }) {
                     </td>
                     <td style={{ padding: '6px' }}>{sc.delivered_pct != null ? `${sc.delivered_pct}%` : '—'}</td>
                     <td style={{ padding: '6px' }}>{sc.first_try_pct != null ? `${sc.first_try_pct}%` : '—'}</td>
+                    <td style={{ padding: '6px' }}>{sc.median_authoring_s_reliable != null ? `${Math.round(sc.median_authoring_s_reliable)}s` : '—'}</td>
                     <td style={{ padding: '6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{fmtTok(sc.tokens_total)}</td>
                     <td style={{ padding: '6px', textAlign: 'right' }}>
                       <button className="ic" title="Open folder"
@@ -3036,7 +3066,7 @@ function BenchPanel({ toast }) {
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={7} style={{ padding: '4px 6px 10px' }}>
+                      <td colSpan={8} style={{ padding: '4px 6px 10px' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                           <thead>
                             <tr style={{ textAlign: 'left', color: 'var(--text-3)', fontSize: 10 }}>
