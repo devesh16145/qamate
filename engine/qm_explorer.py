@@ -148,14 +148,51 @@ class Explorer:
         return outcome
 
     def _custom_select(self, intent, step, element, how, confidence, loc):
-        """A non-native dropdown: open it, then click the option -- two recorded steps."""
+        """A non-native dropdown: open it and click the option. Searchable ones (comboboxes
+        that list only some suggestions) get the value typed into their search box first.
+        Only an option labelled exactly as asked is taken -- never a look-alike such as
+        'Create "<value>"', which would add a record instead of choosing one."""
+        value = str(intent.get("value", ""))
         opened = self._record({"op": "click", "target": loc["python"], "name": f"Open {step['name']}"})
         if not opened["ok"]:
             return opened
-        option = self._element_intent({"do": "click", "target": str(intent.get("value", "")),
-                                       "label": f"Choose {intent.get('value')}"})
-        option.setdefault("how", how)
-        return option
+        option, candidates = self._exact_option(value)
+        if option is None:
+            box = self._focused_search_box(exclude=element)
+            if box is not None:
+                typed = self._record({"op": "fill", "target": box["python"], "value": value,
+                                      "name": f"Search {step['name']} for {value}"})
+                if not typed["ok"]:
+                    return typed
+                option, candidates = self._exact_option(value)
+        if option is None:
+            return {"ok": False, "reason": "not_found", "detail": f"{step['name']} has no option {value!r}",
+                    "candidates": [c.element.summary() for c in candidates[:5]]}
+        option_loc = locator_for(self.page, option.element)
+        if not option_loc["unique"]:
+            return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {option.element.summary()}"}
+        outcome = self._record({"op": "click", "target": option_loc["python"], "name": f"Choose {value}"})
+        outcome.update({"how": how, "confidence": confidence, "element": option.element.summary()})
+        return outcome
+
+    def _exact_option(self, value):
+        candidates = rank({"op": "click", "target": value}, observe(self.page))
+        exact = [c for c in candidates if c.exact >= 0.95]
+        best = max(exact, key=lambda c: (c.exact, c.element.role == "option", c.score), default=None)
+        if best is not None and sum(1 for c in exact if c.exact == best.exact and c.element.role == best.element.role) > 1:
+            best = None   # two options with the same label: let the planner disambiguate
+        return best, candidates
+
+    def _focused_search_box(self, exclude=None):
+        """The text box a just-opened dropdown put the cursor in (its filter/search field)."""
+        obs = observe(self.page)
+        for el in obs.elements:
+            if el.attrs.get("active") and el.role in ("combobox", "searchbox", "textbox"):
+                if exclude is not None and el.ref == exclude.ref and el.role != "combobox":
+                    return None
+                loc = locator_for(self.page, el)
+                return loc if loc["unique"] else None
+        return None
 
     # ── execution + recording ───────────────────────────────────────────────
     def _record(self, step, check=False):

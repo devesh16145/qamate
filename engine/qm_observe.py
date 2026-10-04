@@ -46,11 +46,13 @@ class Element:
     parent: object = None                          # nearest ancestor Element (with a ref)
     children: list = field(default_factory=list)   # descendant Elements one level down
     context: str = ""                              # nearby labels that tell repeated controls apart
+    content: str = ""                              # a nameless control's inner labels (card links)
 
     @property
     def label(self):
-        """What a user would call it: accessible name, else its visible text."""
-        return self.name or self.inline or " ".join(self.text).strip()
+        """What a user would call it: accessible name, else its visible text, else (for a
+        nameless link or button such as a card) the labels inside it."""
+        return self.name or self.inline or " ".join(self.text).strip() or self.content
 
     @property
     def interactive(self):
@@ -136,6 +138,7 @@ def parse(snapshot_text):
         if name and role in ("heading", "cell", "status", "alert"):
             texts.append(name)
         stack.append((indent, el, role, name))
+    _add_content(elements)
     _add_context(elements)
     return elements, texts
 
@@ -146,6 +149,15 @@ def _subtree(el):
         out.append(child)
         out.extend(_subtree(child))
     return out
+
+
+def _add_content(elements):
+    """A link or button with no accessible name (a card wrapping a heading and an image)
+    is still called something by users: the labels inside it."""
+    for e in elements:
+        if e.interactive and not (e.name or e.inline or e.text):
+            inner = [n.name or n.inline or " ".join(n.text) for n in _subtree(e)[:12] if not n.interactive]
+            e.content = " ".join(dict.fromkeys(l.strip() for l in inner if l and l.strip()))[:100]
 
 
 def _add_context(elements):

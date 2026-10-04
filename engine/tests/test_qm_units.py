@@ -84,3 +84,78 @@ def test_steps_render_to_flow_calls():
         'flow.upload(page.get_by_label("File"), TEST_UPLOAD_IMAGE)'
     with pytest.raises(ValueError):
         call_spec({"op": "teleport"})
+
+
+# ── grounding (shapes taken from the Atomic CRM demo) ─────────────────────────
+from types import SimpleNamespace
+
+from qm_ground import decide, rank
+
+CRM = '''- generic [ref=e1]:
+  - navigation [ref=e2]:
+    - link "Contacts" [ref=e3] [cursor=pointer]:
+      - /url: "#/contacts"
+    - link "Companies" [ref=e4] [cursor=pointer]:
+      - /url: "#/companies"
+  - main [ref=e5]:
+    - heading "QAMATE Lifecycle" [level=5] [ref=e6]
+    - tablist [ref=e7]:
+      - tab "Activity" [selected] [ref=e8]
+      - tab "1 contact" [ref=e9]
+    - link "Create contact" [ref=e10] [cursor=pointer]:
+      - /url: "#/contacts/create"
+    - link "Acme Rockets" [ref=e11] [cursor=pointer]:
+      - /url: "#/companies/7/show"
+    - link "Acme Rockets" [ref=e12] [cursor=pointer]:
+      - /url: "#/companies/7/show"
+    - group [ref=e13]:
+      - generic [ref=e14]: Company
+      - combobox "Company" [ref=e15] [cursor=pointer]: Acme Rockets
+    - link [ref=e20] [cursor=pointer]:
+      - /url: "#/companies/55/show"
+      - generic [ref=e21]:
+        - img "QAMATE Lifecycle" [ref=e22]
+        - generic [ref=e23]:
+          - heading "QAMATE Lifecycle" [level=6] [ref=e24]
+          - paragraph [ref=e25]: Industrials
+'''
+
+
+def _ground(op, target, **extra):
+    elements, _ = parse(CRM)
+    candidates = rank({"op": op, "target": target, **extra}, SimpleNamespace(elements=elements))
+    pick = decide(candidates)
+    return pick.element if pick else None, candidates
+
+
+def test_a_nameless_card_link_is_named_by_its_content_and_clicked_through_its_heading():
+    elements, _ = parse(CRM)
+    card = next(e for e in elements if e.ref == "e20")
+    assert card.label == "QAMATE Lifecycle Industrials"
+    pick, _ = _ground("click", "QAMATE Lifecycle")
+    assert pick is not None and pick.ref == "e24"   # the card's heading (readable), not its image
+
+
+def test_an_exact_label_beats_one_that_only_contains_the_word():
+    pick, _ = _ground("click", "Contacts")
+    assert pick.ref == "e3"
+
+
+def test_synonyms_ground_a_guessed_label_without_a_replan():
+    pick, _ = _ground("click", "New Contact")
+    assert pick.ref == "e10"
+
+
+def test_a_named_role_wins_and_counts_in_labels_are_ignored():
+    pick, _ = _ground("click", "Contacts tab")
+    assert pick.ref == "e9"
+
+
+def test_duplicate_links_to_the_same_place_are_one_choice():
+    pick, candidates = _ground("click", "Acme Rockets")
+    assert len([c for c in candidates if c.element.role == "link"]) == 2 and pick.ref == "e11"
+
+
+def test_a_text_check_targets_the_control_showing_the_value():
+    pick, _ = _ground("expect_text", "Company", value="Acme Rockets")
+    assert pick.ref == "e15"

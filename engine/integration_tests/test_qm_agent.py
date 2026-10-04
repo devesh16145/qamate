@@ -87,14 +87,28 @@ def test_surprise_goes_back_to_the_planner_with_candidates(monkeypatch, browser,
     page = browser.new_page()
     page.goto(server + "operations.html#/transfers")
     agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [
-        {"steps": [{"do": "click", "target": "Create transfer button"}], "test": {"flow": "transfers"}},
+        {"steps": [{"do": "click", "target": "Start a shipment"}], "test": {"flow": "transfers"}},
         {"steps": [{"do": "click", "target": "New transfer"},
                    {"do": "expect_text", "value": "New transfer"}], "done": True},
     ])
     result = agent.run_task("Open the new transfer form")
     problem = scripted.calls[1]["problem"]
-    assert problem and problem["reason"] in ("ambiguous", "not_found") and problem["step"]["target"] == "Create transfer button"
+    assert problem and problem["reason"] in ("ambiguous", "not_found") and problem["step"]["target"] == "Start a shipment"
     assert result["saved"], result
+    page.close()
+
+
+def test_a_guessed_synonym_label_needs_no_replan(monkeypatch, browser, server, tmp_path):
+    # Planned before seeing the page: "Create transfer button" for the "New transfer" link.
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [
+        {"steps": [{"do": "click", "target": "Create transfer button"},
+                   {"do": "expect_text", "value": "New transfer"}], "done": True, "test": {"flow": "transfers"}},
+    ])
+    result = agent.run_task("Open the new transfer form")
+    assert len(scripted.calls) == 1 and result["saved"], result
+    assert 'get_by_role("link", name="New transfer")' in "\n".join(result["code"])
     page.close()
 
 
