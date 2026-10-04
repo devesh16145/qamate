@@ -257,3 +257,29 @@ def test_look_alike_controls_need_a_within_to_be_chosen():
     assert decide(rank({"op": "click", "target": "Add to cart"}, obs)) is None       # which one?
     pick = decide(rank({"op": "click", "target": "Add to cart", "within": "Sauce Labs Bike Light"}, obs))
     assert pick.element.ref == "a2"
+
+
+def test_hash_root_is_the_app_root():
+    assert route_of("https://x.test/app/#/") == route_of("https://x.test/app/") == "/app/"
+
+
+def test_explore_reply_lists_navigation_once_then_fields_actions_and_destinations():
+    from qm_map import describe_pages
+    m = PageMap()
+    m.see(_obs("https://x.test/#/orders", LIST))
+    m.see(_obs("https://x.test/#/orders/create", FORM))
+    m.went("https://x.test/#/orders", "New order", "https://x.test/#/orders/create")
+    lines = describe_pages(m)
+    assert lines[0] == "**On every page:** Orders, Customers"
+    listing = next(l for l in lines if l.startswith("- `/#/orders` "))
+    assert "links: New order → `/#/orders/create`" in listing and "fields: Search" in listing
+    form = next(l for l in lines if l.startswith("- `/#/orders/create` "))
+    assert "fields: Customer, Status, Notes" in form and "actions: Create order" in form
+
+
+def test_a_request_names_the_site_to_open():
+    from qm_agent import is_exploration, task_url
+    ask = "Explore https://marmelab.com/atomic-crm-demo/ and list its main pages. Follow links only."
+    assert task_url(ask) == "https://marmelab.com/atomic-crm-demo/" and is_exploration(ask)
+    assert task_url("Log in on (https://www.saucedemo.com).") == "https://www.saucedemo.com"
+    assert not is_exploration("Explore the cart and write a test for removing an item")

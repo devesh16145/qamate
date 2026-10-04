@@ -12,9 +12,10 @@ import json
 import os
 import re
 import time
+from urllib.parse import urlsplit
 
 from qm_explorer import Explorer
-from qm_map import PageMap, quick_scan
+from qm_map import PageMap, describe_pages, quick_scan
 from qm_observe import observe
 from qm_planner import Planner, slug
 from qm_runtime import relative_url
@@ -29,6 +30,20 @@ _EXPLORE = re.compile(r"^\s*(?:please\s+)?(?:explore|scan|map|learn)\b", re.I)
 def is_exploration(task):
     """'Explore the app and list its flows' asks for a map of the app, not a test."""
     return bool(_EXPLORE.match(task or "")) and not re.search(r"\btests?\b", task, re.I)
+
+
+_URL = re.compile(r"https?://[^\s<>\"'`)\]]+", re.I)
+
+
+def task_url(task):
+    """The first web address in a request ("Explore https://... and ..."), minus trailing punctuation."""
+    match = _URL.search(task or "")
+    return match.group(0).rstrip(".,;:!?") if match else None
+
+
+def _origin(url):
+    parts = urlsplit(url or "")
+    return parts.scheme, parts.netloc
 
 
 def _intent_text(intent):
@@ -80,9 +95,13 @@ class FastAgent:
         self.planner.timings = []
         self.trace = []   # one entry per executed intent: what ran, how, how long
         self.scan_ms = None
-        # Every test starts from a known page: reopen where this task begins. A blank
-        # browser (no project URL) has none -- the planner's first step opens the app.
+        # Every test starts from a known page: reopen where this task begins. A blank browser
+        # (no project URL) opens the site the request names; with none named, the planner's
+        # first step opens the app. "Explore <url>" goes there even from another app.
         start_url = self.page.url if self.page.url not in ("", "about:blank") else self.base_url
+        asked = task_url(task)
+        if asked and (not start_url or (is_exploration(task) and _origin(asked) != _origin(start_url))):
+            start_url = asked
         if start_url:
             start = explorer.run_intent({"do": "goto", "url": start_url, "name": "Open the app"})
             if not start["ok"]:
@@ -91,6 +110,10 @@ class FastAgent:
                 return self._explore(task, started)
             if self.scan == "auto" and len(self.page_map) < 3:
                 self._learn_app()
+        elif is_exploration(task):
+            return {"task": task, "steps": 0, "authoring_s": 0, "stop_reason": None, "saved": None, "replay": None,
+                    "ask": "Which site should I explore? Include its address, for example: "
+                           "Explore https://marmelab.com/atomic-crm-demo/ and list its pages and forms."}
         problem, meta, plan_items, stop_reason = None, {"flow": "agent", "title": ""}, [], None
         for round_no in range(self.max_rounds):
             if time.monotonic() - started > self.max_seconds:
@@ -163,12 +186,15 @@ class FastAgent:
         self.emit({"event": "plan", "steps": item})
 
     def _explore(self, task, started):
-        """'Explore the app': map its pages instead of authoring a test."""
-        scanned = quick_scan(self.page, self.page_map, max_pages=25, max_seconds=45, emit=self.emit)
+        """'Explore the app': map its pages (following links only) instead of authoring a test."""
+        page_map = self.page_map
+        if page_map.path and self.base_url and _origin(self.page.url) != _origin(self.base_url):
+            page_map = PageMap()   # another site: keep it out of this project's memory
+        scanned = quick_scan(self.page, page_map, max_pages=25, max_seconds=45, emit=self.emit)
         result = {"task": task, "steps": 0, "authoring_s": round(time.monotonic() - started, 1),
                   "stop_reason": None, "saved": None, "replay": None,
                   "explored": {"pages": scanned["pages"], "s": round(scanned["ms"] / 1000, 1),
-                               "lines": self.page_map.for_task(task, budget=6000)}}
+                               "lines": describe_pages(page_map)}}
         self.history.append(f"{task[:80]} -> mapped {scanned['pages']} pages")
         return result
 
@@ -269,12 +295,13 @@ def _brief(outcome):
 def summary_text(result):
     """Plain chat reply for a finished task."""
     lines = []
+    if result.get("ask"):
+        return result["ask"]
     if result.get("explored"):
         e = result["explored"]
-        lines.append(f"Mapped **{e['pages']} pages** of the app in {e['s']} s (links only; nothing was submitted).")
-        lines += [f"- `{line.split(' (', 1)[0]}` {line.split(' (', 1)[1] if ' (' in line else ''}" if not line.startswith("Everywhere")
-                  else f"- {line}" for line in e["lines"]]
-        lines.append("\nI'll use these pages and labels when planning. Ask me to write a test for any flow.")
+        lines.append(f"Mapped **{e['pages']} pages** in {e['s']} s, following links only (nothing was submitted).\n")
+        lines += e["lines"]
+        lines.append("\nI'll plan with these exact labels from now on. Ask me to write a test for any of these flows.")
         return "\n".join(lines)
     if result.get("saved"):
         s = result["saved"]

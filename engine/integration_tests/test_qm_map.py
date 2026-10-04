@@ -64,3 +64,68 @@ def test_quick_scan_learns_forms_through_links_only_and_returns(site, tmp_path):
     assert 'textbox "Customer"' in form and 'combobox "Status"' in form and 'button "Create order"' in form
     assert {"from": "/orders.html", "label": "New order", "to": "/orders/new.html"} in page_map.moves
     assert result["pages"] == 5 and os.path.exists(tmp_path / "page_map.json")
+
+
+def test_explore_from_a_blank_browser_opens_the_site_named_in_the_request(site, tmp_path):
+    """No project (the browser starts blank): "Explore <url>" maps that site, with no model call."""
+    from qm_agent import FastAgent, summary_text
+
+    class NoPlanner:
+        def plan(self, *a, **k):
+            raise AssertionError("exploring must not call the planner")
+    base, requested = site
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        import qm_agent
+        original = qm_agent.Planner
+        qm_agent.Planner = lambda *a, **k: NoPlanner()
+        try:
+            agent = FastAgent(page, browser, {}, base_url=None, tests_root=str(tmp_path / "tests"))
+            result = agent.run_task(f"Explore {base}/index.html and list its pages and forms. Follow links only.")
+        finally:
+            qm_agent.Planner = original
+        assert page.url == base + "/index.html"
+        browser.close()
+    reply = summary_text(result)
+    assert result["explored"]["pages"] == 5 and result["saved"] is None
+    assert "fields: Customer, Status" in reply and "New order → `/orders/new.html`" in reply
+    assert len(agent.page_map) == 5                       # kept for the next request in this chat
+    assert not {"/logout", "/delete-all", "/export.csv"} & set(requested)
+
+
+def test_exploring_another_site_leaves_the_projects_memory_alone(site, tmp_path):
+    from qm_agent import FastAgent
+    import qm_agent
+    base, _ = site
+    map_path = tmp_path / "page_map.json"
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        original = qm_agent.Planner
+        qm_agent.Planner = lambda *a, **k: type("NoPlanner", (), {"timings": []})()
+        try:
+            agent = FastAgent(page, browser, {}, base_url="https://project-app.test/", tests_root=str(tmp_path / "t"),
+                              page_map=PageMap(str(map_path)))
+            result = agent.run_task(f"Explore {base}/index.html")
+        finally:
+            qm_agent.Planner = original
+        browser.close()
+    assert result["explored"]["pages"] == 5 and not map_path.exists() and len(agent.page_map) == 0
+
+
+def test_explore_without_a_site_asks_which_one(tmp_path):
+    from qm_agent import FastAgent, summary_text
+    import qm_agent
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        original = qm_agent.Planner
+        qm_agent.Planner = lambda *a, **k: type("NoPlanner", (), {"timings": []})()
+        try:
+            agent = FastAgent(page, browser, {}, base_url=None, tests_root=str(tmp_path / "t"))
+            result = agent.run_task("Explore the app and list its main user flows, with the pages each flow touches.")
+        finally:
+            qm_agent.Planner = original
+        browser.close()
+    assert summary_text(result).startswith("Which site should I explore?")

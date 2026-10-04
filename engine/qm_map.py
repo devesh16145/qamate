@@ -35,7 +35,8 @@ def route_of(url):
     rel = relative_url(url)
     path, _, fragment = rel.partition("#")
     fold = lambda part: "/".join(":id" if _ID.match(seg) else seg for seg in part.split("?")[0].split("/"))
-    return fold(path) + ("#" + fold(fragment) if fragment else "")
+    fragment = fold(fragment)
+    return fold(path) + ("#" + fragment if fragment not in ("", "/") else "")   # /app/#/ is /app/
 
 
 def _control_line(el):
@@ -158,9 +159,9 @@ class PageMap:
     def _everywhere(self):
         if len(self.pages) < 2:
             return []
-        counts = {}
+        counts = {}   # in order of first appearance, so the listing is stable
         for page in self.pages.values():
-            for c in set(page.get("controls") or []):
+            for c in dict.fromkeys(page.get("controls") or []):
                 counts[c] = counts.get(c, 0) + 1
         need = max(2, int(0.6 * len(self.pages) + 0.5))
         return [c for c, n in counts.items() if n >= need]
@@ -170,6 +171,51 @@ class PageMap:
         have = set(canonical_words(" ".join(page.get("controls") or []) + " " + page["route"] + " " +
                                    " ".join(page.get("headings") or [])))
         return len(want & have) + min(page.get("visits", 0), 5) * 0.1
+
+
+FIELD_ROLES = {"textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "spinbutton", "slider"}
+_CONTROL = re.compile(r'^([a-z]+) "(.*)"$')
+_INITIALS = re.compile(r"^[A-Z]{1,3}(?:\s|$)")   # avatar initials ("KK", "OR Owen Russel ...")
+
+
+def describe_pages(page_map, limit=25):
+    """The map for a person: the navigation shared by every page once, then per page its
+    fields, actions and links (with where each link led)."""
+    shared = page_map._everywhere()
+    nav = [_CONTROL.sub(r"\2", c) for c in shared if _CONTROL.match(c)]
+    lines = ["**On every page:** " + ", ".join(nav)] if nav else []
+    leads = {(m["from"], m["label"]): m["to"] for m in page_map.moves}
+    for page in sorted(page_map.pages.values(), key=lambda p: p["route"])[:limit]:
+        fields, actions, links, more, records = [], [], [], [], 0
+        for c in page.get("controls") or []:
+            if c in shared:
+                continue
+            match = _CONTROL.match(c)
+            if not match:
+                more.append(c.strip(". "))      # "... +23 more links"
+                continue
+            role, label = match.groups()
+            if role in FIELD_ROLES:
+                fields.append(label)
+            elif role == "link":
+                to = leads.get((page["route"], label))
+                if to:
+                    links.insert(sum(1 for l in links if "→" in l), f"{label} → `{to}`")   # where it goes, first
+                elif len(label) <= 30 and not _INITIALS.match(label):
+                    links.append(label)
+                else:
+                    records += 1      # a record card or avatar: data, not navigation
+            elif len(label) > 40:
+                records += 1          # a record card rendered as a button
+            else:
+                actions.append(label)
+        parts = [f"{name}: " + ", ".join(items[:cap]) + (f" (+{len(items) - cap})" if len(items) > cap else "")
+                 for name, items, cap in (("fields", fields, 14), ("actions", actions, 10), ("links", links, 8)) if items]
+        if records:
+            parts.append(f"{records} record{'s' if records != 1 else ''} (cards/rows)")
+        parts += more[:2]
+        lines.append(f"- `{page['route']}` — " + ("; ".join(parts) or "no controls"))
+    return lines
 
 
 def quick_scan(page, page_map, *, max_pages=12, max_seconds=20, emit=lambda e: None):
@@ -208,6 +254,12 @@ def quick_scan(page, page_map, *, max_pages=12, max_seconds=20, emit=lambda e: N
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
             flow.settle()
             obs = observe(page)
+            shared = set(page_map._everywhere())
+            for _ in range(3):   # a page still fetching its content: give it a moment
+                if any(c not in shared for c in page_controls(obs)):
+                    break
+                page.wait_for_timeout(400)
+                obs = observe(page)
         except Exception:
             continue
         visited.add(page_map.see(obs))
