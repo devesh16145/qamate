@@ -33,6 +33,7 @@ def is_exploration(task):
     return bool(_EXPLORE.match(task or "")) and not re.search(r"\btests?\b", task, re.I)
 
 
+_LINKS_ONLY = re.compile(r"\blinks?\s+only\b|\bonly\s+(?:follow\s+)?links\b|\b(?:don'?t|do not|no)\s+click", re.I)
 _URL = re.compile(r"https?://[^\s<>\"'`)\]]+", re.I)
 
 
@@ -110,7 +111,7 @@ class FastAgent:
             if is_exploration(task):
                 return self._explore(task, started)
             if self.scan == "auto" and len(self.page_map) < 3:
-                self._learn_app()
+                self._learn_app(task)
         elif is_exploration(task):
             return {"task": task, "steps": 0, "authoring_s": 0, "stop_reason": None, "saved": None, "replay": None,
                     "ask": "Which site should I explore? Include its address, for example: "
@@ -179,12 +180,13 @@ class FastAgent:
             stop_reason = f"stopped after {self.max_rounds} planning rounds"
         return self._finish(task, explorer, started, meta=meta, stop_reason=stop_reason, problem=problem)
 
-    def _learn_app(self, max_pages=12, max_seconds=20):
-        """A fresh app: read its navigation and "New ..." pages first (links only, nothing is
-        submitted), so the plan can use the real labels of pages not yet on screen."""
+    def _learn_app(self, task, max_pages=12, max_seconds=20):
+        """A fresh app: read its navigation, menus and "New ..." pages first (nothing is typed
+        or submitted), so the plan can use the real labels of pages not yet on screen."""
         item = [{"step": "Learn the app's main pages", "status": "active"}]
         self.emit({"event": "plan", "steps": item})
-        scanned = quick_scan(self.page, self.page_map, max_pages=max_pages, max_seconds=max_seconds, emit=self.emit)
+        scanned = quick_scan(self.page, self.page_map, max_pages=max_pages, max_seconds=max_seconds, emit=self.emit,
+                             focus=task, max_depth=2)
         self.scan_ms = scanned["ms"]
         item[0].update(status="done", step=f"Learned {scanned['pages']} pages of the app")
         self.emit({"event": "plan", "steps": item})
@@ -194,11 +196,13 @@ class FastAgent:
         page_map = self.page_map
         if page_map.path and self.base_url and _origin(self.page.url) != _origin(self.base_url):
             page_map = PageMap()   # another site: keep it out of this project's memory
-        scanned = quick_scan(self.page, page_map, max_pages=25, max_seconds=45, emit=self.emit)
+        reveal = not _LINKS_ONLY.search(task)   # "follow links only" keeps it to plain links
+        scanned = quick_scan(self.page, page_map, max_pages=60, max_seconds=120, emit=self.emit,
+                             reveal=reveal, focus=task, max_depth=3, reveals_per_page=10)
         result = {"task": task, "steps": 0, "authoring_s": round(time.monotonic() - started, 1),
                   "stop_reason": None, "saved": None, "replay": None,
-                  "explored": {"pages": scanned["pages"], "s": round(scanned["ms"] / 1000, 1),
-                               "lines": describe_pages(page_map)}}
+                  "explored": {**scanned, "s": round(scanned["ms"] / 1000, 1), "reveal": reveal,
+                               "lines": describe_pages(page_map, limit=60)}}
         self.history.append(f"{task[:80]} -> mapped {scanned['pages']} pages")
         return result
 
@@ -303,8 +307,15 @@ def summary_text(result):
         return result["ask"]
     if result.get("explored"):
         e = result["explored"]
-        lines.append(f"Mapped **{e['pages']} pages** in {e['s']} s, following links only (nothing was submitted).\n")
+        found = f"**{e['pages']} pages**" + (f" ({e['new']} new)" if e.get("new") is not None and e["new"] != e["pages"] else "")
+        if e.get("views"):
+            found += f" and **{e['views']} views** behind menus, tabs and sections"
+        how = ("opened menus, tabs and collapsible sections, followed links; nothing was typed or submitted"
+               if e.get("reveal", False) else "followed links only; nothing was clicked or submitted")
+        lines.append(f"Mapped {found} in {e['s']} s ({how}).\n")
         lines += e["lines"]
+        if e.get("queued"):
+            lines.append(f"\n{e['queued']} more links are queued — send **Explore more** to continue from here.")
         lines.append("\nI'll plan with these exact labels from now on. Ask me to write a test for any of these flows.")
         return "\n".join(lines)
     if result.get("saved"):

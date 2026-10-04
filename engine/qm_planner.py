@@ -18,7 +18,8 @@ from qm_runtime import relative_url
 SYSTEM = """You plan the steps of a browser test for QAmate, a test-automation tool.
 You get the task, test data, the CURRENT page (its interactive elements and visible text) and,
 when the app has been seen before, "known_pages": its other pages with their exact control labels
-("label -> route" says where a control led).
+("label -> route" says where a control led; "[open menu: X] ..." lists controls that only appear
+after clicking X -- a menu, tab or section -- so plan the click on X first).
 Reply with ONLY a JSON object, keys in this order:
 {"test": {"flow": "orders", "title": "Short test title"}, "steps": [STEP, ...], "done": false}
 
