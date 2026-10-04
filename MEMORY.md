@@ -84,6 +84,17 @@ not supersede the full frozen cohort's failed result.
   Babel blocks. [src/agent_ui.js](src/agent_ui.js) is shared between docked and
   separate agent windows. `src/app.js` is a legacy backup, not the active renderer.
 
+### Fast engine (default since 2026-10-04)
+
+A second engine replaces the classic modes for chat tasks (Engine: Fast / Classic in the agent
+panel); see [the redesign](docs/QAMATE_FAST_EXPLORER_REDESIGN.md) and its progress log.
+`qm_runtime` (one step runtime for live run and generated test), `qm_observe` (Playwright AI
+snapshot), `qm_selectors`, `qm_ground` (deterministic grounding), `qm_decide` (Jev over a short
+list), `qm_explorer`, `qm_planner` (streamed plans), `qm_map` (per-project app memory and links-only
+quick scan), `qm_agent` (bounded loop; a test is saved only after a fresh-context replay passes),
+`qm_bench` (ten frozen-gate workflows; Benchmark tab, Engine: Fast). Its evidence so far is
+development evidence (scripted plans, fixtures, fake models); live acceptance is unmeasured.
+
 ## Safety and truth semantics to retain
 
 - Single-app `browse_goal` is read-only by default. Extended form interaction

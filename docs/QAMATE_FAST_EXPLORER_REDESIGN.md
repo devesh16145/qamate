@@ -323,3 +323,21 @@ per-phase timers (startup / plan / execute / verify) and per-role tokens.
 Not yet measured: the live planner (MiMo) on the benchmark tasks — needs the user's keys. Next: run the
 benchmark tasks on the Fast engine with MiMo (and Jev for ambiguity), compare with the Classic
 baseline, then Phase 4 (app map and cached sequences) and Phase 5 (retire legacy modes).
+
+### 2026-10-04 (later) — complex app, streaming plans, app memory (Phase 4 core), faster waits
+
+Driven against a harder app (the Atomic CRM demo: React + shadcn/Radix, browser-local data) with
+scripted plans, i.e. no model calls, so these numbers are the engine's share only.
+
+| Change | What landed | Evidence (development, not live acceptance) |
+|---|---|---|
+| Grounding for business apps | Nameless card links labelled by their content and clicked through their heading; exact label beats "contains the word"; UI synonyms and plurals (new/create/add, save/submit, log in/sign in); a named role wins ("Contacts tab"); counts in labels ignored; same-destination links are one choice; text checks target the control showing the value; searchable comboboxes typed into, and only an exactly-labelled option taken (never 'Create "<value>"'); card images named like their title are not rivals; look-alike controls need a `within` | CRM lifecycle (create, edit, search, reopen; 35 steps) and CRM related contact (31 steps) author and replay green; the genuine missing-Size defect still fails its check; SauceDemo cart-edit 19 steps, 3/3 replays green |
+| Streaming plans | Providers stream (OpenAI-compatible incl. MiMo, Anthropic, Ollama); steps run as soon as the model has written them; a step that doesn't fit abandons the rest of the reply (connection closed); test name/flow first in the reply | Fake model at 0.5 s/step: steps run at the model's pace, first within ~1 s; a wrong step abandons a 10-step reply |
+| App memory (`qm_map`, `page_map.json`) | Pages by route with exact control labels and where clicks led, learned from every observation; a bounded links-only quick scan of a fresh project (nav + "New/Create" links; never logout/delete/export or other origins); the planner gets the relevant pages; "Explore the app" maps instead of authoring | CRM: 7 pages in 8.5 s incl. both create forms; 2.5k-character map; fixture proves the scan's safety |
+| Waits | Quiet window 250 → 120 ms (60 ms when nothing changed); script/stylesheet loads count as pending; grounding re-looks for up to 1.5 s while the page is still changing | CRM authoring 15.4 → 12.8 s and replay 15.7 → 12.9 s (related: 16.3 → 12.9 / 15.9 → 12.7); 10/10 replays green; fixture suite 3×28 green, 86 → 61 s |
+| Benchmark | `engine/qm_bench.py` + Benchmark tab (Engine: Fast): the frozen gate's ten workflows, cold or warm memory, each saved test re-run twice through pytest | End-to-end test with a fake model |
+
+Not yet measured: the live planner on these ten workflows (time, tokens, re-plans, reliability) —
+run Benchmark → Engine: Fast. The streaming and app-memory gains depend on live planner behaviour.
+Optional next steps after that measurement: re-plans without thinking (MiMo/DeepSeek declare an
+off switch; keep it opt-in until measured), and cached step sequences (login) per project.
