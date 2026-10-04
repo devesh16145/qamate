@@ -104,12 +104,9 @@ class Explorer:
     def _element_intent(self, intent):
         op = intent["do"]
         target = intent.get("target") or ""
-        obs = observe(self.page)
-        if self.page_map is not None:
-            self.page_map.see(obs)
         ground = {"op": op, "target": target, "within": intent.get("within"),
                   "role": intent.get("role"), "name_hint": intent.get("name"), "value": intent.get("value")}
-        candidates = rank(ground, obs)
+        obs, candidates = self._look(ground)
         pick, how, confidence = decide(candidates), "match", None
         if pick is None and candidates:
             choice = choose(self.config, ground, candidates[:8], page_title=obs.title,
@@ -131,6 +128,12 @@ class Explorer:
                         "detail": f"'{element.label}' looks irreversible; confirm before running it",
                         "element": element.summary()}
         loc = locator_for(self.page, element)
+        if not loc["unique"] and pick.group and pick.group != element.ref:
+            # Text inside a clickable card/button that can't be addressed on its own: use the
+            # card/button itself (it is what receives the click anyway).
+            container = obs.by_ref(pick.group)
+            if container is not None:
+                loc = locator_for(self.page, container)
         if not loc["unique"]:
             return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {element.summary()}"}
         step = {"op": op, "target": loc["python"], "name": label}
@@ -152,6 +155,28 @@ class Explorer:
         outcome.update({"how": how, "confidence": confidence, "element": element.summary(),
                         "positional": loc["positional"]})
         return outcome
+
+    def _look(self, ground, patience_ms=1500):
+        """Observe and rank. While nothing fits well AND the page is still changing (a route
+        rendering, a list loading), look again briefly -- that is far cheaper than asking the
+        planner. A page that has gone quiet without the target fails at once."""
+        deadline = time.monotonic() + patience_ms / 1000
+        while True:
+            obs = observe(self.page)
+            if self.page_map is not None:
+                self.page_map.see(obs)
+            candidates = rank(ground, obs)
+            if (candidates and candidates[0].score >= 0.8) or time.monotonic() >= deadline or not self._settling():
+                return obs, candidates
+            self.page.wait_for_timeout(200)
+
+    def _settling(self):
+        """True while the page has pending requests/timers or changed in the last second."""
+        try:
+            return bool(self.page.evaluate("""() => { const p = window.__qmProbe; if (!p) return false;
+                return p.busy() > 0 || (p.timers && p.timers.size > 0) || performance.now() - p.last < 1000; }"""))
+        except Exception:
+            return True   # mid-navigation
 
     def _custom_select(self, intent, step, element, how, confidence, loc):
         """A non-native dropdown: open it and click the option. Searchable ones (comboboxes

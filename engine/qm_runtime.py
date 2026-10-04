@@ -10,7 +10,9 @@ Waiting is effect-based, never a guess:
   * after an action, the step waits for its declared effect (URL, element shown or
     hidden, value) when one is given;
   * every step ends with `settle()`: wait until the page's DOM has been quiet, no
-    fetch/XHR is in flight and no short timer is pending, capped at a few seconds.
+    fetch/XHR, script or stylesheet load is in flight and no short timer is pending,
+    capped at a few seconds. A page the action didn't change gets a short look (60 ms);
+    one that is reacting must stay unchanged for 120 ms after its last change.
 No `networkidle`, no fixed sleeps.
 
 Generated tests import this module (tests/conftest.py puts engine/ on sys.path):
@@ -38,8 +40,20 @@ QUIET_PROBE = r"""
   probe.busy = () => { const now = performance.now(); let n = 0;
     probe.pending.forEach((t) => { if (now - t < 1500) n++; }); return n; };
   const bump = () => { probe.last = performance.now(); };
-  const watch = () => new MutationObserver(bump).observe(document, {
-    subtree: true, childList: true, attributes: true, characterData: true });
+  // Scripts and stylesheets being loaded (route chunks, preloads) are pending work too.
+  const track = (node) => {
+    const loads = (node.tagName === 'SCRIPT' && node.src) ||
+                  (node.tagName === 'LINK' && /stylesheet|modulepreload|preload/.test(node.rel || ''));
+    if (!loads) return;
+    const id = ++probe.seq; probe.pending.set(id, performance.now());
+    const done = () => { probe.pending.delete(id); bump(); };
+    node.addEventListener('load', done, { once: true });
+    node.addEventListener('error', done, { once: true });
+  };
+  const watch = () => new MutationObserver((records) => {
+    bump();
+    for (const r of records) for (const n of r.addedNodes || []) if (n.nodeType === 1) track(n);
+  }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
   try { watch(); } catch (e) { document.addEventListener('DOMContentLoaded', watch, { once: true }); }
   const origFetch = window.fetch;
   if (origFetch) {
@@ -69,20 +83,26 @@ QUIET_PROBE = r"""
 """
 
 SETTLE_JS = r"""
-([quietMs, maxMs]) => new Promise((resolve) => {
+([quietMs, maxMs, calmMs]) => new Promise((resolve) => {
   const probe = window.__qmProbe;
   const start = performance.now();
   if (!probe) { resolve({ quiet: false, probe: false, ms: 0 }); return; }
+  const idle = () => probe.busy() === 0 && (!probe.timers || probe.timers.size === 0);
+  // A page that hasn't changed lately and has nothing pending only needs a short look for
+  // a delayed reaction; once it changes, it must then stay unchanged for the full period.
+  const calm = idle() && start - probe.last >= calmMs;
   const tick = () => {
     const now = performance.now();
+    const changed = probe.last > start;
     // Quiet is measured from the start of this wait, so work an action triggers a tick
     // later (hashchange renders, microtasks) is always seen.
-    if (probe.busy() === 0 && (!probe.timers || probe.timers.size === 0) && now - Math.max(probe.last, start) >= quietMs)
-      return resolve({ quiet: true, ms: Math.round(now - start) });
+    const need = calm && !changed ? calmMs : quietMs;
+    if (idle() && now - Math.max(probe.last, start) >= need)
+      return resolve({ quiet: true, ms: Math.round(now - start), calm: calm && !changed });
     if (now - start >= maxMs)
       return resolve({ quiet: false, ms: Math.round(now - start), requests: probe.busy(),
                        timers: probe.timers ? probe.timers.size : 0 });
-    (probe.rawSetTimeout || setTimeout)(tick, 40);   // our own poll must not count as page work
+    (probe.rawSetTimeout || setTimeout)(tick, 20);   // our own poll must not count as page work
   };
   tick();
 })
@@ -119,13 +139,14 @@ class Flow:
     (the run timeline) when given."""
 
     def __init__(self, page, base_url=None, checkpoints=None, timeout_ms=10000,
-                 settle_quiet_ms=250, settle_max_ms=3000):
+                 settle_quiet_ms=120, settle_max_ms=3000, settle_calm_ms=60):
         self.page = page
         self.base_url = base_url
         self.checkpoints = checkpoints
         self.timeout_ms = timeout_ms
         self.settle_quiet_ms = settle_quiet_ms
         self.settle_max_ms = settle_max_ms
+        self.settle_calm_ms = settle_calm_ms
         self.last = {}
         try:
             page.context.add_init_script(QUIET_PROBE)
@@ -156,7 +177,7 @@ class Flow:
         what happened; never raises -- a busy page just reaches the cap."""
         for _ in range(2):
             try:
-                return self.page.evaluate(SETTLE_JS, [self.settle_quiet_ms, self.settle_max_ms])
+                return self.page.evaluate(SETTLE_JS, [self.settle_quiet_ms, self.settle_max_ms, self.settle_calm_ms])
             except Exception:
                 # The document navigated mid-wait: let the new one parse, then re-check.
                 try:

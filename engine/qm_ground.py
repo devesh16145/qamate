@@ -179,6 +179,8 @@ def rank(step, observation, limit=10):
             score *= 0.5
         if op == "expect_text" and step.get("value") and _norm(step["value"]) in _norm(shown_text(el)):
             score += 0.2   # "Company shows X": the control displaying X, not the bare label "Company"
+        if el.context and not step.get("within") and ns < 1.0:
+            score -= 0.2   # one of many look-alikes ("Add to cart" x6) can't be what "Cart" means
         why = f"name {ns:.2f}, role {rs:.2f}" + (f", inside {container.role}" if container else "")
         out.append(Candidate(el, round(score, 3), why, (container or el).ref, exact=ns if ns >= 0.95 and rs >= 0.9 else 0.0))
     # One candidate per clickable thing; on a tie prefer readable text over an image.
@@ -193,16 +195,20 @@ def decide(candidates, *, sure=0.8, margin=0.15):
     if not candidates:
         return None
     top = candidates[0]
-    second = candidates[1].score if len(candidates) > 1 else 0.0
+    # A card's image named exactly like the text link beside it (products, articles,
+    # people) is the same choice, not a rival.
+    rivals = [c for c in candidates[1:] if not (c.element.role == "img" and top.element.role != "img"
+                                                and _norm(c.element.label) == _norm(top.element.label))]
+    second = rivals[0].score if rivals else 0.0
     if top.score >= sure and top.score - second >= margin:
         return top
     # "Contacts" means the control labelled exactly that, not a "0 contacts" tab that only
     # contains the word -- unless another control is labelled exactly the same.
-    if top.score >= sure and top.exact and not any(c.exact >= top.exact for c in candidates[1:]):
+    if top.score >= sure and top.exact and not any(c.exact >= top.exact for c in rivals):
         return top
     # Look-alike links that go to the same place (a name in a header and in a sidebar) are
     # the same choice.
-    close = [c for c in candidates if top.score - c.score < margin]
+    close = [top] + [c for c in rivals if top.score - c.score < margin]
     if top.score >= sure and top.element.role == "link" and top.element.url and \
             all(c.element.role == "link" and c.element.url == top.element.url for c in close):
         return top

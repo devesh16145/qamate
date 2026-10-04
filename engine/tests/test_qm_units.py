@@ -231,3 +231,29 @@ def test_map_respects_its_budget_and_skips_the_current_page():
     m.see(_obs("https://x.test/#/orders/create", FORM))
     assert not any(l.startswith("/#/orders/create") for l in m.for_task("orders", "https://x.test/#/orders/create"))
     assert sum(len(l) for l in m.for_task("orders", budget=120)) <= 120
+
+
+SHOP = '''- main [ref=m1]:
+''' + "".join(f'''  - generic [ref=c{i}]:
+    - button "View details for {name}" [ref=v{i}] [cursor=pointer]:
+      - img "{name}" [ref=i{i}]
+    - button "View details for {name}" [ref=t{i}] [cursor=pointer]:
+      - generic [ref=n{i}]: {name}
+    - button "Add to cart" [ref=a{i}] [cursor=pointer]
+''' for i, name in enumerate(["Sauce Labs Backpack", "Sauce Labs Onesie", "Sauce Labs Bike Light"])) + '''  - button "Cart, 2 items" [ref=cart] [cursor=pointer]
+'''
+
+
+def test_a_cards_image_named_like_its_title_is_not_a_rival():
+    elements, _ = parse(SHOP)
+    pick = decide(rank({"op": "click", "target": "Sauce Labs Onesie"}, SimpleNamespace(elements=elements)))
+    assert pick is not None and pick.element.ref == "n1"
+
+
+def test_look_alike_controls_need_a_within_to_be_chosen():
+    elements, _ = parse(SHOP)
+    obs = SimpleNamespace(elements=elements)
+    assert decide(rank({"op": "click", "target": "Cart"}, obs)).element.ref == "cart"
+    assert decide(rank({"op": "click", "target": "Add to cart"}, obs)) is None       # which one?
+    pick = decide(rank({"op": "click", "target": "Add to cart", "within": "Sauce Labs Bike Light"}, obs))
+    assert pick.element.ref == "a2"
