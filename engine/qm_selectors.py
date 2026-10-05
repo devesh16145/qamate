@@ -206,8 +206,8 @@ _GENERATED = re.compile(r"\d{3,}|:r[0-9a-z]+:|\b(?:mat|mui|ember|react-select|ra
 def generated(selector):
     """True for a plain CSS selector (not a role, label or text locator) that leans on a
     generated-looking value: '#grid-image-40-212469', 'input[name="quantity[252341]"]'."""
-    return bool(selector) and not selector.startswith("internal:") and " >> internal:" not in selector \
-        and bool(_GENERATED.search(selector))
+    plain = [part for part in (selector or "").split(_PART_SPLIT) if not part.startswith(("internal:", "nth="))]
+    return any(_GENERATED.search(part) for part in plain)      # a role or text part may hold any number
 
 
 def nth_locator(page, element):
@@ -304,6 +304,35 @@ def scoped_locator(page, element, anchors):
                     expr = to_python(selector)
                     if python_matches(page, expr, selector):
                         return {"selector": selector, "python": expr, "unique": True, "positional": False}
+    # No row, list item or named section around it: the item may still be a box of its own
+    # kind in the page -- a component's element (<order-card>, <example-viewer>), a <section>,
+    # a <fieldset>, an <li> -- found by what it says:
+    #     page.locator("order-card").filter(has_text="Invoice 1041").get_by_role("button", name="Edit")
+    try:
+        tags = target.evaluate("""el => { const out = [];
+            for (let box = el.parentElement, up = 0; box && box !== document.body && up < 12; box = box.parentElement, up++) {
+              const tag = box.tagName.toLowerCase();
+              if ((tag.includes('-') || /^(section|article|fieldset|form|li|tr|details|aside|dialog)$/.test(tag)) && !out.includes(tag)) out.push(tag);
+            }
+            return out; }""", timeout=1000)
+    except Exception:
+        tags = []
+    for anchor in anchors:                     # the step's own "within" first, on every kind of box
+        anchor = (anchor or "").strip()
+        if not anchor or len(anchor) > 80:
+            continue
+        for tag in tags[:6]:
+            try:
+                scope = page.locator(tag).filter(has_text=anchor)
+                inner = (scope.get_by_role(element.role, name=name, exact=True) if name
+                         else scope.get_by_role(element.role))
+                selector = selector_of(inner)
+            except Exception:
+                continue
+            if selector and _same_element(page, target, selector):
+                expr = to_python(selector)
+                if python_matches(page, expr, selector):
+                    return {"selector": selector, "python": expr, "unique": True, "positional": False}
     return None
 
 

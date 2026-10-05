@@ -1,0 +1,21 @@
+{
+ "url": "https://quilljs.com/playground/snow",
+ "seen": true,
+ "note": "first attempt 2026-10-05: the real Quill editor (an editable box with no role) in its playground, where it sits inside a frame from another site. One gap: such editors were only looked for in the page itself, not in its frames.",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Compose an epic...",
+   "value": "Hello from the test"
+  },
+  {
+   "do": "expect_value",
+   "target": "Compose an epic...",
+   "value": "Hello from the test"
+  },
+  {
+   "do": "click",
+   "target": "bold"
+  }
+ ]
+}

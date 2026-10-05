@@ -882,3 +882,18 @@ def test_on_screen_controls_are_preferred_and_identical_items_can_be_counted():
     assert decide(rank(step, obs), step) is None                # three links, two addresses: a question
     elements[[e.ref for e in elements].index("f1e41")].offscreen = True
     assert decide(rank(step, obs), step).element.url == "/p/40"   # the other address is off-screen: one choice left
+
+
+def test_the_control_in_what_was_just_opened_is_the_one_meant():
+    """A calendar pops up beside an always-visible one: both have a button for each day."""
+    snapshot = '''- main [ref=e1]:
+  - grid [ref=e2]:
+    - button "October 20, 2026" [ref=e3]
+  - grid [ref=e9]:
+    - button "October 20, 2026" [ref=e10]'''
+    obs = SimpleNamespace(elements=parse(snapshot)[0])
+    step = {"op": "click", "target": "October 20, 2026"}
+    candidates = rank(step, obs)
+    assert decide(candidates, step) is None                       # two of them: a question...
+    next(c for c in candidates if c.element.ref == "e10").fresh = True
+    assert decide(candidates, step).element.ref == "e10"          # ...unless one is in what the last step opened

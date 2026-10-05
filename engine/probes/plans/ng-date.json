@@ -1,0 +1,50 @@
+{
+ "url": "https://material.angular.dev/components/datepicker/examples",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine 90b90f3 + the select fixes): Angular Material's date range picker -- two typed dates, then a range chosen in the calendar that pops up. Typing ran first time. Gap: the page also has an always-visible calendar further down, so every day button exists twice; the one in the calendar that had just opened is meant, and has to stay meant for the second click of the range.",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Start date",
+   "within": "Basic date range picker",
+   "value": "10/05/2026"
+  },
+  {
+   "do": "fill",
+   "target": "End date",
+   "within": "Basic date range picker",
+   "value": "10/12/2026"
+  },
+  {
+   "do": "expect_value",
+   "target": "End date",
+   "within": "Basic date range picker",
+   "value": "10/12/2026"
+  },
+  {
+   "do": "click",
+   "target": "Open calendar",
+   "within": "Basic date range picker"
+  },
+  {
+   "do": "click",
+   "target": "October 20, 2026"
+  },
+  {
+   "do": "click",
+   "target": "October 24, 2026"
+  },
+  {
+   "do": "expect_value",
+   "target": "Start date",
+   "within": "Basic date range picker",
+   "value": "10/20/2026"
+  },
+  {
+   "do": "expect_value",
+   "target": "End date",
+   "within": "Basic date range picker",
+   "value": "10/24/2026"
+  }
+ ]
+}

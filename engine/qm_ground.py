@@ -350,6 +350,7 @@ class Candidate:
     context: object = None  # share of the step's `within` words found around it (None: no `within`)
     shows: bool = False     # for a text check: the element displays the expected text
     in_item: int = 0        # a label around it IS the step's `within`: 2 as written, 1 punctuation aside, 0 no
+    fresh: bool = False     # it is part of what the last action opened (a calendar, a menu, a panel)
 
     @property
     def exact(self):
@@ -424,8 +425,9 @@ def decide(candidates, step=None):
 
     Only real name matches on controls that can take the action are considered, in order
     of strictness (exact, then decorated, then synonym). The step's `within` must be
-    fully matched when given. Among several, an open dialog wins, then the best-fitting
-    role; links that go to one real address count as one."""
+    fully matched when given. Among several, an open dialog wins, then what is on screen,
+    then what the last step opened, then the best-fitting role; links that go to one real
+    address count as one."""
     for kind in ("exact", "decorated", "synonym"):
         pool = [c for c in candidates if c.match == kind and c.tier is not None]
         if not pool:
@@ -443,6 +445,9 @@ def decide(candidates, step=None):
         in_view = [c for c in pool if not getattr(c.element, "offscreen", False)]
         if in_view and len(in_view) < len(pool):
             pool = in_view                 # not the copy in a closed drawer or on a slide that is not showing
+        opened = [c for c in pool if c.fresh]
+        if opened and len(opened) < len(pool):
+            pool = opened                  # the one in what the last step opened, like the one in an open dialog
         best_tier = min(c.tier for c in pool)
         pool = [c for c in pool if c.tier == best_tier]
         for narrower in ([c for c in pool if c.shows],                      # a text check: where the text is

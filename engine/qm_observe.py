@@ -850,21 +850,37 @@ def _alias(el, text):
 
 def _add_editables(page, elements):
     """Rich-text editors built on a bare contenteditable box (no role) become text boxes,
-    named by their placeholder or the label beside them and reached by their place in the page."""
-    try:
-        found = page.evaluate(EDITABLE_PATHS_JS)
-    except Exception:
-        return
-    for number, box in enumerate(found or [], 1):
+    named by their placeholder or the label beside them and reached by their place in the
+    page -- in the page itself and inside its frames (an app, or its editor, embedded in one)."""
+    scopes = [("", False)] + [(f"aria-ref={frame.ref} >> internal:control=enter-frame >> ", True)
+                              for frame in [e for e in elements if e.role == "iframe" and e.children][:4]]
+    number = 0
+    for scope, framed in scopes:
         try:
-            info = page.locator(box["path"]).evaluate(DESCRIBE_JS, True, timeout=500)
+            found = (page.locator(scope + "html").evaluate("(root) => (" + EDITABLE_PATHS_JS.strip() + ")()", timeout=500)
+                     if framed else page.evaluate(EDITABLE_PATHS_JS))
         except Exception:
             continue
-        label, source = pick_label(info)
-        el = Element(ref=f"x{number}", role="textbox", selector=box["path"], hints=list(box.get("hints") or []),
-                     inline=(info.get("text") or "")[:100], fallback=label, label_source=source if label else "")
-        _alias(el, info.get("nearby"))
-        elements.append(el)
+        stable = scope
+        if framed and found:
+            # In a test the frame is found by what identifies it (its title, name, id), not by this look's ref.
+            try:
+                from qm_selectors import selector_of
+                stable = selector_of(page.locator(scope.split(" >> ")[0]).normalize()) + " >> internal:control=enter-frame >> "
+            except Exception:
+                continue
+        for box in found or []:
+            try:
+                info = page.locator(scope + box["path"]).evaluate(DESCRIBE_JS, True, timeout=500)
+            except Exception:
+                continue
+            number += 1
+            label, source = pick_label(info)
+            el = Element(ref=f"x{number}", role="textbox", selector=scope + box["path"], framed=framed,
+                         hints=[stable + hint for hint in (box.get("hints") or [])],
+                         inline=(info.get("text") or "")[:100], fallback=label, label_source=source if label else "")
+            _alias(el, info.get("nearby"))
+            elements.append(el)
 
 
 def _add_frame_editors(page, elements):

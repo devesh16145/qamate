@@ -1,0 +1,43 @@
+{
+ "url": "https://material.angular.dev/components/select/examples",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine 90b90f3): Angular Material's select examples -- mat-select, a native select, a mat-select that takes several choices, a checkbox. The single selects ran first time once the plan said which example ('within'; four dropdowns share a name). Gaps: (1) the dropdown was located by a generated id (#mat-select-6): no row or named section around it, only the component's own element; (2) a list that takes several choices stays open, and 'opening' it again clicked another option; (3) the open list then covered the next target.",
+ "steps": [
+  {
+   "do": "select",
+   "target": "Favorite food",
+   "within": "Select in a form",
+   "value": "Pizza"
+  },
+  {
+   "do": "select",
+   "target": "Favorite car",
+   "within": "Select in a form",
+   "value": "Saab"
+  },
+  {
+   "do": "select",
+   "target": "Toppings",
+   "within": "Select with multiple selection",
+   "value": "Mushroom"
+  },
+  {
+   "do": "select",
+   "target": "Toppings",
+   "within": "Select with multiple selection",
+   "value": "Onion"
+  },
+  {
+   "do": "check",
+   "target": "Disable select"
+  },
+  {
+   "do": "expect_checked",
+   "target": "Disable select"
+  },
+  {
+   "do": "expect_text",
+   "value": "Mushroom, Onion"
+  }
+ ]
+}

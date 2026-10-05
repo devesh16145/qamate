@@ -149,6 +149,7 @@ class Explorer:
         self._destructive_ok = False
         self._blocked_dialog = None
         self._reveal_note = None   # why opening things did not settle where a target is
+        self._opened, self._kept = set(), set()   # refs in what recent steps opened (see _mark_opened)
 
     @property
     def page(self):
@@ -406,6 +407,8 @@ class Explorer:
             step["dialog"], step["dialog_text"] = "accept", str(live["dialog_text"])
         if op == "select" and not self._is_native_select(loc["selector"]):
             return self._custom_select(intent, live, step, element, how, confidence, loc)
+        if not op.startswith("expect"):
+            self._close_popup_over(obs, element, loc)
         before = self.page.url
         self._blocked_dialog = None
         outcome = self._record(step, check=op.startswith("expect"), state=self._state(obs), data=data,
@@ -457,6 +460,24 @@ class Explorer:
                 distinct[where] = c
         chosen = list(distinct.values())
         return chosen[wanted - 1] if wanted <= len(chosen) else None
+
+    def _close_popup_over(self, obs, element, loc):
+        """A list or menu the test opened is still open (a dropdown that takes several choices
+        stays open after each) and covers the next target: close it with Escape, as its own
+        step, instead of failing on "something else is on top of it"."""
+        trigger = next((e for e in obs.elements if e.attrs.get("expanded") is True and e.role in ("combobox", "button")), None)
+        if trigger is None or trigger is element or not any(e.role in ("listbox", "menu") for e in obs.elements):
+            return False
+        if element.role in ("option", "menuitem", "menuitemcheckbox", "menuitemradio", "listbox", "menu") \
+                or any(role in ("listbox", "menu") for role, _ in element.regions):
+            return False                        # the target is in the open list itself
+        try:
+            self.page.locator(loc["selector"]).click(trial=True, timeout=400)
+            return False                        # nothing is in the way
+        except Exception:
+            pass
+        closed = self._record({"op": "press", "value": "Escape", "name": "Close the open list"})
+        return closed["ok"]
 
     def _locator(self, pick, obs, within):
         """The stable locator for a grounded element: its own; else the card or button it
@@ -604,6 +625,7 @@ class Explorer:
             if self.page_map is not None:
                 self.page_map.see(obs)
             candidates = rank(ground, obs)
+            self._mark_opened(candidates, obs)
             now = time.monotonic()
             # ...and for as long as a request the last action made is still open (a slow API
             # behind a route change), within reason.
@@ -611,6 +633,27 @@ class Explorer:
             if (candidates and candidates[0].exact) or not waiting or (also is not None and also(obs)):
                 return obs, candidates
             self.page.wait_for_timeout(200)
+
+    def _mark_opened(self, candidates, obs, least=6):
+        """Flag the candidates that sit in what the test has just opened: a calendar, a menu,
+        a panel -- a new part of the page of some size, not one new line. It stays "just
+        opened" for as long as it is there and the steps keep working inside it (the second
+        click of a date range). A calendar that pops up beside an always-visible one has the
+        same day buttons; a person means the one that just opened."""
+        now = {e.ref for e in obs.elements}
+        opened = set(self._kept) & now
+        before = self._states[-1]["obs"] if self._states and route_of(self.page.url) == self._route else None
+        if before is not None:
+            known = {e.ref for e in before.elements}
+            for e in obs.elements:
+                if e.ref in known or (e.parent is not None and e.parent.ref not in known):
+                    continue                            # not the top of a new part of the page
+                part = [e] + _descendants(e, limit=400)
+                if len(part) >= least:
+                    opened.update(member.ref for member in part)
+        self._opened = opened
+        for c in candidates:
+            c.fresh = c.element.ref in opened
 
     def _loading(self):
         """True while a request made since the last action is still open, or styles are loading."""
@@ -708,10 +751,16 @@ class Explorer:
         Only an option labelled exactly as asked is taken -- never a look-alike such as
         'Create "<value>"', which would add a record instead of choosing one."""
         value = str(live.get("value", ""))
-        opened = self._record({"op": "click", "target": loc["python"], "name": f"Open {step['name']}"})
-        if not opened["ok"]:
-            return opened
+        # A list that takes several choices stays open after each: when the option is already
+        # on show, clicking the dropdown again would close it (or land on another option).
         option, candidates = self._exact_option(value)
+        if option is not None and option.element.role not in ("option", "menuitemcheckbox", "menuitemradio"):
+            option = None
+        if option is None:
+            opened = self._record({"op": "click", "target": loc["python"], "name": f"Open {step['name']}"})
+            if not opened["ok"]:
+                return opened
+            option, candidates = self._exact_option(value)
         if option is None:
             box = self._focused_search_box(exclude=element)
             if box is not None:
@@ -847,6 +896,8 @@ class Explorer:
         if not self.steps and step["op"] != "goto":
             self.start_url = before
         if not check:
+            # what was just opened stays so only while the steps keep working inside it
+            self._kept = self._opened if element is not None and element.ref in self._opened else set()
             self._remember(obs)
         seen_dialogs, seen_downloads = len(self.flow.dialogs), len(self.flow.downloads)
         self.flow.opened.clear()

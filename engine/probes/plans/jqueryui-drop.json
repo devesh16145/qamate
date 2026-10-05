@@ -1,0 +1,16 @@
+{
+ "url": "https://jqueryui.com/droppable/",
+ "seen": true,
+ "note": "first attempt 2026-10-05: jQuery UI's droppable demo, inside a frame. Drag-and-drop was added the same day and had only been tried on the probe's own pages. Passed first time, with two replays.",
+ "steps": [
+  {
+   "do": "drag",
+   "target": "Drag me to my target",
+   "to": "Drop here"
+  },
+  {
+   "do": "expect_text",
+   "value": "Dropped!"
+  }
+ ]
+}
