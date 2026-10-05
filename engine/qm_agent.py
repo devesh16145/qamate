@@ -15,7 +15,7 @@ import time
 from urllib.parse import urlsplit
 
 from llm import LLMError
-from qm_explorer import Explorer
+from qm_explorer import SECRET_FIELD, Explorer
 from qm_map import PageMap, describe_pages, quick_scan
 from qm_observe import observe
 from qm_planner import Planner, slug
@@ -48,7 +48,16 @@ def _origin(url):
     return parts.scheme, parts.netloc
 
 
+def public_intent(intent):
+    """The intent as it may be shown and logged: a typed secret is masked."""
+    if intent.get("do") == "fill" and "{secret:" not in str(intent.get("value", "")) \
+            and SECRET_FIELD.search(str(intent.get("target", ""))):
+        return {**intent, "value": "••••••"}
+    return intent
+
+
 def _intent_text(intent):
+    intent = public_intent(intent)
     op = intent.get("do")
     bits = [op.replace("_", " ")]
     for key in ("target", "url", "key", "value"):
@@ -76,13 +85,20 @@ def next_tc_id(tests_root, flow):
     return f"{prefix}-{n:03d}"
 
 
+REPLAYS = 2      # fresh-browser runs a test must pass before it is saved
+
+
 class FastAgent:
     def __init__(self, page, browser, config, *, provider_name=None, base_url=None, tests_root=None,
                  storage_state=None, test_data=None, emit=lambda e: None, confirm=None,
                  max_rounds=8, max_seconds=300, log_dir=None, page_map=None, scan="auto"):
         self.page, self.browser, self.config = page, browser, config
         self.base_url, self.tests_root, self.storage_state = base_url, tests_root, storage_state
-        self.test_data, self.emit, self.confirm = test_data or {}, emit, confirm
+        self.emit, self.confirm = emit, confirm
+        # Secrets in the test data (a project's saved password) are kept here and the planner
+        # is given {secret:NAME} instead: the model never sees them, the test files never hold them.
+        self.secrets = {k: str(v) for k, v in (test_data or {}).items() if SECRET_FIELD.search(k) and v}
+        self.test_data = {k: ("{secret:%s}" % k if k in self.secrets else v) for k, v in (test_data or {}).items()}
         self.max_rounds, self.max_seconds, self.log_dir = max_rounds, max_seconds, log_dir
         self.planner = Planner(config, provider_name, emit=emit)
         self.history = []   # short summaries of earlier tasks in this chat
@@ -92,8 +108,8 @@ class FastAgent:
 
     def run_task(self, task):
         started = time.monotonic()
-        explorer = Explorer(self.page, base_url=self.base_url, config=self.config,
-                            emit=self.emit, confirm=self.confirm, page_map=self.page_map)
+        explorer = Explorer(self.page, base_url=self.base_url, config=self.config, emit=self.emit,
+                            confirm=self.confirm, page_map=self.page_map, secrets=self.secrets)
         self.planner.timings = []
         self.trace = []   # one entry per executed intent: what ran, how, how long
         self.scan_ms = None
@@ -121,7 +137,7 @@ class FastAgent:
             if time.monotonic() - started > self.max_seconds:
                 stop_reason = f"stopped after {self.max_seconds} s"
                 break
-            obs = observe(self.page)
+            obs = observe(explorer.page)       # the tab in front (a step may have opened a new one)
             self.page_map.see(obs)
             try:
                 stream = self._start_plan(task, obs, explorer, problem)
@@ -135,18 +151,18 @@ class FastAgent:
                 item = {"step": _intent_text(intent), "status": "active"}
                 plan_items.append(item)
                 self._emit_plan(plan_items, stream)
-                self.emit({"event": "tool_call", "tool": "step", "args": intent})
+                self.emit({"event": "tool_call", "tool": "step", "args": public_intent(intent)})
                 outcome = explorer.run_intent(intent)   # asks self.confirm before destructive actions
                 ran += 1
-                self.trace.append({"intent": intent, "ok": outcome["ok"], "ms": outcome.get("ms"),
+                self.trace.append({"intent": public_intent(intent), "ok": outcome["ok"], "ms": outcome.get("ms"),
                                    "how": outcome.get("how"), "reason": outcome.get("reason"),
-                                   "detail": outcome.get("detail")})
+                                   "detail": outcome.get("detail"), "weak": outcome.get("weak")})
                 self.emit({"event": "tool_result", "tool": "step", "outcome": "ok" if outcome["ok"] else "error",
                            "summary": json.dumps(_brief(outcome), ensure_ascii=False)[:1500]})
                 item["status"] = "done" if outcome["ok"] else "failed"
                 self._emit_plan(plan_items, stream)
                 if not outcome["ok"]:
-                    problem = {"step": intent, **_brief(outcome)}
+                    problem = {"step": public_intent(intent), **_brief(outcome)}
                     stream.cancel()   # the rest was planned for a page that turned out different
                     break
             try:
@@ -226,8 +242,12 @@ class FastAgent:
             steps.pop(0)
         if steps and steps[0]["op"] != "goto" and explorer.start_url:
             steps.insert(0, {"op": "goto", "value": explorer._url_value(explorer.start_url), "name": "Open the app"})
+        # The same check twice in a row (a re-plan repeating itself) says nothing more.
+        steps[:] = [s for i, s in enumerate(steps)
+                    if not (i and s["op"].startswith("expect") and render(s) == render(steps[i - 1]))]
         trace = getattr(self, "trace", [])
         calls = list(getattr(self.planner, "timings", []))
+        checks = [s for s in steps if s["op"].startswith("expect")]
         result = {"task": task, "steps": len(steps), "authoring_s": round(time.monotonic() - started, 1),
                   "stop_reason": stop_reason or error, "saved": None, "replay": None,
                   "timing": {"planner_calls": len(calls), "planner_s": round(sum(c["ms"] for c in calls) / 1000, 1),
@@ -237,20 +257,39 @@ class FastAgent:
                              "browser_s": round(sum((t.get("ms") or 0) for t in trace) / 1000, 1),
                              "replay_s": None},
                   "replanned": [{"step": _intent_text(t["intent"]), "reason": t["reason"], "detail": t["detail"]}
-                                for t in trace if not t["ok"]]}
+                                for t in trace if not t["ok"]],
+                  "checks": {"total": len(checks), "weak": [{"check": s.get("name"), "why": s["weak"]}
+                                                           for s in checks if s.get("weak")]},
+                  "notes": list(dict.fromkeys(n for n in explorer.notes if not n.startswith("Check "))),
+                  "unique": sorted(k for k, v in data.items() if "{unique}" in str(v)),
+                  "secrets": sorted(k for k, v in data.items() if "{secret:" in str(v))}
+        try:
+            explorer.cleanup()      # close tabs the task opened; the session's page stays
+        except Exception:
+            pass
         meaningful = [s for s in steps if s["op"] != "goto"]
         if error or not meaningful:
             result["summary"] = error or stop_reason or "Nothing was recorded."
             self.history.append(f"{task[:80]} -> not recorded")
             return result
-        verify = replay(self.browser, steps, data, base_url=self.base_url, storage_state=self.storage_state)
-        result["replay"] = {"ok": verify["ok"], "ms": verify["ms"], "failed_step": verify["failed_step"]}
-        result["timing"]["replay_s"] = round(verify["ms"] / 1000, 1)
-        if verify["ok"] and not stop_reason and self.tests_root:
+        # Accept the test only if it runs on its own -- twice, in fresh browsers. The second
+        # run is what a real backend needs: it meets the data the first one left behind.
+        runs = []
+        for _ in range(REPLAYS):
+            verify = replay(self.browser, steps, data, base_url=self.base_url, storage_state=self.storage_state,
+                            secrets=explorer.secrets)
+            runs.append(verify)
+            if not verify["ok"]:
+                break
+        ok = all(r["ok"] for r in runs) and len(runs) == REPLAYS
+        result["replay"] = {"ok": ok, "ms": sum(r["ms"] for r in runs), "runs": [r["ok"] for r in runs],
+                            "failed_step": runs[-1]["failed_step"], "failed_run": None if ok else len(runs)}
+        result["timing"]["replay_s"] = round(sum(r["ms"] for r in runs) / 1000, 1)
+        if ok and not stop_reason and self.tests_root:
             flow = slug(meta.get("flow") or "agent")
             tc_id = next_tc_id(self.tests_root, flow)
             path = write_test(self.tests_root, flow, tc_id, steps, data,
-                              description=meta.get("title") or task[:120], expected="")
+                              description=meta.get("title") or task[:120], expected="", secrets=explorer.secrets)
             result["saved"] = {"tc_id": tc_id, "flow": flow, "path": path}
         result["code"] = [render(s) for s in steps]
         self.history.append(f"{task[:80]} -> {result['saved']['tc_id'] if result['saved'] else 'not saved'}")
@@ -318,20 +357,44 @@ def summary_text(result):
             lines.append(f"\n{e['queued']} more links are queued — send **Explore more** to continue from here.")
         lines.append("\nI'll plan with these exact labels from now on. Ask me to write a test for any of these flows.")
         return "\n".join(lines)
+    replay_info = result.get("replay") or {}
     if result.get("saved"):
         s = result["saved"]
         lines.append(f"Saved **{s['tc_id']}** in flow `{s['flow']}` — {result['steps']} steps, "
                      f"authored in {result['authoring_s']} s.")
-        lines.append(f"Replay in a fresh browser: **passed** ({result['replay']['ms'] / 1000:.1f} s).")
-    elif result.get("replay") and not result["replay"]["ok"]:
-        f = result["replay"]["failed_step"] or {}
-        lines.append(f"The flow ran, but replaying it in a fresh browser **failed** at step "
-                     f"{f.get('index', 0) + 1} ({f.get('name') or f.get('op')}): {f.get('error', '')}")
+        lines.append(f"Ran it {len(replay_info.get('runs') or [1])} times in fresh browsers: **passed** "
+                     f"({replay_info['ms'] / 1000:.1f} s).")
+    elif replay_info and not replay_info["ok"]:
+        f = replay_info["failed_step"] or {}
+        again = replay_info.get("failed_run", 1) and replay_info.get("failed_run", 1) > 1
+        lines.append(("The test passed once in a fresh browser but **failed when run again**" if again
+                      else "The flow ran, but replaying it in a fresh browser **failed**") +
+                     f" at step {f.get('index', 0) + 1} ({f.get('name') or f.get('op')}): {f.get('error', '')}")
+        if not result.get("unique"):
+            lines.append("If the app keeps its data between runs, the earlier run may have used these values up "
+                         "(a record with the same name already exists). Ask me to use a unique value for what "
+                         "the test creates.")
         lines.append("Not saved. Tell me what to change, or ask me to try again.")
     else:
         lines.append(f"Not saved: {result.get('summary') or result.get('stop_reason') or 'the task did not finish'}.")
     if result.get("stop_reason") and result.get("saved") is None and result.get("replay"):
         lines.append(f"Stopped early: {result['stop_reason']}.")
+    checks = result.get("checks") or {}
+    if checks.get("total"):
+        weak = checks.get("weak") or []
+        lines.append(f"Checks: {checks['total'] - len(weak)} of {checks['total']} verify something the steps changed"
+                     + ("; the rest only confirm what was already there:" if weak else "."))
+        for w in weak[:5]:
+            lines.append(f"- {w['check']} — {w['why']}")
+    elif result.get("saved"):
+        lines.append("Checks: none. This test only proves the steps can be clicked through.")
+    if result.get("unique"):
+        lines.append(f"New value on every run for: {', '.join(result['unique'])} (so the test can be re-run).")
+    if result.get("secrets"):
+        lines.append(f"Kept out of the test files: {', '.join(result['secrets'])} "
+                     f"(stored in `secrets.local.json` beside the tests, not in git).")
+    for note in (result.get("notes") or [])[:4]:
+        lines.append(f"Note: {note}")
     t = result.get("timing") or {}
     if t.get("planner_calls") is not None:
         calls = f"{t['planner_calls']} call{'s' if t['planner_calls'] != 1 else ''}"

@@ -21,7 +21,8 @@ when the app has been seen before, "known_pages": its other pages with their exa
 ("label -> route" says where a control led; "[open menu: X] ..." lists controls that only appear
 after clicking X -- a menu, tab or section -- so plan the click on X first).
 Reply with ONLY a JSON object, keys in this order:
-{"test": {"flow": "orders", "title": "Short test title"}, "steps": [STEP, ...], "done": false}
+{"test": {"flow": "<app area this test covers, one or two words taken from the task>", "title": "<short test title>"},
+ "steps": [STEP, ...], "done": false}
 
 Each STEP is one of:
   {"do": "goto", "url": "<path or URL>"}            only the app's start URL or a link you can see
@@ -30,26 +31,41 @@ Each STEP is one of:
   {"do": "select", "target": "<dropdown label>", "value": "<option text>"}
   {"do": "check", "target": "<checkbox label>", "checked": true}
   {"do": "press", "key": "Enter", "target": "<field label, optional>"}
-  {"do": "expect_text", "value": "<text that must be visible>"}
-  {"do": "expect_text", "value": "<text>", "present": false}     must NOT be visible
+  {"do": "hover", "target": "<label>"}              only when something appears on hover
+  {"do": "close_tab"}                               return from a tab that a click opened
+  {"do": "expect_text", "value": "<text>", "within": "<row, card or section it belongs to>"}
+  {"do": "expect_text", "value": "<text that must be visible>"}          anywhere on the page
+  {"do": "expect_text", "value": "<text>", "present": false}             must NOT be visible
   {"do": "expect_value", "target": "<field label>", "value": "<text>"}
   {"do": "expect_visible", "target": "<label>"}
-  {"do": "expect_url", "url": "<path>"}             only when certain of the exact path
+  {"do": "expect_url", "url": "<path, no query string>"}                 only when certain of the path
 
 Rules:
 - Plan the WHOLE task in this reply whenever you can predict it, including pages you haven't
   seen yet -- for those, write the labels a user would see. Each extra round trip costs time.
   If a step doesn't match the real page, execution stops there and you'll be shown that page
   with the closest elements, so you can adjust the rest.
-- On the current page, use labels exactly as they appear in its elements. For pages listed in
-  known_pages, use their labels exactly too -- plan through them as confidently as the current page.
+- Use labels exactly as they appear: on the current page from its elements, on other pages from
+  known_pages. A target must be the control's own name, not a description of it.
 - When several elements share a label (e.g. "Add to cart" on every product), say which one
   with "within": the item's name, row text or section.
 - Set "done": true when your steps complete the whole task, including its checks. Use
-  "done": false only if you genuinely need to see a page before planning further.
-- Check every outcome the task asks for with expect_* steps. Prefer stable visible text;
-  never assert times, dates or generated ids exactly.
-- Use values from the task or the test data. Never invent credentials.
+  "done": false only if you genuinely need to see a page before planning further. "done" is a
+  key of the reply, never a step.
+- Check every outcome the task asks for, and make each check able to fail:
+  * check what the action changed -- the saved record, the new row, the message -- not text
+    that is on the page anyway (menus, filter names, column headings);
+  * say where the text belongs with "within" whenever it is about one item (a row, a card);
+  * prefer the lasting result over a message that disappears;
+  * never assert times, dates or generated ids exactly.
+- Values come from the task or the test data; never invent credentials. A value written
+  {secret:NAME} in the test data is used exactly like that -- QAmate fills in the real one.
+- When the test CREATES something the app keeps (a record's name, an email, a code), put
+  {unique} in that value -- "QA Vendor {unique}" -- and use the same text wherever you refer to
+  it later, so the test can run again without colliding with its own earlier data. Don't add
+  it to values the task says must be exact, or to things the test only reads.
+- A browser pop-up (confirm/alert) raised by a step is answered OK automatically; add
+  "dialog": "dismiss" to the step to answer Cancel, or "dialog_text": "<text>" for a prompt.
 - If you get a "problem" (a step that could not run), change your approach -- don't repeat
   the same step. The problem lists the closest matching elements.
 - If the task cannot be done, reply {"steps": [], "done": true, "blocked": "<why>"}.
@@ -249,8 +265,16 @@ class PlanStream:
         return {"steps": [], "done": False, "blocked": None, "test": _test_meta(test), "partial": True}
 
 
+# Models sometimes end the list with a pseudo-step; it means "the plan is complete".
+END_STEPS = {"done", "finish", "finished", "end", "stop", "complete", "completed"}
+
+
+def is_end_step(step):
+    return isinstance(step, dict) and str(step.get("do", "")).strip().lower() in END_STEPS
+
+
 def normalize_step(step):
-    if not isinstance(step, dict) or not step.get("do"):
+    if not isinstance(step, dict) or not step.get("do") or is_end_step(step):
         return None
     step = dict(step)
     if step["do"] == "expect_text" and not step.get("target"):
@@ -260,15 +284,20 @@ def normalize_step(step):
 
 def _test_meta(test):
     test = test if isinstance(test, dict) else {}
-    return {"flow": slug(test.get("flow") or "agent"), "title": str(test.get("title") or "").strip()[:120]}
+    flow, title = str(test.get("flow") or ""), str(test.get("title") or "").strip()
+    if "<" in flow:      # the prompt's placeholder copied verbatim
+        flow = ""
+    return {"flow": slug(flow or "agent"), "title": "" if "<" in title else title[:120]}
 
 
 def normalize_plan(raw):
     """Defensive parse of the planner's JSON into {steps, done, blocked, test}."""
     if not isinstance(raw, dict):
         raise LLMError("planner did not return a JSON object")
-    steps = [s for s in (normalize_step(step) for step in raw.get("steps") or []) if s]
-    return {"steps": steps, "done": bool(raw.get("done")), "blocked": raw.get("blocked") or None,
+    raw_steps = raw.get("steps") or []
+    steps = [s for s in (normalize_step(step) for step in raw_steps) if s]
+    done = bool(raw.get("done")) or any(is_end_step(step) for step in raw_steps)
+    return {"steps": steps, "done": done, "blocked": raw.get("blocked") or None,
             "test": _test_meta(raw.get("test"))}
 
 

@@ -57,26 +57,58 @@ def serve(unique):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, vendors
 
-CREATE = [{"do": "click", "target": "New vendor"}, {"do": "fill", "target": "Vendor name", "value": "QA Vendor 01"},
-          {"do": "fill", "target": "City", "value": "Pune"}, {"do": "click", "target": "Create vendor"},
-          {"do": "expect_text", "value": "QA Vendor 01"}, {"do": "expect_text", "value": "City: Pune"}]
-REOPEN = [{"do": "click", "target": "Back to vendors"}, {"do": "fill", "target": "Search vendors", "value": "QA Vendor 01"},
-          {"do": "click", "target": "QA Vendor 01"}, {"do": "expect_text", "value": "City: Pune"}]
-SCENARIOS = [("A. names must be unique; test: create + check details", True, CREATE),
-             ("B. duplicates allowed; test: create + search + reopen", False, CREATE + REOPEN),
-             ("C. duplicates allowed; test: create + check details only", False, CREATE)]
-with sync_playwright() as pw:
-    b = pw.chromium.launch()
-    for title, unique, plan in SCENARIOS:
-        srv, vendors = serve(unique)
-        base = f'http://127.0.0.1:{srv.server_port}/'
-        scripted = ScriptedPlanner([{"steps": plan, "done": True, "test": {"flow": "vendors", "title": "Create a vendor"}}])
-        qm_agent.Planner = lambda *a, **k: scripted
-        page = b.new_page(); page.goto(base)
-        agent = FastAgent(page, b, {}, base_url=base, tests_root=tempfile.mkdtemp(), scan="off")
-        result = agent.run_task("Create vendor QA Vendor 01 in Pune and check it")
-        print(f"\n{title}")
-        print("  agent's own replay:", "passed" if result['replay'] and result['replay']['ok'] else f"FAILED at {(result['replay'] or {}).get('failed_step', {}).get('name')!r}: {str((result['replay'] or {}).get('failed_step', {}).get('error'))[:140]}")
-        print("  saved:", bool(result['saved']), "| vendors named 'QA Vendor 01' on the server now:", sum(v['name'] == 'QA Vendor 01' for v in vendors))
-        page.close(); srv.shutdown()
-    b.close()
+def plan(name):
+    create = [{"do": "click", "target": "New vendor"}, {"do": "fill", "target": "Vendor name", "value": name},
+              {"do": "fill", "target": "City", "value": "Pune"}, {"do": "click", "target": "Create vendor"},
+              {"do": "expect_text", "value": name}, {"do": "expect_text", "value": "City: Pune"}]
+    reopen = [{"do": "click", "target": "Back to vendors"}, {"do": "fill", "target": "Search vendors", "value": name},
+              {"do": "click", "target": name}, {"do": "expect_text", "value": "City: Pune"}]
+    return create, create + reopen
+
+
+FIXED, UNIQUE = "QA Vendor 01", "QA Vendor {unique}"
+# (title, names must be unique on the server, plan, should the test be saved?)
+SCENARIOS = [
+    ("A. fixed name, server rejects duplicates: create + check", True, plan(FIXED)[0], False),
+    ("B. fixed name, duplicates allowed: create + search + reopen", False, plan(FIXED)[1], False),
+    ("C. {unique} name, server rejects duplicates: create + check", True, plan(UNIQUE)[0], True),
+    ("D. {unique} name, duplicates allowed: create + search + reopen", False, plan(UNIQUE)[1], True),
+]
+
+
+def run(verbose=True):
+    results = []
+    with sync_playwright() as pw:
+        b = pw.chromium.launch()
+        for title, unique, steps, should_save in SCENARIOS:
+            srv, vendors = serve(unique)
+            base = f'http://127.0.0.1:{srv.server_port}/'
+            scripted = ScriptedPlanner([{"steps": steps, "done": True, "test": {"flow": "vendors", "title": "Create a vendor"}}])
+            original, qm_agent.Planner = qm_agent.Planner, (lambda *a, **k: scripted)
+            try:
+                page = b.new_page(); page.goto(base)
+                agent = FastAgent(page, b, {}, base_url=base, tests_root=tempfile.mkdtemp(), scan="off")
+                result = agent.run_task("Create a vendor in Pune and check it")
+            finally:
+                qm_agent.Planner = original
+            names = sorted(v['name'] for v in vendors if v['name'].startswith('QA Vendor'))
+            results.append({"title": title, "saved": bool(result['saved']), "expected": should_save, "names": names,
+                            "replay": result['replay'], "code": result.get('code') or [], "summary": summary_text(result)})
+            if verbose:
+                rp = result['replay'] or {}
+                print(f"\n{title}")
+                print("  replays:", rp.get('runs'), "| saved:", bool(result['saved']), "(expected", str(should_save) + ")",
+                      "| vendors on the server:", names)
+                if not rp.get('ok'):
+                    print("  failed at:", (rp.get('failed_step') or {}).get('name'), '-', str((rp.get('failed_step') or {}).get('error'))[:110])
+                if '{unique}' in str(steps) and result.get('code'):
+                    print("  " + "\n  ".join(line for line in result['code'] if 'tc_data' in line)[:700])
+            page.close(); srv.shutdown()
+        b.close()
+    return results
+
+
+if __name__ == "__main__":
+    out = run()
+    good = sum(r["saved"] == r["expected"] for r in out)
+    print(f"\n{good}/{len(out)} scenarios behave as they should")

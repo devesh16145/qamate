@@ -18,12 +18,12 @@
   },
   {
    "do": "select",
-   "target": "Sort",
+   "target": "Sort products",
    "value": "Price (low to high)"
   },
   {
    "do": "expect_value",
-   "target": "Sort",
+   "target": "Sort products",
    "value": "lohi"
   },
   {

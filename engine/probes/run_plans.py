@@ -61,13 +61,15 @@ def run_plan(browser, path, fixtures, verbose):
     authoring = time.monotonic() - started
     replays = []
     if problem is None:
-        replays = [replay(browser, explorer.steps, explorer.data) for _ in range(2)]
+        replays = [replay(browser, explorer.steps, explorer.data, secrets=explorer.secrets) for _ in range(2)]
         bad = next((r for r in replays if not r["ok"]), None)
         if bad:
             problem = f"replay: {str(bad['failed_step'])[:160]}"
+    weak = sum(1 for s in explorer.steps if s.get("weak"))
+    checks = sum(1 for s in explorer.steps if s["op"].startswith("expect"))
     context.close()
     return {"name": os.path.basename(path)[:-5], "seen": plan.get("seen", True), "ok": problem is None,
-            "steps": len(explorer.steps), "authoring_s": round(authoring, 1),
+            "steps": len(explorer.steps), "authoring_s": round(authoring, 1), "checks": checks, "weak": weak,
             "replay_s": round(replays[0]["ms"] / 1000, 1) if replays else None, "problem": problem}
 
 
@@ -89,10 +91,10 @@ def main(argv):
                 print(os.path.basename(path))
             rows.append(run_plan(browser, path, fixtures, verbose))
         browser.close()
-    print(f"\n{'plan':22s} {'app':7s} result  steps  authoring  replay")
+    print(f"\n{'plan':22s} {'app':7s} result  steps  authoring  replay  checks (no change)")
     for r in rows:
         print(f"{r['name']:22s} {'seen' if r['seen'] else 'UNSEEN':7s} {'pass' if r['ok'] else 'FAIL':6s} {r['steps']:5d} {r['authoring_s']:9.1f}s "
-              f"{(str(r['replay_s']) + 's') if r['replay_s'] is not None else '-':>7s}  {r['problem'] or ''}")
+              f"{(str(r['replay_s']) + 's') if r['replay_s'] is not None else '-':>7s}  {r['checks']:3d} ({r['weak']})  {r['problem'] or ''}")
     print(f"\n{sum(r['ok'] for r in rows)}/{len(rows)} plans pass")
     return 0
 

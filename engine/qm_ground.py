@@ -1,36 +1,73 @@
 """Grounding: which element on the page does a plain-language step mean?
 
-Deterministic and fast (no model call). Each candidate is scored on
-  * name match: the step's target words vs the element's label;
-  * role fit: a fill wants a text box, a check wants a checkbox, ...;
-  * context: words from the step's `within` (e.g. a product name or row text) found
-    in the element's item context or region names.
-A clear winner is used directly. Otherwise the short ranked list goes to the decision
-model (Jev) or the planner -- never the whole page.
+The rule is *exact or ask*. A step's target is a control's name as a user reads it, and
+an element is taken without a model only when its displayed name IS that target:
+
+  exact      the same words                      "Add to cart"
+  decorated  the same words once counts, badges and bracketed extras on the label are
+             ignored                             "Cart" ~ "Cart, 2 items"; "Inbox" ~ "Inbox (3)"
+  synonym    the same words up to common UI wording and plurals
+                                                 "New contact" ~ "Create contact"
+
+...and the element can take the action (a fill needs a field, a check needs a checkbox),
+and it is the only such element once the step's `within`, an open dialog, the best
+fitting role and "these links go to the same place" have been applied.
+
+Everything else -- a label that merely contains the words or shares some of them, or
+several equally good elements -- is a short ranked list for the decision model or the
+planner. A wrong click that replays green is worse than a question, so nothing fuzzy
+is ever accepted here. (The earlier weighted scorer accepted substring matches and
+clicked "Ticket 1" for "Ticket 150"; see engine/probes.)
 """
+import functools
 import re
+import unicodedata
 from dataclasses import dataclass
 
-GENERIC_WORDS = {
-    "button", "btn", "link", "field", "input", "box", "textbox", "text", "dropdown", "select",
-    "menu", "tab", "the", "a", "an", "to", "on", "in", "of", "for", "icon", "checkbox",
-    "option", "item", "control", "area", "page", "form", "named", "labelled", "labeled",
-}
-ROLE_WORDS = {"button": "button", "link": "link", "tab": "tab", "checkbox": "checkbox",
-              "radio": "radio", "dropdown": "combobox", "select": "combobox", "menu": "menuitem",
-              "option": "option", "switch": "switch", "toggle": "switch", "search": "searchbox"}
-ROLES_FOR = {
-    "fill": {"textbox", "searchbox", "spinbutton", "combobox"},
-    "select": {"combobox", "listbox"},
-    "check": {"checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"},
-    "click": {"button", "link", "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "option",
-              "checkbox", "radio", "switch", "treeitem", "combobox"},
-    "hover": None, "expect_visible": None, "expect_hidden": None, "expect_text": None,
-    "expect_value": {"textbox", "searchbox", "spinbutton", "combobox"},
-    "expect_checked": {"checkbox", "radio", "switch"}, "upload": {"button", "textbox"},
-    "press": None,
-}
+# ── words ─────────────────────────────────────────────────────────────────────
+_KEEP = "#$."
 
+
+@functools.lru_cache(maxsize=8192)
+def _word_char(ch):
+    if ch.isascii():
+        return ch.isalnum() or ch in _KEEP
+    return unicodedata.category(ch)[0] in "LMN"   # letters, marks (Indic vowel signs), numbers
+
+
+def words(text):
+    """Lower-cased word tokens in any script. '#', '$' and '.' stay inside tokens
+    ("#1002", "$15.99", "v2.6"); other punctuation and symbols separate words."""
+    text = unicodedata.normalize("NFKC", text or "").casefold()
+    out, cur = [], []
+    for ch in text:
+        if _word_char(ch):
+            cur.append(ch)
+        elif cur:
+            out.append("".join(cur))
+            cur = []
+    if cur:
+        out.append("".join(cur))
+    return [w for w in (t.strip(".") for t in out) if w]
+
+
+STOP_WORDS = {"the", "a", "an"}
+# A role named in the step ("Login button", "Contacts tab") constrains the element's role.
+# "search" and "menu" are not here: they are far more often part of a control's name.
+ROLE_WORDS = {
+    "button": {"button", "link"}, "btn": {"button", "link"},     # links styled as buttons, and back
+    "link": {"link", "button"}, "tab": {"tab"},
+    "checkbox": {"checkbox"}, "radio": {"radio"}, "switch": {"switch", "checkbox"},
+    "toggle": {"switch", "checkbox", "button"},
+    "dropdown": {"combobox", "listbox", "button"}, "select": {"combobox", "listbox"},
+    "combobox": {"combobox"}, "option": {"option", "menuitem"},
+    "field": {"textbox", "searchbox", "spinbutton", "combobox"},
+    "input": {"textbox", "searchbox", "spinbutton", "combobox"},
+    "textbox": {"textbox", "searchbox"}, "box": {"textbox", "searchbox", "checkbox", "combobox"},
+    "icon": {"button", "link", "img"}, "heading": {"heading"}, "image": {"img"},
+}
+GENERIC_WORDS = set(ROLE_WORDS) | STOP_WORDS | {"text", "menu", "item", "control", "area", "page", "form",
+                                                 "named", "labelled", "labeled", "to", "on", "in", "of", "for"}
 
 # Interchangeable UI wording, so a planner that guessed "New contact" or "Sign in" for a
 # page it hadn't seen still lands on "Create contact" / "Log in" without a re-plan.
@@ -44,57 +81,134 @@ SYNONYMS = {
 _PHRASES = [(re.compile(r"\b(?:log|sign)[\s-]*in\b"), "login"),
             (re.compile(r"\b(?:log|sign)[\s-]*out\b"), "logout"),
             (re.compile(r"\bsign[\s-]*up\b"), "signup")]
+_BRACKETED = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+_NUMBER = re.compile(r"[#$]?[\d.]+%?")
 
 
-def words(text):
-    return [w for w in re.split(r"[^a-z0-9#$.]+", (text or "").lower()) if w]
+def _singular(w):
+    if not w.isascii() or len(w) <= 3 or w.endswith("ss"):
+        return w
+    if w.endswith("ies"):
+        return w[:-3] + "y"
+    if w.endswith(("ches", "shes", "xes", "zes", "ses")):
+        return w[:-2]
+    return w[:-1] if w.endswith("s") else w
+
+
+def _plain(tokens):
+    return [w for w in tokens if w not in STOP_WORDS] or list(tokens)
+
+
+def canonical_words(text):
+    """Words with UI synonyms and simple plurals folded, role and filler words dropped:
+    'New Contacts' -> [create, contact]. Used for relevance, never for acceptance."""
+    text = unicodedata.normalize("NFKC", text or "").casefold()
+    for pattern, repl in _PHRASES:
+        text = pattern.sub(repl, text)
+    ws = words(text)
+    core = [w for w in ws if w not in GENERIC_WORDS] or ws
+    out = [_singular(SYNONYMS.get(w, w)) for w in core]
+    return [w for w in out if not w.isdigit()] or out
 
 
 def core_words(text):
     ws = words(text)
-    core = [w for w in ws if w not in GENERIC_WORDS]
-    return core or ws
-
-
-def canonical_words(text):
-    """Core words with synonyms and simple plurals folded: 'New Contacts' -> create contact."""
-    text = (text or "").lower()
-    for pattern, repl in _PHRASES:
-        text = pattern.sub(repl, text)
-    out = []
-    for w in core_words(text):
-        w = SYNONYMS.get(w, w)
-        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
-            w = w[:-1]
-        out.append(w)
-    # Counts decorate labels ("1 contact", "Inbox (3)"); they don't name the control.
-    return [w for w in out if not w.isdigit()] or out
+    return [w for w in ws if w not in GENERIC_WORDS] or ws
 
 
 def _norm(text):
     return " ".join(words(text))
 
 
+def _synonym_form(tokens):
+    text = " ".join(tokens)
+    for pattern, repl in _PHRASES:
+        text = pattern.sub(repl, text)
+    return [_singular(SYNONYMS.get(w, w)) for w in text.split()]
+
+
+def label_variants(label, keep_numbers):
+    """Token lists a label may be read as: as written, without bracketed extras, and
+    (unless the target itself names a number) without counts and their unit word."""
+    out = []
+    for text in dict.fromkeys((label, _BRACKETED.sub(" ", label))):
+        tokens = _plain(words(text))
+        if not tokens:
+            continue
+        out.append(tokens)
+        if keep_numbers or not any(_NUMBER.fullmatch(t) for t in tokens):
+            continue
+        no_counts = [t for t in tokens if not _NUMBER.fullmatch(t)]
+        no_units = [t for i, t in enumerate(tokens)
+                    if not _NUMBER.fullmatch(t) and not (i and _NUMBER.fullmatch(tokens[i - 1]))]
+        out += [v for v in (no_counts, no_units) if v]
+    return out
+
+
+def readings(target):
+    """Ways to read a step's target: the whole text as the control's name, or -- when it
+    starts or ends with a role word -- the rest as the name with that role required."""
+    tokens = _plain(words(target))
+    out = [(tokens, None)]
+    if len(tokens) > 1:
+        if tokens[-1] in ROLE_WORDS:
+            out.append((tokens[:-1], ROLE_WORDS[tokens[-1]]))
+        if tokens[0] in ROLE_WORDS:
+            out.append((tokens[1:], ROLE_WORDS[tokens[0]]))
+    return [(t, r) for t, r in out if t]
+
+
+MATCH_RANK = {"exact": 3, "decorated": 2, "synonym": 1, "partial": 0}
+
+
+def match_kind(target, label, role=None):
+    """('exact' | 'decorated' | 'synonym' | 'partial' | None, relevance 0..1) of a label
+    for a target. `role` is the element's role (for targets that name one)."""
+    if not label:
+        return None, 0.0
+    best = (None, 0.0)
+    for tokens, roles in readings(target):
+        if roles is not None and role not in roles:
+            continue
+        has_number = any(_NUMBER.fullmatch(t) for t in tokens)
+        variants = label_variants(label, keep_numbers=has_number)
+        if not variants:
+            continue
+        if variants[0] == tokens:
+            return "exact", 1.0
+        kind = None
+        if tokens in variants or [_singular(t) for t in tokens] in [[_singular(t) for t in v] for v in variants]:
+            kind = "decorated"
+        elif _synonym_form(tokens) in [_synonym_form(v) for v in variants]:
+            kind = "synonym"
+        if kind and MATCH_RANK[kind] > MATCH_RANK.get(best[0], -1):
+            best = (kind, 0.97 if kind == "decorated" else 0.95)
+    if best[0]:
+        return best
+    def bag(text):                          # numbers count here: "Ticket 150" is not "Ticket 1"
+        tokens = set(_synonym_form(_plain(words(text))))
+        return tokens - GENERIC_WORDS or tokens
+    a, b = bag(target), bag(label)
+    if not a or not b or not a & b:
+        return None, 0.0
+    return "partial", round(0.2 + 0.6 * len(a & b) / len(a | b), 3)
+
+
+# ── role fit ──────────────────────────────────────────────────────────────────
 POINTER_OPS = {"click", "dblclick", "hover"}
-
-
-@dataclass
-class Candidate:
-    element: object
-    score: float
-    why: str
-    group: str = ""   # the clickable thing it stands for: a card's heading and the card link are one
-    exact: float = 0.0    # 1.0: the label IS the target; 0.95: same words up to synonyms (fitting control only)
-
-
-def shown_text(element, limit=40):
-    """Everything an element displays: its own label and text plus its descendants'."""
-    parts, stack = [element.label, element.inline, *element.text], list(element.children)
-    while stack and len(parts) < limit:
-        node = stack.pop(0)
-        parts += [node.label, node.inline, *node.text]
-        stack.extend(node.children)
-    return " ".join(p for p in parts if p)
+VALUE_ROLES = {"textbox", "searchbox", "spinbutton", "combobox", "slider"}
+CHECK_ROLES = {"checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"}
+_TIERS = {   # roles that can take the action, best fit first
+    "fill": [{"textbox", "searchbox"}, {"combobox", "spinbutton"}, {"slider"}],
+    "select": [{"combobox", "listbox"}, {"button"}],
+    "check": [CHECK_ROLES],
+    "upload": [{"button", "textbox"}],
+    "expect_value": [VALUE_ROLES],
+    "expect_checked": [CHECK_ROLES],
+    "click": [{"button", "link", "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "option", "treeitem",
+               "switch", "checkbox", "radio"}, {"combobox", "listbox"}, VALUE_ROLES],
+}
+_TIERS["dblclick"] = _TIERS["click"]
 
 
 def clickable_container(element, levels=4):
@@ -110,106 +224,161 @@ def clickable_container(element, levels=4):
     return None
 
 
-def name_score(target, label):
-    if not label:
-        return 0.0
-    t, l = _norm(target), _norm(label)
-    tc = " ".join(core_words(target))
-    if l and (l == t or l == tc):
-        return 1.0
-    ct, cl = canonical_words(target), canonical_words(label)
-    if ct and ct == cl:
-        return 0.95   # same words up to synonyms/plurals: "New Contact" ~ "Create contact"
-    if len(tc) >= 3 and (tc in l or l in tc):
-        return 0.85
-    a, b = set(ct), set(cl)
-    if not a or not b:
-        return 0.0
-    return 0.8 * len(a & b) / len(a | b)
+def fit(op, element, container=None):
+    """How well the element can take the action: 0 is the natural kind of control, larger
+    is a poorer fit, None means it cannot (a paragraph can't be filled)."""
+    tiers = _TIERS.get(op)
+    if tiers is None:                      # hover, press, expect_visible/hidden/text: anything named
+        return 0
+    actor = container or element
+    for index, roles in enumerate(tiers):
+        if actor.role in roles:
+            return index
+    if op in ("click", "dblclick") and actor.interactive:
+        return len(tiers)                  # a clickable <div>
+    return None
 
 
-def role_score(op, element, target_text):
-    wanted = ROLES_FOR.get(op)
-    hinted = {ROLE_WORDS[w] for w in words(target_text) if w in ROLE_WORDS}
-    if hinted and element.role in hinted:
-        return 1.0
-    if hinted and (wanted is None or element.role in wanted):
-        return 0.5   # "the Contacts tab" is not the "Contacts" link
-    if wanted is None:
-        return 0.8 if element.interactive or op.startswith("expect") else 0.5
-    if element.role in wanted:
-        return 1.0
-    if element.interactive and op == "click":
-        return 0.6   # e.g. a clickable generic div
-    return 0.1
+def shown_text(element, limit=40):
+    """Everything an element displays: its own label and text plus its descendants'."""
+    parts, stack = [element.label, element.inline, *element.text], list(element.children)
+    while stack and len(parts) < limit:
+        node = stack.pop(0)
+        parts += [node.label, node.inline, *node.text]
+        stack.extend(node.children)
+    return " ".join(p for p in parts if p)
 
 
-def context_score(within, element):
-    """`within` names one item ("Plan A", "Sauce Labs Onesie", "#1002"): every word
-    counts, and a full match must clearly beat items that share some words."""
-    if not within:
-        return 0.0
-    want = set(words(within))
-    have = set(words(element.context)) | {w for _, n in element.regions for w in words(n)}
-    if not want:
-        return 0.0
-    hit = len(want & have) / len(want)
-    return 0.4 * hit * hit - (0.15 if hit == 0 else 0.0)
+def context_words(element, levels=6, item_size=30):
+    """Words that say where an element is: the labels of its item (row, card, list entry),
+    the names and headings of the sections and dialogs it sits in."""
+    have = set(words(element.context))
+    for _, name in element.regions:
+        have.update(words(name))
+    twin = (element.role, _norm(element.label))
+    node, own_item = element.parent, True
+    for _ in range(levels):
+        if node is None:
+            break
+        inside, stack = [], list(node.children)
+        while stack and len(inside) <= item_size:
+            inner = stack.pop()
+            inside.append(inner)
+            stack.extend(inner.children)
+        # Once a container also holds another control like this one (the next row's "Edit"),
+        # its labels no longer say which one this is.
+        if any(n is not element and (n.role, _norm(n.label)) == twin for n in inside):
+            own_item = False
+        if own_item:
+            have.update(words(node.name))
+            have.update(w for t in node.text for w in words(t))
+            if len(inside) <= item_size:             # a small container is the item: all its labels
+                for inner in inside:
+                    if inner is not element:
+                        have.update(words(inner.label))
+                        have.update(w for t in inner.text for w in words(t))
+            else:
+                for child in node.children:          # a larger section is named by its heading
+                    if child.role in ("heading", "caption", "legend"):
+                        have.update(words(child.label))
+        node = node.parent
+    return have
+
+
+@dataclass
+class Candidate:
+    element: object
+    score: float
+    why: str
+    group: str = ""        # the clickable thing it stands for: a card's heading and the card link are one
+    match: str = "partial"  # exact | decorated | synonym | partial
+    tier: object = None     # role fit (0 best); None = cannot take the action
+    context: object = None  # share of the step's `within` words found around it (None: no `within`)
+    shows: bool = False     # for a text check: the element displays the expected text
+
+    @property
+    def exact(self):
+        """1.0 / 0.97 / 0.95 for an exact / decorated / synonym name on a control that can take
+        the action, else 0 -- kept for callers that only need 'is this a real match?'."""
+        if self.tier is None:
+            return 0.0
+        return {"exact": 1.0, "decorated": 0.97, "synonym": 0.95}.get(self.match, 0.0)
 
 
 def rank(step, observation, limit=10):
-    """Candidates for a step dict {op, target, within?, role?, name?}, best first."""
+    """Candidates for a step {op, target, within?, role?, name_hint?, value?}, best first:
+    real name matches on fitting controls, then everything that merely resembles it."""
     op = step["op"]
     target = step.get("target") or ""
     hint_role, hint_name = step.get("role"), step.get("name_hint")
+    want = set(words(step.get("within") or ""))
+    value = _norm(step.get("value")) if op == "expect_text" and step.get("value") else ""
     out = []
     for el in observation.elements:
-        if not el.label and not el.interactive:
+        if not el.label or el.attrs.get("aria-hidden"):   # e.g. the hidden native <select> behind a custom dropdown
             continue
         container = clickable_container(el) if op in POINTER_OPS and not el.interactive else None
+        actor = container or el
         if hint_role and hint_name and el.role == hint_role and _norm(el.label) == _norm(hint_name):
-            ns, rs = 1.0, 1.0
+            kind, relevance = "exact", 1.0
         else:
-            ns = max(name_score(target, el.label), name_score(target, el.name))
-            rs = role_score(op, container or el, target)
-        if ns == 0:
+            kind, relevance = match_kind(target, el.label, actor.role)
+            if el.name and el.name != el.label:
+                other = match_kind(target, el.name, actor.role)
+                if MATCH_RANK.get(other[0], -1) > MATCH_RANK.get(kind, -1):
+                    kind, relevance = other
+        if kind is None:
             continue
-        score = 0.75 * ns + 0.25 * rs + context_score(step.get("within"), el)
-        if el.attrs.get("disabled") and not op.startswith("expect"):
-            score *= 0.5
-        if op == "expect_text" and step.get("value") and _norm(step["value"]) in _norm(shown_text(el)):
-            score += 0.2   # "Company shows X": the control displaying X, not the bare label "Company"
-        if el.context and not step.get("within") and ns < 1.0:
-            score -= 0.2   # one of many look-alikes ("Add to cart" x6) can't be what "Cart" means
-        why = f"name {ns:.2f}, role {rs:.2f}" + (f", inside {container.role}" if container else "")
-        out.append(Candidate(el, round(score, 3), why, (container or el).ref, exact=ns if ns >= 0.95 and rs >= 0.9 else 0.0))
-    # One candidate per clickable thing; on a tie prefer readable text over an image.
+        tier = fit(op, el, container)
+        if tier is not None and el.attrs.get("disabled") and not op.startswith("expect"):
+            tier += 10                      # a disabled control is the last resort
+        context = len(want & context_words(el)) / len(want) if want else None
+        score = relevance - (0.35 if tier is None else 0.02 * min(tier, 5)) + 0.1 * (context or 0)
+        shows = bool(value) and value in _norm(shown_text(el))
+        if shows:
+            score += 0.05                   # "Company shows X": the control displaying X
+        out.append(Candidate(el, round(score, 3), f"{kind} name" + ("" if tier is not None else ", wrong kind of control")
+                             + (f", inside {container.role}" if container else ""),
+                             actor.ref, kind, tier, context, shows))
+    # One candidate per clickable thing; prefer readable text over an image of the same name.
     best = {}
-    for c in sorted(out, key=lambda c: (-c.score, c.element.role == "img")):
+    for c in sorted(out, key=lambda c: (-MATCH_RANK[c.match] if c.tier is not None else 1, -c.score, c.element.role == "img")):
         best.setdefault(c.group, c)
-    return sorted(best.values(), key=lambda c: -c.score)[:limit]
+    ordered = sorted(best.values(), key=lambda c: (-(MATCH_RANK[c.match] if c.tier is not None else -1), -c.score))
+    return ordered[:limit]
 
 
-def decide(candidates, *, sure=0.8, margin=0.15):
-    """The clear winner, or None when a model (or a person) should choose."""
-    if not candidates:
-        return None
-    top = candidates[0]
-    # A card's image named exactly like the text link beside it (products, articles,
-    # people) is the same choice, not a rival.
-    rivals = [c for c in candidates[1:] if not (c.element.role == "img" and top.element.role != "img"
-                                                and _norm(c.element.label) == _norm(top.element.label))]
-    second = rivals[0].score if rivals else 0.0
-    if top.score >= sure and top.score - second >= margin:
-        return top
-    # "Contacts" means the control labelled exactly that, not a "0 contacts" tab that only
-    # contains the word -- unless another control is labelled exactly the same.
-    if top.score >= sure and top.exact and not any(c.exact >= top.exact for c in rivals):
-        return top
-    # Look-alike links that go to the same place (a name in a header and in a sidebar) are
-    # the same choice.
-    close = [top] + [c for c in rivals if top.score - c.score < margin]
-    if top.score >= sure and top.element.role == "link" and top.element.url and \
-            all(c.element.role == "link" and c.element.url == top.element.url for c in close):
-        return top
+_REAL_URL = re.compile(r"^(?!#$|javascript:|about:)\S")
+
+
+def decide(candidates, step=None):
+    """The element to act on without asking anyone, or None.
+
+    Only real name matches on controls that can take the action are considered, in order
+    of strictness (exact, then decorated, then synonym). The step's `within` must be
+    fully matched when given. Among several, an open dialog wins, then the best-fitting
+    role; links that go to one real address count as one."""
+    for kind in ("exact", "decorated", "synonym"):
+        pool = [c for c in candidates if c.match == kind and c.tier is not None]
+        if not pool:
+            continue
+        if pool[0].context is not None:
+            pool = [c for c in pool if c.context == 1.0]
+            if not pool:
+                return None                # right name, but not where the step said
+        in_dialog = [c for c in pool if c.element.region("dialog", "alertdialog")]
+        if in_dialog and len(in_dialog) < len(pool):
+            pool = in_dialog
+        best_tier = min(c.tier for c in pool)
+        pool = [c for c in pool if c.tier == best_tier]
+        for narrower in ([c for c in pool if c.shows],                      # a text check: where the text is
+                         [c for c in pool if c.element.role != "img"]):     # a caption over its own picture
+            if narrower and len(narrower) < len(pool):
+                pool = narrower
+        if len(pool) == 1:
+            return pool[0]
+        urls = {c.element.url for c in pool}
+        if all(c.element.role == "link" for c in pool) and len(urls) == 1 and _REAL_URL.match(next(iter(urls)) or ""):
+            return pool[0]                 # the same destination, listed twice
+        return None                        # several equally good: ask
     return None

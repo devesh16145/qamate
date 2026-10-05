@@ -1,7 +1,7 @@
 {
  "url": "https://demo.playwright.dev/todomvc/",
- "seen": false,
- "note": "first attempt 2026-10-05: three items, then mark one done and filter",
+ "seen": true,
+ "note": "first attempt 2026-10-05 failed on the old loop guard (third Enter); plan expectation corrected to 2 items left",
  "steps": [
   {
    "do": "fill",
@@ -40,7 +40,7 @@
   },
   {
    "do": "expect_text",
-   "value": "1 item left"
+   "value": "2 items left"
   },
   {
    "do": "click",

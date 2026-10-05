@@ -1,7 +1,7 @@
 {
  "url": "https://practicesoftwaretesting.com/",
- "seen": false,
- "note": "first attempt 2026-10-05: search, open product, quantity 2, add to cart, check cart",
+ "seen": true,
+ "note": "first attempt 2026-10-05 failed at step 1; the blind guess \"Quantity\" on the cart page needs the chooser or a re-plan, so this plan now uses the real label",
  "steps": [
   {
    "do": "fill",
@@ -39,7 +39,7 @@
   },
   {
    "do": "expect_value",
-   "target": "Quantity",
+   "target": "Quantity for Combination Pliers",
    "value": "2"
   }
  ]

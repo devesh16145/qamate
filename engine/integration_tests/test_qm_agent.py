@@ -180,7 +180,7 @@ def test_blank_start_without_project_records_the_real_first_page(monkeypatch, br
     assert result["saved"], result
     source = open(result["saved"]["path"], encoding="utf-8").read()
     assert "about:blank" not in source
-    assert f'flow.goto("{server}operations.html#/transfers"' in source.split("flow = Flow")[1].splitlines()[1]
+    assert f'flow.goto("{server}operations.html#/transfers"' in source.split("flow.use_data")[1].splitlines()[1]
     assert result["timing"]["planner_calls"] == 0 or result["timing"]["browser_s"] >= 0
     log = json.load(open(result["log"], encoding="utf-8"))
     assert log["trace"] and log["replay"]["ok"]

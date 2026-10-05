@@ -175,3 +175,33 @@ def locator_for_ref(page, ref, role=None, name=None, regions=None):
 def locator_for(page, element):
     """locator_for_ref for a parsed qm_observe.Element."""
     return locator_for_ref(page, element.ref, element.role, element.name or None, element.regions)
+
+
+_ITEM_ROLES = ("row", "listitem", "article", "group", "region", "dialog", "form")
+
+
+def scoped_locator(page, element, anchors):
+    """For a control that repeats (the "Edit" of every row): a locator that finds its item
+    by what the item says instead of by position --
+        page.get_by_role("row").filter(has_text="Bach").get_by_role("link", name="Edit")
+    `anchors` are texts that identify the item, most specific first. Returns the same shape
+    as locator_for_ref, or None when no anchored locator pins down exactly this element."""
+    target = page.locator(f"aria-ref={element.ref}")
+    roles = list(dict.fromkeys(r for r, _ in reversed(element.regions) if r in _ITEM_ROLES))
+    for role in roles:
+        for anchor in anchors:
+            anchor = (anchor or "").strip()
+            if not anchor or len(anchor) > 80:
+                continue
+            try:
+                scope = page.get_by_role(role).filter(has_text=anchor)
+                inner = (scope.get_by_role(element.role, name=element.name, exact=True) if element.name
+                         else scope.get_by_role(element.role))
+                selector = selector_of(inner)
+            except Exception:
+                continue
+            if selector and _same_element(page, target, selector):
+                expr = to_python(selector)
+                if python_matches(page, expr, selector):
+                    return {"selector": selector, "python": expr, "unique": True, "positional": False}
+    return None

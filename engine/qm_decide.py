@@ -74,9 +74,14 @@ def choose(config, step, candidates, *, page_title="", page_path="", emit=lambda
         index = int(choice[1:]) if isinstance(choice, str) and choice.startswith("c") and choice[1:].isdigit() else None
         return {"index": index if index is not None and index < len(candidates) else None,
                 "confidence": confidence, "by": "jev"}
-    # Generic chat model (no confidence available).
+    if not name:
+        # No decision model configured: the planner gets the candidates instead. Using the
+        # (slow, reasoning) planner model as a chooser costs as much as a re-plan and tells
+        # the planner nothing.
+        return {"index": None, "confidence": None, "by": None}
+    # Generic chat model in the decision role (no confidence available).
     try:
-        provider = make_provider(config, name, role="decision") if name else make_provider(config, role="planner")
+        provider = make_provider(config, name, role="decision")
         prompt = json.dumps({"step": describe(step), "options": options,
                              "answer_format": {"choice": "one option key"}})
         raw = provider.complete(INSTRUCTIONS, prompt + "\nRespond with only JSON.", max_tokens=200, temperature=0)

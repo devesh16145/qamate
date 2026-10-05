@@ -27,7 +27,8 @@ TEST_UPLOAD_IMAGE = os.path.join(os.path.dirname(__file__), "..", "..", "fixture
 '''
 
 _STEP_TYPES = {"goto": "navigate", "click": "click", "dblclick": "dblclick", "hover": "hover",
-               "fill": "fill", "select": "select", "check": "check", "press": "press", "upload": "upload"}
+               "fill": "fill", "select": "select", "check": "check", "press": "press", "upload": "upload",
+               "close_tab": "navigate"}
 
 
 def func_name(tc_id):
@@ -44,8 +45,14 @@ def build_function(tc_id, steps, description="", expected=""):
         f"def {func_name(tc_id)}(page: Page, tc_data, base_url, checkpoints):",
         f'    """{doc}"""',
         "    flow = Flow(page, base_url=base_url, checkpoints=checkpoints)",
+        "    tc_data = flow.use_data(tc_data, __file__)",
     ]
-    lines += ["    " + render(step) for step in steps]
+    for step in steps:
+        if step.get("weak"):
+            lines.append(f"    # verifies no change: {step['weak']}")
+        lines.append("    " + render(step))
+        if step.get("new_tab") or step["op"] == "close_tab":
+            lines.append("    page = flow.page")     # later steps run in the tab that is now in front
     lines.append('    checkpoints.mark_passed("Flow completed - all steps passed")')
     return "\n".join(lines) + "\n"
 
@@ -75,8 +82,44 @@ def _ensure_imports(source):
     return source
 
 
-def write_test(tests_root, flow_id, tc_id, steps, data=None, description="", expected=""):
+SECRETS_FILE = "secrets.local.json"
+
+
+def save_secrets(tests_root, secrets, data):
+    """Put secret values in <tests_root>/secrets.local.json (kept out of git) and return
+    `data` with its {secret:NAME} references pointing at the names actually used -- a name
+    already holding a different value gets a numbered sibling instead of being overwritten."""
+    if not secrets:
+        return data
+    path = os.path.join(tests_root, SECRETS_FILE)
+    stored = _read_json(path, {})
+    data = dict(data)
+    for name, value in secrets.items():
+        token = "{secret:%s}" % name
+        if not any(token in str(v) for v in data.values()):
+            continue
+        final, n = name, 2
+        while stored.get(final) not in (None, value):
+            final, n = f"{name}_{n}", n + 1
+        stored[final] = value
+        if final != name:
+            data = {k: (v.replace(token, "{secret:%s}" % final) if isinstance(v, str) else v) for k, v in data.items()}
+    os.makedirs(tests_root, exist_ok=True)
+    _write_json(path, stored)
+    ignore = os.path.join(tests_root, ".gitignore")
+    lines = []
+    if os.path.exists(ignore):
+        with open(ignore, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    if SECRETS_FILE not in lines:
+        with open(ignore, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines + ["# passwords and tokens used by tests -- never commit", SECRETS_FILE]) + "\n")
+    return data
+
+
+def write_test(tests_root, flow_id, tc_id, steps, data=None, description="", expected="", secrets=None):
     """Create or replace test `tc_id` in flow `flow_id`. Returns the test file path."""
+    data = save_secrets(tests_root, secrets, data or {})
     flow_dir = os.path.join(tests_root, "flows", flow_id)
     os.makedirs(flow_dir, exist_ok=True)
     for init in (os.path.join(tests_root, "flows", "__init__.py"), os.path.join(flow_dir, "__init__.py")):
@@ -117,7 +160,8 @@ def write_test(tests_root, flow_id, tc_id, steps, data=None, description="", exp
         "steps": [{"id": i + 1, "type": _STEP_TYPES.get(s["op"], "assert"),
                    "targetDescription": s.get("name") or s["op"],
                    "value": "" if s.get("data_key") else str(s.get("value") or ""),
-                   "varName": s.get("data_key") or "", "rawLine": render(s)}
+                   "varName": s.get("data_key") or "", "rawLine": render(s),
+                   **({"weak": s["weak"]} if s.get("weak") else {})}
                   for i, s in enumerate(steps)],
     })
     _write_json(cases_path, cases)

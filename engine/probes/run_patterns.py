@@ -40,11 +40,12 @@ CASES = [
  ("French labels", "french", [f("Nom du client", "Asha"), c("Créer une commande"), txt("Commande créée: Asha")]),
  ("Rich-text box", "rich", [f("Comment", "Looks good"), c("Post comment"), txt("Posted: Looks good")]),
  ("Item far down a lazy list", "longlist", [c("Ticket 150"), txt("Opened Ticket 150")]),
- ("Type-ahead that needs a pick", "typeahead", [f("City", "Pune"), c("Save city"), txt("City saved: Pune")]),
+ # A blind plan (fill, save) is told "Choose a city from the list" and re-plans; this is the informed plan.
+ ("Type-ahead that needs a pick", "typeahead", [f("City", "Pu"), c("Pune"), c("Save city"), txt("City saved: Pune")]),
  ("Same labels in two sections", "dup", [f("City", "Pune", within="Shipping address"), c("Save", within="Shipping address"), txt("Shipping saved: Pune")]),
 ]
 only = [a for a in sys.argv[1:] if not a.startswith('-')]
-results = []
+results, RESULTS = [], []
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     for name, route, plan in CASES:
@@ -72,5 +73,6 @@ with sync_playwright() as pw:
             print('     planner sees:', page_summary(observe(page))['elements'][:12], '| text:', page_summary(observe(page))['text'][:8])
         ctx.close()
         results.append(verdict)
+        RESULTS.append((name, verdict, why))
     b.close()
 print(f"\n{results.count('PASS')}/{len(results)} patterns pass")
