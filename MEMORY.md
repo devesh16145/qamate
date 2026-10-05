@@ -89,11 +89,19 @@ not supersede the full frozen cohort's failed result.
 A second engine replaces the classic modes for chat tasks (Engine: Fast / Classic in the agent
 panel); see [the redesign](docs/QAMATE_FAST_EXPLORER_REDESIGN.md) and its progress log.
 `qm_runtime` (one step runtime for live run and generated test), `qm_observe` (Playwright AI
-snapshot), `qm_selectors`, `qm_ground` (deterministic grounding), `qm_decide` (Jev over a short
-list), `qm_explorer`, `qm_planner` (streamed plans), `qm_map` (per-project app memory and links-only
-quick scan), `qm_agent` (bounded loop; a test is saved only after a fresh-context replay passes),
-`qm_bench` (ten frozen-gate workflows; Benchmark tab, Engine: Fast). Its evidence so far is
-development evidence (scripted plans, fixtures, fake models); live acceptance is unmeasured.
+snapshot with positions, completed from the page), `qm_selectors`, `qm_ground` ("exact or ask"
+grounding), `qm_decide` (chooser asked twice in opposite orders; agreement required),
+`qm_explorer`, `qm_planner` (streamed plans), `qm_map` (per-project app memory and quick scan),
+`qm_agent` (bounded loop; a test is saved only after two fresh-context replays pass),
+`qm_bench` (ten frozen-gate workflows, `--model` to compare planners), `qm_chooser_eval` (chooser
+models on fixed cases) — the last two are in the Benchmark tab.
+
+Before and after any change to grounding, waits or the step runtime, run the model-free probes in
+[engine/probes](engine/probes/README.md); that README holds the dated results and the first-attempt
+record on apps the engine had never seen (14 so far; a new kind of app still needs 0–3 engine
+fixes — do not claim general reliability). Never accept a fuzzy name match without asking. As of
+2026-10-05 all of this is development evidence (hand-written plans, fixtures, fake models):
+the live benchmark and both model comparisons have not been run with real models.
 
 ## Safety and truth semantics to retain
 

@@ -359,3 +359,52 @@ Full results and how to reproduce: [engine/probes/README.md](../engine/probes/RE
 Two of the rules that broke unseen apps were added the day before to make the CRM pass. Consumed
 (no longer unseen): demo.playwright.dev/todomvc, practicesoftwaretesting.com, adminlte.io demo,
 coreui.io demo. the-internet.herokuapp.com timed out under Playwright and produced no result.
+
+
+### 2026-10-05 (later) — rework for unknown apps, model tooling, outside research
+
+Engine `e547d85`. Numbers and the per-app record: [engine/probes/README.md](../engine/probes/README.md).
+
+**Grounding is now "exact or ask".** The weighted scorer is gone. An element is acted on without a
+model only when its name is the step's target (exactly, or counts/brackets/UI synonyms aside), it
+can take the action, and it is the only such element once `within`, an open dialog, what is on
+screen and what the test just opened have been applied. Everything fuzzy goes to the chooser or
+back to the planner. Plain content named exactly like the target (a cell, a list entry, a
+`<summary>`) is clicked as a last resort and kept only if the page visibly reacts.
+
+**What real apps needed, each one code path for authoring and replay:** browser dialogs, new tabs,
+downloads (the test expects the file), uploads through any trigger, drag-and-drop, right-click,
+sliders, lists that take several choices, radio/segment "selects", segmented date fields, explicit
+`wait` when a task asks for it, `{unique}` data, secrets kept out of test files, item-scoped
+checks, and an audit that reports checks which verify no change.
+
+**What the engine sees.** One snapshot with element positions, completed from the page in a single
+call: real names the AI snapshot omits, icon buttons, fields labelled only by text beside them
+(or by an untied `<label>`), column headers, dropdown options, role-less and in-frame rich-text
+editors, off-screen drawers and slides, identical items with their count. A page too big to show
+whole is cut by what is in the window, then what the task names, then what is nearest.
+
+**Waiting.** Settle counts the requests a step itself set off (same site, or an origin whose
+answers change the page) until answered, waits for a new page's stylesheets, ignores timer loops
+and timers that have twice fired without effect, and sees changes inside web components. A step
+whose target is not there yet waits while the page is still arriving.
+
+**Models.** The chooser is asked twice in opposite option orders with an explicit "none"; only
+agreement counts (Jev's own documentation and the multiple-choice literature both report
+first-option bias). `engine/qm_chooser_eval.py` compares chooser models on 43 fixed cases;
+`qm_bench.py --model` compares planner models on the ten workflows. Both are in the Benchmark tab.
+**Neither has been run with real models yet** — that needs the user's keys.
+
+**Outside research (four independent searches, October 2026).** The idea is not new: Playwright's
+own test agents (planner / generator / healer) are free, and Momentic, QA Wolf, mabl, testRigor,
+Donobu and JetBrains Qure sell variants; Octomind, with this architecture, shut down in mid-2026.
+What nobody ships together: an open desktop app, bring-your-own-key, plain pytest output, and
+trust gates (two replays before save, checks proven able to fail, secrets out of files). That, and
+measured reliability on unseen apps, is where QAmate can differ; the free default is the risk.
+Practices adopted from published reliability advice: new data on every run, replay twice before
+saving, show which checks could not fail, secrets outside the test files, dialogs/tabs/frames as
+explicit steps, no fixed sleeps unless asked for.
+
+**Still open.** Live benchmark with MiMo; chooser and planner model comparisons; apps behind
+SSO/MFA beyond a captured session; canvas apps; nested frames more than one deep for role-less
+editors; download contents; the MUI date field still records a text locator.
