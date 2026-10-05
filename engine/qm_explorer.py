@@ -35,7 +35,8 @@ from qm_ground import _norm, decide, plain_pick, rank, reading_text, shown_text,
 from qm_map import route_of
 from qm_observe import Element, observe
 from qm_runtime import _SECRET, Flow, download_pattern, generic_url, relative_url
-from qm_selectors import anchored_locator, label_locator, locator_for, locator_for_ref, scoped_locator, text_locator
+from qm_selectors import (anchored_locator, generated, label_locator, locator_for, locator_for_ref, nth_locator,
+                          scoped_locator, text_locator)
 from qm_steps import execute, parameterize, usable_literals
 
 # Irreversible or outward-facing actions: confirmed before they run.
@@ -307,7 +308,10 @@ class Explorer:
         obs, candidates = self._look(ground, also=(lambda seen: self._choice_in_group(intent, live, seen) is not None)
                                      if op == "select" else None)
         pick, confidence = decide(candidates, ground), None
-        composite = False
+        composite = by_position = False
+        if pick is None and intent.get("nth"):
+            pick = self._nth(ground, obs, intent["nth"])
+            by_position = pick is not None
         if pick is None and op == "fill":
             # No field is named this, but a group of fields may be: a date entered as month,
             # day and year, a code with a box per digit. It is typed into as one field.
@@ -336,7 +340,8 @@ class Explorer:
                 self.emit({"event": "qm_decision_error", "error": choice["error"]})
         if pick is None and found is None:
             real = [c for c in candidates if c.exact]
-            detail = (f"{len(real)} elements are named {target!r}; say which one with \"within\""
+            detail = (f"{len(real)} elements are named {target!r}; say which one with \"within\" "
+                      f"(or with \"nth\" if the items are identical)"
                       if real else f"nothing on the page is named {target!r}")
             if self._reveal_note:
                 detail += "; " + self._reveal_note
@@ -354,10 +359,15 @@ class Explorer:
                         "detail": f"'{element.label}' looks irreversible; confirm before running it",
                         "element": element.summary()}
             self._destructive_ok = True
+        if getattr(element, "offscreen", False) and op in ("click", "dblclick", "hover"):
+            # No scrolling brings it into view: the click could only time out. Say why instead.
+            return {"ok": False, "reason": "off_screen", "element": element.summary(),
+                    "detail": f"'{element.label}' is off-screen -- in a closed drawer or panel, or on a slide that is "
+                              f"not showing; open what shows it first"}
         if found:
             loc, how = found["loc"], found["how"]
         else:
-            loc = self._locator(pick, obs, live.get("within"))
+            loc = (nth_locator(self.page, element) if by_position else None) or self._locator(pick, obs, live.get("within"))
         if not loc["unique"]:
             return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {element.summary()}"}
         step = {"op": "type" if composite else op, "target": loc["python"], "name": label}
@@ -421,6 +431,30 @@ class Explorer:
                         "positional": loc["positional"]})
         return outcome
 
+    def _nth(self, ground, obs, nth):
+        """The step says which of several identical items it means by position ("nth": 2).
+        Counted among the elements named exactly like the target that fit the action, in page
+        order; links to one address count once (a product's picture and its title)."""
+        try:
+            wanted = int(nth)
+        except (TypeError, ValueError):
+            return None
+        pool = [c for c in rank(ground, obs, limit=200) if c.match == "exact" and c.tier is not None
+                and (c.context is None or c.context == 1.0)]
+        if not pool or wanted < 1:
+            return None
+        tier = min(c.tier for c in pool)
+        order = {id(e): i for i, e in enumerate(obs.elements)}
+        pool = sorted((c for c in pool if c.tier == tier), key=lambda c: order.get(id(c.element), 0))
+        distinct = {}
+        for c in pool:
+            where = c.element.url if c.element.role == "link" and c.element.url else id(c)
+            # of a picture link and a title link to one address, the one with a name of its own
+            if where not in distinct or (c.element.name and not distinct[where].element.name):
+                distinct[where] = c
+        chosen = list(distinct.values())
+        return chosen[wanted - 1] if wanted <= len(chosen) else None
+
     def _locator(self, pick, obs, within):
         """The stable locator for a grounded element: its own; else the card or button it
         stands for; else its item found by what the item says rather than by position."""
@@ -432,10 +466,17 @@ class Explorer:
             container = obs.by_ref(pick.group)
             if container is not None:
                 loc = locator_for(self.page, container)
-        if loc["positional"] or not loc["unique"]:
-            # A repeated control: find its item by what the item says, not by its position.
-            anchors = [within] + [part for part in (element.context or "").split(" · ")]
-            loc = scoped_locator(self.page, element, anchors) or loc
+        weak = generated(loc["selector"])
+        if loc["positional"] or not loc["unique"] or weak:
+            # A repeated control, or one only a generated id tells apart: find its item by what
+            # the item says, not by its position or by a number that will be different next time.
+            anchors = [within] + [part for part in (element.context or "").split(" · ")] + _item_anchors(element)
+            better = scoped_locator(self.page, element, anchors)
+            if better is not None:
+                loc = better
+            elif weak and loc["unique"]:
+                self.notes.append(f"'{element.label}' is found by an id the app generated ({loc['python'][:70]}); "
+                                  f"it may be different on another run")
         return loc
 
     def _choice_in_group(self, intent, live, obs):
@@ -568,7 +609,8 @@ class Explorer:
         """True while the page has pending requests/timers or changed in the last second."""
         try:
             return bool(self.page.evaluate("""() => { const p = window.__qmProbe; if (!p) return false;
-                return p.busy() > 0 || (p.timers && p.timers.size > 0) || performance.now() - p.last < 1000; }"""))
+                return p.busy() > 0 || (p.timers && p.timers.size > 0) || performance.now() - p.last < 1000 ||
+                       (!!p.styling && p.styling()); }"""))
         except Exception:
             return True   # mid-navigation
 
@@ -901,6 +943,23 @@ class Explorer:
         if intent.get("destructive") is True:
             return True
         return bool(DESTRUCTIVE.search(f"{element.label} {intent.get('target', '')}"))
+
+
+def _item_anchors(element, limit=6):
+    """Texts that say which row, card or list entry an element is in: what the item shows
+    (names, links, plain text), not its buttons. Wording without numbers first -- a name
+    stays, a record number or price may not."""
+    node = element.parent
+    while node is not None and node.role not in ("row", "listitem", "article", "group", "region", "form", "dialog"):
+        node = node.parent
+    if node is None:
+        return []
+    texts = list(node.text)
+    for inner in _descendants(node, limit=60):
+        if inner is not element and (inner.role == "link" or not inner.interactive):
+            texts += [inner.label, *inner.text]
+    unique = list(dict.fromkeys(" ".join(t.split()) for t in texts if t and 2 <= len(t.strip()) <= 60))
+    return sorted(unique, key=lambda t: (any(ch.isdigit() for ch in t), -len(t)))[:limit]
 
 
 def _inside(element, other):

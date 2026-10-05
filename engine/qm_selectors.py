@@ -198,6 +198,41 @@ def locator_for(page, element):
                            hints=getattr(element, "hints", ()))
 
 
+# A selector built on an id or attribute the app generated: a record's number, a framework's
+# counter. It finds the element now and may not on the next run.
+_GENERATED = re.compile(r"\d{3,}|:r[0-9a-z]+:|\b(?:mat|mui|ember|react-select|radix|headlessui|rc|el-id|ng)-[\w-]*\d")
+
+
+def generated(selector):
+    """True for a plain CSS selector (not a role, label or text locator) that leans on a
+    generated-looking value: '#grid-image-40-212469', 'input[name="quantity[252341]"]'."""
+    return bool(selector) and not selector.startswith("internal:") and " >> internal:" not in selector \
+        and bool(_GENERATED.search(selector))
+
+
+def nth_locator(page, element):
+    """For one of several identical items chosen by position: role + name + its place among
+    them -- page.get_by_role("link", name="iPhone", exact=True).nth(1). None if it cannot be
+    told by role and name at all."""
+    name = element.name or (element.label if element.role in _NAMED_BY_CONTENT else "")
+    if not name:
+        return None
+    target = page.locator(handle(element))
+    try:
+        same = page.get_by_role(element.role, name=name, exact=True)
+        target.evaluate("el => { window.__qmPick = el; }")
+        for index in range(min(same.count(), 40)):
+            if same.nth(index).evaluate("el => el === window.__qmPick"):
+                selector = selector_of(same.nth(index))
+                expr = to_python(selector)
+                if python_matches(page, expr, selector):
+                    return {"selector": selector, "python": expr, "unique": True, "positional": True}
+                return None
+    except Exception:
+        return None
+    return None
+
+
 def text_locator(page, text):
     """A locator for plain text the page shows -- a caption, a label, a line in a list --
     when exactly one visible element shows exactly this text. Same shape as locator_for_ref;

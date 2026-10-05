@@ -440,6 +440,9 @@ def decide(candidates, step=None):
         in_dialog = [c for c in pool if c.element.region("dialog", "alertdialog")]
         if in_dialog and len(in_dialog) < len(pool):
             pool = in_dialog
+        in_view = [c for c in pool if not getattr(c.element, "offscreen", False)]
+        if in_view and len(in_view) < len(pool):
+            pool = in_view                 # not the copy in a closed drawer or on a slide that is not showing
         best_tier = min(c.tier for c in pool)
         pool = [c for c in pool if c.tier == best_tier]
         for narrower in ([c for c in pool if c.shows],                      # a text check: where the text is

@@ -807,3 +807,60 @@ def test_a_pause_is_a_step_only_when_asked_for():
     assert render({"op": "wait", "value": 3.0, "name": "Wait 3 s"}) == 'flow.wait(3.0, "Wait 3 s")'
     assert normalize_step({"do": "sleep", "value": 2})["seconds"] == 2
     assert "only when the task itself says to wait" in SYSTEM
+
+
+STORE = '''- generic [active] [ref=f1e1] [box=0,0,1280,1897]:
+  - generic [ref=f1e3] [box=-320,0,320,800]:
+    - link "Components" [ref=f1e12] [cursor=pointer] [box=-320,61,320,40]:
+      - /url: /c/25
+  - button "" [ref=f1e20] [cursor=pointer] [box=263,585,41,38]
+  - button " Edit cart" [ref=f1e21] [box=300,585,90,38]
+  - generic [ref=f1e30] [box=0,700,1280,60]:
+    - text: "Success: You have added"
+    - link "iPhone" [ref=f1e31] [cursor=pointer] [box=200,700,50,20]:
+      - /url: /p/40
+    - text: to your
+    - link "shopping cart" [ref=f1e32] [cursor=pointer] [box=300,700,90,20]:
+      - /url: /cart
+    - text: "!"
+  - link "iPhone" [ref=f1e40] [cursor=pointer] [box=100,900,200,20]:
+    - /url: /p/40
+  - link "iPhone" [ref=f1e41] [cursor=pointer] [box=400,900,200,20]:
+    - /url: /p/41
+  - iframe [ref=f1e50] [box=0,1000,400,100]:
+    - button "Pay" [ref=f2e1] [box=10,10,60,30]'''
+
+
+def test_what_a_busy_store_page_taught_the_parser():
+    """From an online store with 1,150 elements: icon-font glyphs, element positions, a
+    sentence with links in it, and main-document refs that carry a prefix after a navigation."""
+    from qm_planner import page_summary
+    elements, text = parse(STORE)
+    by_ref = {e.ref: e for e in elements}
+    assert by_ref["f1e20"].name == "" and by_ref["f1e21"].name == "Edit cart"        # the glyph is not a name
+    assert by_ref["f1e12"].box == (-320, 61, 320, 40) and "box" not in by_ref["f1e12"].attrs
+    assert "Success: You have added iPhone to your shopping cart !" in text
+    assert by_ref["f2e1"].framed and not by_ref["f1e31"].framed                        # by the tree, not by the ref
+    by_ref["f1e12"].offscreen = True                                                   # (set from the page by enrich)
+    summary = page_summary(SimpleNamespace(elements=elements, page_text=text, url="http://x/", title=""))
+    drawer = next(line for line in summary["elements"] if "Components" in line)
+    assert "off-screen" in drawer
+    # The two product links read the same: listed once, with how many there are.
+    assert summary["elements"].count('link "iPhone"  [x2, identical]') == 1
+
+
+def test_a_locator_on_a_generated_id_is_recognised():
+    from qm_selectors import generated
+    assert generated('input[name="quantity[252341]"]') and generated("#mz-product-grid-image-40-212469")
+    assert generated("#mat-input-3") and generated('[id=":r1f:"]')
+    assert not generated('internal:role=link[name="Ticket 15000"i]')      # visible text may hold any number
+    assert not generated("#userSelect") and not generated('[data-test="login-button"]')
+
+
+def test_on_screen_controls_are_preferred_and_identical_items_can_be_counted():
+    elements, _ = parse(STORE)
+    obs = SimpleNamespace(elements=elements)
+    step = {"op": "click", "target": "iPhone"}
+    assert decide(rank(step, obs), step) is None                # three links, two addresses: a question
+    elements[[e.ref for e in elements].index("f1e41")].offscreen = True
+    assert decide(rank(step, obs), step).element.url == "/p/40"   # the other address is off-screen: one choice left

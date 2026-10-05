@@ -52,7 +52,8 @@ Rules:
 - Use labels exactly as they appear: on the current page from its elements, on other pages from
   known_pages. A target must be the control's own name, not a description of it.
 - When several elements share a label (e.g. "Add to cart" on every product), say which one
-  with "within": the item's name, row text or section.
+  with "within": the item's name, row text or section. Only when the items themselves are
+  identical (marked "[x4, identical]") add "nth": 1 for the first, 2 for the second, ...
 - Set "done": true when your steps complete the whole task, including its checks. Use
   "done": false only if you genuinely need to see a page before planning further. "done" is a
   key of the reply, never a step.
@@ -81,6 +82,7 @@ Rules:
 MAX_ELEMENT_LINES = 120
 MAX_TEXT_LINES = 60
 _CHROME = ("navigation", "banner", "contentinfo", "menubar")
+_FIELDS = ("textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio", "switch", "listbox")
 
 
 def page_summary(observation):
@@ -88,23 +90,31 @@ def page_summary(observation):
     When a page has more than fits, what a task works with is kept first -- fields, buttons,
     dialogs, messages, then links in the content -- and site navigation and footer links are
     cut back to a sample."""
-    entries, seen = [], set()
+    entries, seen = [], {}
     for order, el in enumerate(observation.elements):
         if not (el.interactive or el.role in ("heading", "alert", "status", "dialog")):
             continue
+        if not el.label and el.role not in _FIELDS and el.role != "dialog":
+            continue                                   # nothing to call it by
         line = el.summary()[:140]
         if line in seen:
+            seen[line] += 1                            # identical items: listed once, with how many there are
             continue
-        seen.add(line)
+        seen[line] = 1
         chrome = el.region(*_CHROME) is not None
-        priority = 2 if (el.role == "link" and chrome) else 1 if el.role == "link" else 0
+        # what cannot be used until something else is opened (a closed drawer, a later slide) comes last
+        priority = 3 if getattr(el, "offscreen", False) else 2 if (el.role == "link" and chrome) else 1 if el.role == "link" else 0
         entries.append((priority, order, line))
     kept = sorted(entries)[:MAX_ELEMENT_LINES] if len(entries) > MAX_ELEMENT_LINES else entries
     if len(entries) > MAX_ELEMENT_LINES:
         nav = [e for e in kept if e[0] == 2]
         if len(nav) > 15:                               # navigation never crowds out content
-            kept = [e for e in kept if e[0] < 2] + nav[:15]
-    lines = [line for _, _, line in sorted(kept, key=lambda e: e[1])]
+            kept = [e for e in kept if e[0] != 2] + nav[:15]
+        away = [e for e in kept if e[0] == 3]
+        if len(away) > 25:                              # nor does what is off-screen
+            kept = [e for e in kept if e[0] != 3] + away[:25]
+    lines = [line + (f"  [x{seen[line]}, identical]" if seen[line] > 1 else "")
+             for _, _, line in sorted(kept, key=lambda e: e[1])]
     if len(lines) < len(entries):
         lines.append(f"... ({len(entries) - len(lines)} more links not shown)")
     text = [t[:200] for t in dict.fromkeys(t.strip() for t in observation.page_text) if t][:MAX_TEXT_LINES]

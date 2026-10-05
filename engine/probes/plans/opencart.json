@@ -1,0 +1,73 @@
+{
+ "url": "https://ecommerce-playground.lambdatest.io/",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine 45c684e), written page by page from what the planner is shown. A busy real store (1,150 elements on the home page). Gaps found: (1) icon-font glyphs counted as a button's name, so 'Add to Cart' buttons were unnamed and their title never looked up; (2) only the first 80 unnamed controls were described per look, one call each; (3) closed side drawers and carousel slides that are not showing were listed and treated as usable; (4) after a navigation the main document's refs carry an 'f1' prefix and were taken for frame content; (5) four identical 'iPhone' results: the planner saw one and could not say which ('nth'); (6) the quantity box was located by a generated cart-row id; (7) sentences were cut at links, and off-screen text came first. The page may also have been read before its stylesheet arrived on this slow site.",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Search For Products",
+   "value": "iPhone"
+  },
+  {
+   "do": "click",
+   "target": "Search"
+  },
+  {
+   "do": "expect_text",
+   "value": "Search - iPhone"
+  },
+  {
+   "do": "click",
+   "target": "iPhone",
+   "nth": 1
+  },
+  {
+   "do": "click",
+   "target": "Add to Cart",
+   "within": "iPhone"
+  },
+  {
+   "do": "expect_text",
+   "value": "Success: You have added iPhone to your shopping cart!"
+  },
+  {
+   "do": "click",
+   "target": "View Cart"
+  },
+  {
+   "do": "expect_value",
+   "target": "QUANTITY",
+   "value": "1"
+  },
+  {
+   "do": "fill",
+   "target": "QUANTITY",
+   "value": "2"
+  },
+  {
+   "do": "click",
+   "target": "Update"
+  },
+  {
+   "do": "expect_text",
+   "value": "Success: You have modified your shopping cart!"
+  },
+  {
+   "do": "expect_value",
+   "target": "QUANTITY",
+   "value": "2"
+  },
+  {
+   "do": "expect_text",
+   "value": "$246.40"
+  },
+  {
+   "do": "click",
+   "target": "Remove"
+  },
+  {
+   "do": "expect_text",
+   "value": "Your shopping cart is empty!"
+  }
+ ]
+}

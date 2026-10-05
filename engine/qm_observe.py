@@ -22,6 +22,7 @@ their own frame (the frame's whole body is the text box).
 import json
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 
 from qm_ground import words
@@ -71,6 +72,9 @@ class Element:
     selector: str = ""                                # how to reach it when the snapshot gave it no ref (see _add_editables)
     hints: list = field(default_factory=list)         # selectors that may identify it in a test, most stable first
     options: list = field(default_factory=list)       # a dropdown's choices as listed: [(label, chosen), ...]
+    box: tuple = None                                 # (x, y, width, height) in the viewport when the snapshot was taken
+    offscreen: bool = False                           # outside the page and not scrollable into view: a closed drawer, a hidden slide
+    framed: bool = False                              # inside an <iframe> (its ref and box belong to that frame)
 
     @property
     def label(self):
@@ -102,6 +106,8 @@ class Element:
         bits = [f'{self.role} "{self.label}"' if self.label else self.role]
         state = [k if v is True else f"{k}={v}" for k, v in self.attrs.items()
                  if k not in ("ref", "cursor", "active")]
+        if self.offscreen:
+            state.append("off-screen")
         if self.aliases:
             state.append("labelled " + ", ".join(f'"{a}"' for a in self.aliases[:2]))
         if not self.name and self.label and self.label == self.fallback and self.label_source in ("icon", "nearby", "id"):   # a guess, say so
@@ -180,9 +186,27 @@ def _attrs(raw):
     return out
 
 
-def parse_tree(snapshot_text):
-    """AI snapshot text -> (elements with refs, page text lines), before labels are completed."""
-    elements, texts = [], []
+def _glyphless(text):
+    """Text without icon-font glyphs. Icon fonts draw their icons with private-use characters,
+    which browsers count as a button's text: a cart button is then "named" by one unreadable
+    character and its real label (title, tooltip) is never looked up."""
+    if not text or text.isascii():
+        return text
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Co").strip()
+
+
+def _box(raw):
+    try:
+        x, y, w, h = (int(float(part)) for part in str(raw).split(","))
+        return x, y, w, h
+    except Exception:
+        return None
+
+
+def parse_tree(snapshot_text, owners=None):
+    """AI snapshot text -> (elements with refs, page text lines), before labels are completed.
+    `owners`, when given, receives the element each text line sits in (None at the top)."""
+    elements, texts, said_in = [], [], []
     stack = []   # (indent, Element or None, role, name)
     phrase = None    # the stack entry whose running text the last line of `texts` belongs to
 
@@ -194,6 +218,7 @@ def parse_tree(snapshot_text):
             texts[-1] = f"{texts[-1]} {text}"
         else:
             texts.append(text)
+            said_in.append(next((e for _, e, _, _ in reversed(stack) if e is not None), None))
         phrase = piece_of
 
     for raw in snapshot_text.splitlines():
@@ -205,6 +230,8 @@ def parse_tree(snapshot_text):
             stack.pop()
         parent = stack[-1][1] if stack else None
         key, value = _split(stripped[2:].rstrip())
+        if isinstance(value, str):
+            value = _glyphless(value)
         if key.startswith("/"):                   # a property of the parent: /url, /placeholder
             if parent is not None and value is not None:
                 if key == "/url":
@@ -225,8 +252,9 @@ def parse_tree(snapshot_text):
         if not m:
             continue
         role, raw_name = m.group("role"), m.group("name") or ""
-        name = _unquote(raw_name[1:-1]) if raw_name.startswith('"') else raw_name[1:-1]
+        name = _glyphless(_unquote(raw_name[1:-1]) if raw_name.startswith('"') else raw_name[1:-1])
         attrs = _attrs(m.group("attrs"))
+        box = _box(attrs.pop("box")) if "box" in attrs else None
         inline = (value or "").strip()
         inside = [(r, n, e.ref if e is not None else None) for _, e, r, n in stack if r in REGION_ROLES]
         regions = [(r, n) for r, n, _ in inside]
@@ -235,7 +263,8 @@ def parse_tree(snapshot_text):
             ancestor = next((e for _, e, _, _ in reversed(stack) if e is not None), None)
             el = Element(ref=attrs.pop("ref"), role=role, name=name, attrs=attrs, inline=inline,
                          depth=indent // 2, regions=regions, parent=ancestor,
-                         region_refs=[ref for _, _, ref in inside])
+                         region_refs=[ref for _, _, ref in inside], box=box,
+                         framed=any(r == "iframe" for _, _, r, _ in stack))
             if ancestor is not None:
                 ancestor.children.append(el)
             elements.append(el)
@@ -251,6 +280,8 @@ def parse_tree(snapshot_text):
             pass                                      # said by its row
         elif inline and role in PHRASE_ROLES:
             say(inline, stack[-1] if stack else None)
+        elif role == "link" and (name or inline) and stack and stack[-1] is phrase:
+            say(name or inline, stack[-1])            # a link in the middle of a sentence is part of what it says
         elif inline and (not el or (role not in INTERACTIVE_ROLES and role not in VALUE_ROLES)):
             say(inline)                               # what any piece of content says (a field's inline text is its value)
         if name and role not in CELL_ROLES and role not in INTERACTIVE_ROLES and role not in REGION_ROLES \
@@ -258,12 +289,15 @@ def parse_tree(snapshot_text):
             say(name)                                 # content named by its own text: headings, status, definitions...
         stack.append((indent, el, role, name))
     lines = []
-    for text in texts:
+    for text, owner in zip(texts, said_in):
         if isinstance(text, _Row):
+            owner = text.element or owner
             cells = [c.label for c in (text.element.children if text.element is not None else []) if c.role in CELL_ROLES]
             text = " | ".join(" ".join(c.split()) for c in cells if c) or text.name
         if text:
             lines.append(text)
+            if owners is not None:
+                owners.append(owner)
     return elements, lines
 
 
@@ -314,7 +348,9 @@ def _add_context(elements):
             best, node = node, node.parent
         if best is None:
             continue
-        labels = [n.label for n in _subtree(best) if n is not e and n.label and key(n) != key(e)]
+        # what the item says about itself -- its name, price, status -- not its other buttons
+        labels = [n.label for n in _subtree(best) if n is not e and n.label and key(n) != key(e)
+                  and (n.role == "link" or n.role not in INTERACTIVE_ROLES)]
         labels += best.text
         e.context = " · ".join(dict.fromkeys(l.strip() for l in labels if l and l.strip()))[:160]
 
@@ -453,6 +489,8 @@ DESCRIBE_JS = r"""(el, asField) => {
     icon: icon(), nearby: isField ? ((asField && replaced()) || around()) : '',
     testid: attr(el, 'data-testid') || attr(el, 'data-test') || attr(el, 'data-test-id') || attr(el, 'data-qa') || attr(el, 'data-cy'),
     id: el.id || '', name: attr(el, 'name'),
+    // what it opens, when it says so: aria-controls="cart-drawer", href="#filters"
+    controls: attr(el, 'aria-controls') || ((attr(el, 'href').match(/^#([A-Za-z][\w-]{2,})$/) || [])[1] || ''),
   };
 }"""
 
@@ -493,7 +531,7 @@ def _icon_label(icon):
     for token in tokens:
         if token in ICON_MEANING:
             return ICON_MEANING[token]
-    return " ".join(tokens[:3])
+    return _humanize(icon)          # readable words, or nothing (sprite ids such as "svgc9ba0888...")
 
 
 def pick_label(info):
@@ -514,7 +552,7 @@ def pick_label(info):
         label = _icon_label(info.get("icon"))
         if label:
             return label, "icon"
-    for key in ("testid", "name", "id"):
+    for key in ("testid", "name", "id", "controls"):
         label = _humanize(info.get(key))
         if label:
             return label, "id"
@@ -528,13 +566,14 @@ NAMED_CONTAINERS = {"group", "radiogroup", "region", "form", "dialog", "alertdia
 
 
 FIELD_ROLES = {"textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio", "switch", "listbox"}
-_MAIN_REF = re.compile(r"^e\d+$")
 
 
 def _label_cache(page):
     """Per-document cache of what the page said about a field (ref -> info). A ref names one
     element for the life of its document, and what stands beside a named field does not
-    change, so it is asked once. Refs inside frames are not cached (a frame can reload)."""
+    change, so it is asked once. Elements inside frames are not cached (a frame can reload).
+    (Whether an element is in a frame is read from the tree, not from its ref: after a
+    navigation the main document's own refs carry a prefix too -- "f1e12".)"""
     try:
         doc = page.evaluate("() => (window.__qmDoc = window.__qmDoc || String(Math.random()))")
     except Exception:
@@ -549,35 +588,143 @@ def _label_cache(page):
     return cache["info"]
 
 
-def enrich(page, elements, limit=80, budget_ms=500):
+# One call that asks the page about many elements at once. A snapshot taken with boxes says
+# where every element is; the same rectangle finds the element again in the page. Each
+# target is [ref, "x,y,w,h", role, what]: what & 1 = describe it (DESCRIBE_JS), what & 2 =
+# can it be brought into view at all? An element the page has moved since the snapshot (an
+# image finished loading above it) is simply not found here; the caller asks about it by ref.
+MANY_JS = r"""
+({ targets }) => {
+  const describe = %s;
+  const page = document.scrollingElement || document.documentElement;
+  const key = (el) => { const r = el.getBoundingClientRect();
+    return Math.round(r.x) + ',' + Math.round(r.y) + ',' + Math.round(r.width) + ',' + Math.round(r.height); };
+  const wanted = new Map();
+  targets.forEach((t, i) => { if (!wanted.has(t[1])) wanted.set(t[1], []); wanted.get(t[1]).push(i); });
+  const input = (el, types) => el.tagName === 'INPUT' && types.test(el.type);
+  const kind = {
+    button: (el) => el.tagName === 'BUTTON' || el.tagName === 'SUMMARY' || input(el, /^(button|submit|reset|image|file)$/),
+    link: (el) => el.tagName === 'A' || el.tagName === 'AREA',
+    textbox: (el) => el.tagName === 'TEXTAREA' || el.isContentEditable || (el.tagName === 'INPUT' && !input(el, /^(checkbox|radio|button|submit|reset|image|file|range|hidden)$/)),
+    searchbox: (el) => el.tagName === 'INPUT', combobox: (el) => el.tagName === 'SELECT' || el.tagName === 'INPUT',
+    listbox: (el) => el.tagName === 'SELECT', checkbox: (el) => input(el, /^checkbox$/), radio: (el) => input(el, /^radio$/),
+    slider: (el) => input(el, /^range$/), spinbutton: (el) => input(el, /^number$/), iframe: (el) => el.tagName === 'IFRAME',
+  };
+  const fits = (el, role) => (el.getAttribute('role') === role || (kind[role] && kind[role](el)) ? 2 : 1);
+  const best = new Array(targets.length).fill(null);
+  const visit = (scope) => {
+    for (const el of scope.querySelectorAll('*')) {
+      if (el.shadowRoot) visit(el.shadowRoot);
+      const list = wanted.get(key(el));
+      if (!list) continue;
+      for (const i of list) {
+        const score = fits(el, targets[i][2]);
+        if (!best[i] || score > best[i].score) best[i] = { el, score };      // of equals, the outermost
+      }
+    }
+  };
+  visit(document);
+  // Outside the page's own scroll area, and inside nothing that scrolls: no scrolling shows it.
+  const reachable = (el) => {
+    const r = el.getBoundingClientRect();
+    const out = { x: r.right + scrollX <= 0 || r.left + scrollX >= page.scrollWidth,
+                  y: r.bottom + scrollY <= 0 || r.top + scrollY >= page.scrollHeight };
+    if (!out.x && !out.y) return true;
+    for (let box = el.parentElement; box && box !== document.body; box = box.parentElement) {
+      const style = getComputedStyle(box);
+      if (out.x && /auto|scroll/.test(style.overflowX) && box.scrollWidth > box.clientWidth + 1) return true;
+      if (out.y && /auto|scroll/.test(style.overflowY) && box.scrollHeight > box.clientHeight + 1) return true;
+    }
+    return false;
+  };
+  const info = {}, off = [];
+  targets.forEach((t, i) => {
+    if (!best[i]) return;
+    if (t[3] & 1) { try { info[t[0]] = describe(best[i].el, false); } catch (e) {} }
+    if ((t[3] & 2) && !reachable(best[i].el)) off.push(t[0]);
+  });
+  return { info, off };
+}
+""" % DESCRIBE_JS.replace("%", "%%")
+
+
+def _ask_many(page, elements, describe, metrics):
+    """(info by ref, refs that are off-screen) for main-document elements, in one call.
+    Elements the page has moved since the snapshot, and elements in frames, are left out
+    (the caller asks about those one by one)."""
+    if not metrics:
+        return {}, set()
+    sx, sy, width, height = metrics[:4]
+    wanted = {e.ref for e in describe}
+    targets = []
+    for el in elements:
+        if el.box is None or el.framed:
+            continue
+        x, y, w, h = el.box
+        outside = x + w + sx <= 0 or x + sx >= width or y + h + sy <= 0 or y + sy >= height
+        what = (1 if el.ref in wanted else 0) | (2 if outside and (w or h) else 0)
+        if what:
+            targets.append([el.ref, f"{x},{y},{w},{h}", el.role, what])
+    if not targets:
+        return {}, set()
+    try:
+        answer = page.evaluate(MANY_JS, {"targets": targets}) or {}
+    except Exception:
+        return {}, set()
+    return answer.get("info") or {}, set(answer.get("off") or [])
+
+
+def enrich(page, elements, limit=40, budget_ms=400, metrics=None):
     """Complete what the snapshot says about controls from the page itself:
       * a control it left nameless gets a label (its real accessible name first, see module
         docstring);
       * a field named by its placeholder or title also gets the visible label beside it as
         an alias ("name@example.com" is the Email field);
-      * a named container's recovered name becomes part of its contents' context."""
+      * a named container's recovered name becomes part of its contents' context;
+      * elements no scrolling can bring into view (a closed side drawer) are marked off-screen.
+    All of it is asked in one call (see MANY_JS); what that cannot reach is asked one element
+    at a time, within `limit` and `budget_ms`."""
     nameless = [e for e in elements if not e.name and not e.attrs.get("aria-hidden")
                 and ((e.interactive and not words(e.label)) or e.role in NAMED_CONTAINERS)]
     # real controls first, then clickable wrappers, then containers
     nameless.sort(key=lambda e: (e.role in NAMED_CONTAINERS, e.role not in INTERACTIVE_ROLES))
     named_fields = [e for e in elements if e.name and e.role in FIELD_ROLES and not e.attrs.get("aria-hidden")]
+    # A button that shows only a count (a cart with "0", a bell with "3") is called by its icon or title.
+    counters = [e for e in elements if e.interactive and e.role not in FIELD_ROLES and e.label and words(e.label)
+                and not any(ch.isalpha() for ch in e.label) and not e.attrs.get("aria-hidden")]
     cache = _label_cache(page)
-    started = time.monotonic()
+    answered, off = _ask_many(page, elements,
+                              nameless + [e for e in named_fields + counters if e.ref not in cache], metrics)
+    for el in elements:
+        if el.ref in off:
+            el.offscreen = True
+    started, asked = time.monotonic(), 0
+
+    def same_field(el, info):
+        """A named field found again by its place must still carry that name: if the page
+        moved meanwhile, another field may sit where this one was."""
+        said = set(words(" ".join(str(info.get(k) or "") for k in ("named", "placeholder", "title", "text"))))
+        return bool(said & set(words(el.name)))
 
     def describe(el, cached):
-        if cached and el.ref in cache:
+        nonlocal asked
+        if el.ref in answered and (not el.name or el.role not in FIELD_ROLES or same_field(el, answered[el.ref])):
+            info = answered[el.ref]
+        elif cached and el.ref in cache:
             return cache[el.ref]
-        if (time.monotonic() - started) * 1000 > budget_ms:
-            return None
-        try:
-            info = page.locator(f"aria-ref={el.ref}").evaluate(DESCRIBE_JS, timeout=500)
-        except Exception:
-            return None
-        if cached and _MAIN_REF.match(el.ref):
+        else:
+            if asked >= limit or (time.monotonic() - started) * 1000 > budget_ms:
+                return None
+            asked += 1
+            try:
+                info = page.locator(f"aria-ref={el.ref}").evaluate(DESCRIBE_JS, timeout=500)
+            except Exception:
+                return None
+        if cached and not el.framed:
             cache[el.ref] = info
         return info
 
-    for el in nameless[:limit]:
+    for el in nameless:
         info = describe(el, cached=False)       # its text may change while it stays nameless: always fresh
         if not info or info.get("hidden"):      # a visually hidden twin of a custom widget is not a control
             continue
@@ -588,7 +735,13 @@ def enrich(page, elements, limit=80, budget_ms=500):
         if label and el.role in VALUE_ROLES and el.inline and label != el.inline and label.endswith(el.inline):
             label = label[: -len(el.inline)].strip()     # "Department Marketing": name + current value
         el.fallback, el.label_source = label, (source if label else "")
-    for el in named_fields[:limit]:
+    for el in counters:
+        info = describe(el, cached=True)
+        if info and not info.get("hidden"):
+            label, _ = pick_label({**info, "named": "", "text": "", "value": ""})
+            if label:
+                el.aliases.append(label)
+    for el in named_fields:
         info = describe(el, cached=True)
         if not info or info.get("hidden"):
             continue
@@ -699,13 +852,38 @@ def _add_frame_editors(page, elements):
             _alias(root, name)
 
 
+def _away(element):
+    while element is not None:
+        if element.offscreen:
+            return True
+        element = element.parent
+    return False
+
+
+_BOXES = re.compile(r" \[box=[^\]]*\]")
+_METRICS_JS = ("() => { const page = document.scrollingElement || document.documentElement;"
+               " return [Math.round(scrollX), Math.round(scrollY), page.scrollWidth, page.scrollHeight]; }")
+
+
 def observe(page, timeout_ms=5000):
     """Snapshot the page (all frames), parse it and complete missing labels from the page."""
     started = time.monotonic()
-    text = page.aria_snapshot(mode="ai", timeout=timeout_ms)
-    elements, page_text = parse_tree(text)
+    try:
+        metrics = page.evaluate(_METRICS_JS)
+    except Exception:
+        metrics = None
+    try:
+        text = page.aria_snapshot(mode="ai", boxes=True, timeout=timeout_ms)
+    except TypeError:                              # a Playwright without element boxes
+        text, metrics = page.aria_snapshot(mode="ai", timeout=timeout_ms), None
+    owners = []
+    elements, page_text = parse_tree(text, owners)
+    text = _BOXES.sub("", text)                    # positions are not part of what the page shows
     _add_content(elements)
-    enrich(page, elements)
+    enrich(page, elements, metrics=metrics)
+    # What is said in a closed drawer or on a slide that is not showing comes after what is on show.
+    away = [_away(owner) for owner in owners]
+    page_text = [t for t, gone in zip(page_text, away) if not gone] + [t for t, gone in zip(page_text, away) if gone]
     _add_frame_editors(page, elements)
     _add_editables(page, elements)
     _add_context(elements)

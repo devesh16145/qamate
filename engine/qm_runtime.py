@@ -11,7 +11,8 @@ Waiting is effect-based, never a guess:
     hidden, value) when one is given;
   * every step ends with `settle()`: wait until the page's DOM has been quiet, no
     fetch/XHR, script or stylesheet load is in flight and no short timer is pending,
-    capped at a few seconds. A page the action didn't change gets a short look (60 ms);
+    capped at a few seconds (longer while a new page's stylesheets are still loading: a
+    page without its styles shows closed drawers open and hidden things visible). A page the action didn't change gets a short look (60 ms);
     one that is reacting must stay unchanged for 120 ms after its last change. Nodes
     that never stop changing (progress bars, clocks, spinners) are recognised and ignored.
 No `networkidle`, no fixed sleeps.
@@ -74,7 +75,18 @@ QUIET_PROBE = r"""
     const id = ++probe.seq; probe.pending.set(id, performance.now());
     const done = () => { probe.pending.delete(id); bump(); };
     node.addEventListener('load', done, { once: true });
-    node.addEventListener('error', done, { once: true });
+    node.addEventListener('error', () => { probe.failed.add(node); done(); }, { once: true });
+  };
+  // Is the document still waiting for a stylesheet that applies to the screen? Until it has
+  // arrived the page is not laid out as the user will see it.
+  probe.failed = new WeakSet();
+  probe.styling = () => {
+    if (document.readyState === 'complete') return false;
+    for (const link of document.querySelectorAll('link[rel~="stylesheet"]')) {
+      if (!link.href || link.sheet || link.disabled || probe.failed.has(link)) continue;
+      if (!link.media || link.media === 'all' || matchMedia(link.media).matches) return true;
+    }
+    return false;
   };
   // A node whose attributes or text keep changing (a progress bar, a clock, a spinner) is
   // decoration: after a few changes in a row it stops counting as "the page is reacting".
@@ -194,7 +206,8 @@ SETTLE_JS = r"""
   const probe = window.__qmProbe;
   const start = performance.now();
   if (!probe) { resolve({ quiet: false, probe: false, ms: 0 }); return; }
-  const idle = () => probe.busy() === 0 && (!probe.timers || probe.timers.size === 0);
+  const styling = () => !!probe.styling && probe.styling();
+  const idle = () => probe.busy() === 0 && (!probe.timers || probe.timers.size === 0) && !styling();
   // A page that hasn't changed lately and has nothing pending only needs a short look for
   // a delayed reaction; once it changes, it must then stay unchanged for the full period.
   const calm = idle() && start - probe.last >= calmMs;
@@ -206,7 +219,7 @@ SETTLE_JS = r"""
     const need = calm && !changed ? calmMs : quietMs;
     if (idle() && now - Math.max(probe.last, start) >= need)
       return resolve({ quiet: true, ms: Math.round(now - start), calm: calm && !changed });
-    if (now - start >= maxMs)
+    if (now - start >= (styling() ? Math.max(maxMs, 10000) : maxMs))
       return resolve({ quiet: false, ms: Math.round(now - start), requests: probe.busy(),
                        timers: probe.timers ? probe.timers.size : 0 });
     (probe.rawSetTimeout || setTimeout)(tick, 20);   // our own poll must not count as page work
@@ -824,7 +837,8 @@ class Flow:
             box = self._find(target)
             try:
                 painted = box.evaluate("el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el);"
-                                       " return s.opacity === '0' || r.width < 3 || r.height < 3; }", timeout=2000)
+                                       " return s.opacity === '0' || r.width < 3 || r.height < 3 ||"
+                                       " r.right + scrollX <= 0 || r.bottom + scrollY <= 0; }", timeout=2000)
             except Exception:
                 painted = False
             try:
