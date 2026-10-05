@@ -113,6 +113,8 @@ def python_matches(page, expr, selector):
         return False
 
 
+_NAMED_BY_CONTENT = {"button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option",
+                     "heading", "cell", "columnheader", "rowheader", "treeitem", "switch", "checkbox", "radio"}
 _SCOPE_ROLES = ("row", "dialog", "alertdialog", "listitem", "form", "article", "region", "group", "navigation")
 
 
@@ -129,18 +131,22 @@ def _same_element(page, target, selector):
 
 
 def _role_candidates(page, role, name, regions):
-    """Canonical role+name selectors (built by Playwright itself), plain then scoped."""
+    """Canonical role+name selectors (built by Playwright itself): plain, then scoped to a
+    named region; then the same including content the app hides from assistive technology.
+    (Apps do ship visible, working screens under a stray aria-hidden -- a modal or drawer
+    that forgot to clean up -- and role locators match nothing there unless told to look.)"""
     out = []
-    try:
-        out.append(selector_of(page.get_by_role(role, name=name)))
-        out.append(selector_of(page.get_by_role(role, name=name, exact=True)))
-        for scope_role, scope_name in reversed(regions or []):
-            if scope_role in _SCOPE_ROLES and scope_name:
-                scope = page.get_by_role(scope_role, name=scope_name)
-                out.append(selector_of(scope.get_by_role(role, name=name)))
-                out.append(selector_of(scope.get_by_role(role, name=name, exact=True)))
-    except Exception:
-        pass
+    for hidden in ({}, {"include_hidden": True}):
+        try:
+            out.append(selector_of(page.get_by_role(role, name=name, **hidden)))
+            out.append(selector_of(page.get_by_role(role, name=name, exact=True, **hidden)))
+            for scope_role, scope_name in reversed(regions or []):
+                if scope_role in _SCOPE_ROLES and scope_name:
+                    scope = page.get_by_role(scope_role, name=scope_name, **hidden)
+                    out.append(selector_of(scope.get_by_role(role, name=name, **hidden)))
+                    out.append(selector_of(scope.get_by_role(role, name=name, exact=True, **hidden)))
+        except Exception:
+            pass
     return out
 
 
@@ -173,8 +179,13 @@ def locator_for_ref(page, ref, role=None, name=None, regions=None):
 
 
 def locator_for(page, element):
-    """locator_for_ref for a parsed qm_observe.Element."""
-    return locator_for_ref(page, element.ref, element.role, element.name or None, element.regions)
+    """locator_for_ref for a parsed qm_observe.Element. A name recovered from the page counts
+    when it is the control's real accessible name (Playwright's role locators see it even
+    where the AI snapshot does not print it); a label that was guessed never does."""
+    name = element.name or (element.fallback if getattr(element, "label_source", "") == "name" else None)
+    if not name and element.role in _NAMED_BY_CONTENT and element.label and element.label != element.fallback:
+        name = element.label      # its own text is its name; every candidate is verified against the element anyway
+    return locator_for_ref(page, element.ref, element.role, name or None, element.regions)
 
 
 _ITEM_ROLES = ("row", "listitem", "article", "group", "region", "dialog", "form")
@@ -188,20 +199,38 @@ def scoped_locator(page, element, anchors):
     as locator_for_ref, or None when no anchored locator pins down exactly this element."""
     target = page.locator(f"aria-ref={element.ref}")
     roles = list(dict.fromkeys(r for r, _ in reversed(element.regions) if r in _ITEM_ROLES))
-    for role in roles:
-        for anchor in anchors:
-            anchor = (anchor or "").strip()
-            if not anchor or len(anchor) > 80:
-                continue
-            try:
-                scope = page.get_by_role(role).filter(has_text=anchor)
-                inner = (scope.get_by_role(element.role, name=element.name, exact=True) if element.name
-                         else scope.get_by_role(element.role))
-                selector = selector_of(inner)
-            except Exception:
-                continue
-            if selector and _same_element(page, target, selector):
-                expr = to_python(selector)
-                if python_matches(page, expr, selector):
-                    return {"selector": selector, "python": expr, "unique": True, "positional": False}
+    name = element.name or (element.fallback if getattr(element, "label_source", "") == "name" else "")
+    for hidden in ({}, {"include_hidden": True}):
+        for role in roles:
+            for anchor in anchors:
+                anchor = (anchor or "").strip()
+                if not anchor or len(anchor) > 80:
+                    continue
+                try:
+                    scope = page.get_by_role(role, **hidden).filter(has_text=anchor)
+                    inner = (scope.get_by_role(element.role, name=name, exact=True, **hidden) if name
+                             else scope.get_by_role(element.role, **hidden))
+                    selector = selector_of(inner)
+                except Exception:
+                    continue
+                if selector and _same_element(page, target, selector):
+                    expr = to_python(selector)
+                    if python_matches(page, expr, selector):
+                        return {"selector": selector, "python": expr, "unique": True, "positional": False}
+    return None
+
+
+def anchored_locator(page, element, text):
+    """page.get_by_role(<role>).filter(has_text=<text>) when that is exactly this element --
+    a row, card or section found by what it says. None otherwise."""
+    target = page.locator(f"aria-ref={element.ref}")
+    for hidden in ({}, {"include_hidden": True}):
+        try:
+            selector = selector_of(page.get_by_role(element.role, **hidden).filter(has_text=text))
+        except Exception:
+            continue
+        if selector and _same_element(page, target, selector):
+            expr = to_python(selector)
+            if python_matches(page, expr, selector):
+                return {"selector": selector, "python": expr, "unique": True, "positional": False}
     return None

@@ -49,7 +49,8 @@ def run_plan(browser, path, fixtures, verbose):
         outcome = explorer.run_intent(intent)
         if verbose:
             what = str(intent.get("target") or intent.get("value") or intent.get("url") or "")[:40]
-            print(f"   {index:2d} {'ok  ' if outcome['ok'] else 'FAIL'} {outcome['ms']:5d}ms {intent['do']:16s} {what}")
+            print(f"   {index:2d} {'ok  ' if outcome['ok'] else 'FAIL'} {outcome['ms']:5d}ms {intent['do']:16s} {what:40s} "
+                  f"{(outcome.get('step') or {}).get('target', '')[:90] if outcome['ok'] else ''}")
         if not outcome["ok"]:
             problem = (f"step {index} {intent['do']} {str(intent.get('target') or intent.get('value') or '')!r}: "
                        f"{outcome.get('reason')} - {str(outcome.get('detail')).splitlines()[0][:120]}")

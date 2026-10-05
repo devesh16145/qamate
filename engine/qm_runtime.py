@@ -223,6 +223,8 @@ SCROLL_MORE_JS = r"""
 }
 """
 
+_EDITABLE_PARTS = ('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), '
+                   'textarea, [contenteditable="true"], [role="spinbutton"]')
 _SECRET = re.compile(r"\{secret:([A-Za-z0-9_.-]+)\}")
 SECRETS_FILE = "secrets.local.json"
 
@@ -578,6 +580,28 @@ class Flow:
                     raise StepError(f"the field shows {self._editable_value(loc)!r} after entering the value")
             self.settle()
 
+    def type(self, target, text, name=None):
+        """Enter a value into a field made of several parts -- a date split into month, day
+        and year, a one-time code with a box per digit. Its first part is clicked and the
+        characters typed; such fields move from part to part by themselves, so separators
+        in the value ("10/05/2026") are left out. A field with a single part is simply filled."""
+        text = "" if text is None else str(text)
+        with self._action(name or "Type"):
+            box = self._find(target)
+            node = box.element_handle(timeout=self.timeout_ms)    # the field itself: what it shows changes as we type
+            parts = box.locator(_EDITABLE_PARTS).filter(visible=True)
+            count = parts.count()
+            if count == 1:
+                parts.first.fill(text, timeout=self.timeout_ms)
+            else:
+                (parts.first if count else box).click(timeout=self.timeout_ms)
+                self.page.keyboard.type(re.sub(r"[\W_]+", "", text) if count else text, delay=30)
+            shown = node.evaluate("el => [el.innerText || '', ...[...el.querySelectorAll('input, textarea')].map(i => i.value || '')].join(' ')")
+            squash = lambda value: re.sub(r"[\W_]+", "", value).lower()
+            if squash(text) and squash(text) not in squash(shown):
+                raise StepError(f"the field shows {' '.join(shown.split())[:80]!r} after typing the value")
+            self.settle()
+
     @classmethod
     def _shows(cls, loc, value):
         """True when the field displays `value` -- allowing input masks that only add
@@ -687,11 +711,17 @@ class Flow:
         last action and gone again, like a toast) -- or, with present=False, does not."""
         with self._step(name or (f"Page shows '{text}'" if present else f"Page does not show '{text}'")):
             self._sync_page()
-            deadline = time.monotonic() + self._ms(timeout) / 1000
+            started = time.monotonic()
+            deadline, searched = started + self._ms(timeout) / 1000, False
             while True:
                 shown, flashed, sample = self.page_text(text)
                 if (shown or flashed) if present else not shown:
                     return
+                if present and not searched and time.monotonic() - started > 1.2:
+                    searched = True       # it may be further down a long or lazily loaded list: look there
+                    while time.monotonic() < deadline and self.scroll_more():
+                        if self.page_text(text)[0]:
+                            return
                 if time.monotonic() >= deadline:
                     if present:
                         raise StepError(f"the page does not show {text!r}. It shows: {sample[:400]}")

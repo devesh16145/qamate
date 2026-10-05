@@ -62,6 +62,7 @@ class Element:
     fallback: str = ""                             # label taken from the page when the snapshot has none
     label_source: str = ""                         # where `fallback` came from: text, title, icon, nearby, id
     props: dict = field(default_factory=dict)      # /placeholder and other snapshot properties
+    region_refs: list = field(default_factory=list)   # ref of each entry in `regions` (None when it has none)
 
     @property
     def label(self):
@@ -69,6 +70,8 @@ class Element:
         fields -- their text is their value); else the labels inside it (a card); else
         what the page itself says about it (see enrich)."""
         if self.name:
+            if self.role in VALUE_ROLES and self.inline and self.name != self.inline and self.name.endswith(self.inline):
+                return self.name[: -len(self.inline)].strip()    # "Department Marketing": name + current value
             return self.name
         own = "" if self.role in VALUE_ROLES else (self.inline or " ".join(self.text).strip())
         for text in (own, self.content, self.fallback, self.props.get("placeholder", "")):
@@ -91,7 +94,7 @@ class Element:
         bits = [f'{self.role} "{self.label}"' if self.label else self.role]
         state = [k if v is True else f"{k}={v}" for k, v in self.attrs.items()
                  if k not in ("ref", "cursor", "active")]
-        if not self.name and self.label and self.label == self.fallback and self.label_source in ("icon", "nearby", "id"):
+        if not self.name and self.label and self.label == self.fallback and self.label_source in ("icon", "nearby", "id"):   # a guess, say so
             state.append({"icon": "unnamed, from its icon", "nearby": "unnamed, from the text beside it",
                           "id": "unnamed, from its id"}[self.label_source])
         if state:
@@ -183,12 +186,14 @@ def parse_tree(snapshot_text):
         name = _unquote(raw_name[1:-1]) if raw_name.startswith('"') else raw_name[1:-1]
         attrs = _attrs(m.group("attrs"))
         inline = (value or "").strip()
-        regions = [(r, n) for _, _, r, n in stack if r in REGION_ROLES]
+        inside = [(r, n, e.ref if e is not None else None) for _, e, r, n in stack if r in REGION_ROLES]
+        regions = [(r, n) for r, n, _ in inside]
         el = None
         if "ref" in attrs:
             ancestor = next((e for _, e, _, _ in reversed(stack) if e is not None), None)
             el = Element(ref=attrs.pop("ref"), role=role, name=name, attrs=attrs, inline=inline,
-                         depth=indent // 2, regions=regions, parent=ancestor)
+                         depth=indent // 2, regions=regions, parent=ancestor,
+                         region_refs=[ref for _, _, ref in inside])
             if ancestor is not None:
                 ancestor.children.append(el)
             elements.append(el)
@@ -333,8 +338,18 @@ DESCRIBE_JS = r"""el => {
   };
   const firstImg = el.querySelector('img[alt]'), svgTitle = el.querySelector('svg title');
   const box = el.getBoundingClientRect(), style = getComputedStyle(el);
+  // The accessible name as the author gave it. Playwright's AI snapshot omits it for some
+  // controls its default snapshot does name (a button with an icon element inside, fields
+  // labelled through <label for>), so it is read here.
+  const root = el.getRootNode();
+  const byIds = (ids) => clean((ids || '').split(/\s+/).map((id) => {
+    const node = id && (root.getElementById ? root.getElementById(id) : document.getElementById(id));
+    return node ? own(node) : ''; }).join(' '));
+  const wrapping = el.closest('label');
+  const named = byIds(attr(el, 'aria-labelledby')) || attr(el, 'aria-label') ||
+                (el.labels && el.labels.length ? clean([...el.labels].map(own).join(' ')) : (wrapping && wrapping !== el ? own(wrapping) : ''));
   return {
-    tag, field: isField,
+    tag, field: isField, named: named.slice(0, 120),
     hidden: (box.width <= 1 && box.height <= 1) || style.visibility === 'hidden' || style.display === 'none',
     text: own(el).slice(0, 100),
     value: tag === 'input' && /^(button|submit|reset)$/.test(el.type) ? clean(el.value) : '',
@@ -393,9 +408,10 @@ def pick_label(info):
     about it. Fields are named by placeholder, title or the text beside them; buttons and
     links by visible text, title/tooltip, image, icon and -- last -- a readable id."""
     if info.get("field"):
-        order = [("placeholder", "placeholder"), ("title", "title"), ("tooltip", "title"), ("nearby", "nearby")]
+        order = [("named", "name"), ("placeholder", "placeholder"), ("title", "title"), ("tooltip", "title"),
+                 ("nearby", "nearby")]
     else:
-        order = [("text", "text"), ("value", "text"), ("title", "title"), ("tooltip", "title"),
+        order = [("named", "name"), ("text", "text"), ("value", "text"), ("title", "title"), ("tooltip", "title"),
                  ("alt", "title"), ("svg_title", "title")]
     for key, source in order:
         text = (info.get(key) or "").strip()
@@ -412,11 +428,18 @@ def pick_label(info):
     return "", ""
 
 
-def enrich(page, elements, limit=40, budget_ms=300):
+# Containers whose name says what their contents are (a "Join date" group of three
+# segments, a "Billing address" region): named only by the author, never by guesswork.
+NAMED_CONTAINERS = {"group", "radiogroup", "region", "form", "dialog", "alertdialog", "table", "grid",
+                    "tabpanel", "toolbar", "menu", "listbox", "tablist", "navigation"}
+
+
+def enrich(page, elements, limit=60, budget_ms=400):
     """Name the controls the snapshot left nameless (see module docstring)."""
-    needy = [e for e in elements if e.interactive and not e.name and not words(e.label)
-             and not e.attrs.get("aria-hidden")]
-    needy.sort(key=lambda e: e.role not in INTERACTIVE_ROLES)   # real controls before clickable wrappers
+    needy = [e for e in elements if not e.name and not e.attrs.get("aria-hidden")
+             and ((e.interactive and not words(e.label)) or e.role in NAMED_CONTAINERS)]
+    # real controls first, then clickable wrappers, then containers
+    needy.sort(key=lambda e: (e.role in NAMED_CONTAINERS, e.role not in INTERACTIVE_ROLES))
     started = time.monotonic()
     for el in needy[:limit]:
         if (time.monotonic() - started) * 1000 > budget_ms:
@@ -425,8 +448,22 @@ def enrich(page, elements, limit=40, budget_ms=300):
             info = page.locator(f"aria-ref={el.ref}").evaluate(DESCRIBE_JS, timeout=500)
         except Exception:
             continue
-        if not info.get("hidden"):          # a visually hidden twin of a custom widget is not a control
-            el.fallback, el.label_source = pick_label(info)
+        if info.get("hidden"):              # a visually hidden twin of a custom widget is not a control
+            continue
+        if el.role in NAMED_CONTAINERS and not el.interactive:
+            label, source = (info.get("named") or "", "name")
+        else:
+            label, source = pick_label(info)
+        if label and el.role in VALUE_ROLES and el.inline and label != el.inline and label.endswith(el.inline):
+            label = label[: -len(el.inline)].strip()     # "Department Marketing": name + current value
+        el.fallback, el.label_source = label, (source if label else "")
+    # A container's recovered name is part of where its contents are.
+    renamed = {e.ref: e for e in elements if e.role in REGION_ROLES and e.fallback and not e.name}
+    if renamed:
+        for el in elements:
+            for index, ref in enumerate(el.region_refs):
+                if ref in renamed:
+                    el.regions[index] = (renamed[ref].role, renamed[ref].fallback)
     return elements
 
 

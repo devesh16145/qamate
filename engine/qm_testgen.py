@@ -27,7 +27,7 @@ TEST_UPLOAD_IMAGE = os.path.join(os.path.dirname(__file__), "..", "..", "fixture
 '''
 
 _STEP_TYPES = {"goto": "navigate", "click": "click", "dblclick": "dblclick", "hover": "hover",
-               "fill": "fill", "select": "select", "check": "check", "press": "press", "upload": "upload",
+               "fill": "fill", "type": "fill", "select": "select", "check": "check", "press": "press", "upload": "upload",
                "close_tab": "navigate"}
 
 

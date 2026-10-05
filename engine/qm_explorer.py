@@ -31,7 +31,7 @@ from qm_ground import _norm, decide, rank, shown_text, words
 from qm_map import route_of
 from qm_observe import observe
 from qm_runtime import _SECRET, Flow, generic_url, relative_url
-from qm_selectors import locator_for, python_matches, scoped_locator, selector_of, to_python
+from qm_selectors import anchored_locator, locator_for, scoped_locator
 from qm_steps import execute, parameterize, usable_literals
 
 # Irreversible or outward-facing actions: confirmed before they run.
@@ -43,6 +43,7 @@ SECRET_FIELD = re.compile(r"\b(pass(?:word|code|phrase)?|secret|api[ _-]?key|acc
 ELEMENT_OPS = {"click", "dblclick", "hover", "fill", "select", "check", "upload",
                "expect_visible", "expect_hidden", "expect_text", "expect_value", "expect_checked"}
 DIALOG_OPS = {"click", "dblclick", "press", "select", "check"}
+PART_ROLES = {"spinbutton", "textbox", "searchbox"}     # what a segmented field is made of
 SCOPE_ROLES = {"row", "listitem", "article", "group", "region", "dialog", "alertdialog", "form", "link"}
 MAX_STEPS = 200
 MAX_CHECK_WAIT_S = 20        # how long a check may keep waiting while the page is still working
@@ -205,7 +206,7 @@ class Explorer:
         if best is None:
             return {"ok": False, "reason": "not_found",
                     "detail": f"no row, card or section on the page is named {within!r}"}
-        loc = self._anchored(best, within) or locator_for(self.page, best)
+        loc = anchored_locator(self.page, best, within) or locator_for(self.page, best)
         if not loc["unique"]:
             return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {best.summary()}"}
         step = {"op": "expect_text", "target": loc["python"], "value": value, "present": present,
@@ -215,24 +216,6 @@ class Explorer:
         outcome["element"] = best.summary()
         return outcome
 
-    def _anchored(self, element, text):
-        """page.get_by_role(<role>).filter(has_text=<text>) when that is exactly this element."""
-        try:
-            selector = selector_of(self.page.get_by_role(element.role).filter(has_text=text))
-            target = self.page.locator(f"aria-ref={element.ref}")
-            candidate = self.page.locator(selector)
-            if candidate.count() != 1:
-                return None
-            target.evaluate("el => { window.__qmPick = el; }")
-            if not candidate.evaluate("el => el === window.__qmPick"):
-                return None
-            expr = to_python(selector)
-            if python_matches(self.page, expr, selector):
-                return {"selector": selector, "python": expr, "unique": True, "positional": False}
-        except Exception:
-            pass
-        return None
-
     # ── element steps ───────────────────────────────────────────────────────
     def _element_intent(self, intent, live, reveal=True):
         op = intent["do"]
@@ -241,6 +224,13 @@ class Explorer:
                   "role": intent.get("role"), "name_hint": live.get("name"), "value": live.get("value")}
         obs, candidates = self._look(ground)
         pick, confidence = decide(candidates, ground), None
+        composite = False
+        if pick is None and op == "fill":
+            # No field is named this, but a group of fields may be: a date entered as month,
+            # day and year, a code with a box per digit. It is typed into as one field.
+            pick = next((c for c in candidates if c.match != "partial" and c.tier is None
+                         and any(d.role in PART_ROLES for d in _descendants(c.element))), None)
+            composite = pick is not None
         if pick is None and reveal and not any(c.exact for c in candidates) and self._reveal(ground):
             obs, candidates = self._look(ground)
             pick = decide(candidates, ground)
@@ -283,7 +273,7 @@ class Explorer:
             loc = scoped_locator(self.page, element, anchors) or loc
         if not loc["unique"]:
             return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {element.summary()}"}
-        step = {"op": op, "target": loc["python"], "name": label}
+        step = {"op": "type" if composite else op, "target": loc["python"], "name": label}
         data = None
         if op in ("fill", "select", "expect_value", "expect_text"):
             step["value"] = live.get("value", "")
@@ -602,6 +592,15 @@ class Explorer:
         if intent.get("destructive") is True:
             return True
         return bool(DESTRUCTIVE.search(f"{element.label} {intent.get('target', '')}"))
+
+
+def _descendants(element, limit=40):
+    out, stack = [], list(element.children)
+    while stack and len(out) < limit:
+        node = stack.pop()
+        out.append(node)
+        stack.extend(node.children)
+    return out
 
 
 def _short(exc):

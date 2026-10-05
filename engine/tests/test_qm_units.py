@@ -516,3 +516,26 @@ def test_a_done_pseudo_step_ends_the_plan_instead_of_failing_it():
                            "test": {"flow": "<app area this test covers, one or two words taken from the task>"}})
     assert [s["do"] for s in plan["steps"]] == ["click"] and plan["done"] is True and plan["test"]["flow"] == "agent"
     assert [s["do"] for s in StepScanner().feed('{"steps": [{"do": "click", "target": "Save"}, {"do": "done"}]}')] == ["click"]
+
+
+def test_real_names_recovered_from_the_page_come_first():
+    """Playwright's AI snapshot leaves out names its default snapshot has (a button with an
+    icon element inside; anything under a stray aria-hidden). The author's own name wins
+    over every guess."""
+    assert pick_label({"field": True, "named": "Name", "nearby": "Personal details"}) == ("Name", "name")
+    assert pick_label({"field": False, "named": "Choose date", "icon": "calendar"}) == ("Choose date", "name")
+    assert pick_label({"field": False, "named": "", "text": "Add to cart"}) == ("Add to cart", "text")
+
+
+def test_a_dropdown_named_with_its_current_value_keeps_only_its_name():
+    by = {e.ref: e for e in parse('''- generic [ref=e1]:
+  - combobox "Department Marketing" [ref=e2]: Marketing
+  - combobox "Marketing" [ref=e3]: Marketing
+''')[0]}
+    assert by["e2"].label == "Department" and by["e3"].label == "Marketing"
+
+
+def test_typing_into_a_segmented_field_is_one_step():
+    step = {"op": "type", "target": 'page.get_by_role("group", name="Join date")', "name": "Join date",
+            "value": "10/05/2026", "data_key": "join_date"}
+    assert render(step) == 'flow.type(page.get_by_role("group", name="Join date"), tc_data["join_date"], "Join date")'

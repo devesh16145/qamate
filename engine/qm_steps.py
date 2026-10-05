@@ -38,7 +38,7 @@ class Code:
     name: str
 
 
-ACTIONS = {"goto", "click", "dblclick", "hover", "fill", "select", "check", "press", "upload", "close_tab"}
+ACTIONS = {"goto", "click", "dblclick", "hover", "fill", "type", "select", "check", "press", "upload", "close_tab"}
 CHECKS = {"expect_url", "expect_visible", "expect_hidden", "expect_text", "expect_value",
           "expect_checked", "expect_page_text", "expect_count"}
 OPS = ACTIONS | CHECKS
@@ -94,8 +94,8 @@ def call_spec(step):
     if op == "hover":
         kw = {"expect_visible": Expr(step["expect_visible"])} if step.get("expect_visible") else {}
         return "hover", [target, name], kw
-    if op == "fill":
-        return "fill", [target, _value(step), name], {}
+    if op in ("fill", "type"):
+        return op, [target, _value(step), name], {}
     if op == "select":
         return "select", [target, _value(step), name], _dialog(step, text=False)
     if op == "check":
@@ -199,7 +199,7 @@ def parameterize(step, literals):
     """Rewrite one recorded step in place so it reads typed values from the test data."""
     if not literals:
         return step
-    if step.get("target") and step["op"] != "fill":
+    if step.get("target") and step["op"] not in ("fill", "type"):
         def swap(match):
             try:
                 text = json.loads(match.group(0))

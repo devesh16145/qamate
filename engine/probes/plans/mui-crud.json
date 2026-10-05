@@ -1,0 +1,52 @@
+{
+ "url": "https://mui.com/material-ui/getting-started/templates/crud-dashboard/",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine e3f8969) failed at step 5: the date is three segments, the app content is aria-hidden (names missing from the AI snapshot, role locators match nothing), and the row locator embedded the value of that run",
+ "steps": [
+  {
+   "do": "click",
+   "target": "Essential only"
+  },
+  {
+   "do": "click",
+   "target": "Create"
+  },
+  {
+   "do": "fill",
+   "target": "Name",
+   "value": "QA Probe {unique}"
+  },
+  {
+   "do": "fill",
+   "target": "Age",
+   "value": "31"
+  },
+  {
+   "do": "fill",
+   "target": "Join date",
+   "value": "10/05/2026"
+  },
+  {
+   "do": "select",
+   "target": "Department",
+   "value": "Finance"
+  },
+  {
+   "do": "check",
+   "target": "Full-time"
+  },
+  {
+   "do": "click",
+   "target": "Create"
+  },
+  {
+   "do": "expect_text",
+   "value": "QA Probe {unique}"
+  },
+  {
+   "do": "expect_text",
+   "value": "Finance",
+   "within": "QA Probe {unique}"
+  }
+ ]
+}
