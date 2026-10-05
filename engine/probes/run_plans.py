@@ -31,8 +31,11 @@ def fixture_server():
     return f"http://127.0.0.1:{srv.server_port}/"
 
 
+FOCUS = ""      # --focus "words of the task": what a planner working on that task would be shown first
+
+
 def show_page(page, limit=60):
-    s = page_summary(observe(page))
+    s = page_summary(observe(page), focus=FOCUS)
     print(f"     planner sees {s['url']} ({len(s['elements'])} elements):")
     for line in s["elements"][:limit]:
         print("       ", line)
@@ -85,6 +88,11 @@ def run_plan(browser, path, fixtures, verbose, show=False):
 
 
 def main(argv):
+    global FOCUS
+    if "--focus" in argv:
+        at = argv.index("--focus")
+        FOCUS = argv[at + 1]
+        del argv[at:at + 2]
     verbose = "-v" in argv
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -92,6 +100,10 @@ def main(argv):
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             page.goto(argv[argv.index("--look") + 1], wait_until="domcontentloaded")
             page.wait_for_timeout(1500)
+            # a "#section" address: be where the browser would end up once the page has drawn it
+            page.evaluate("() => { const el = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));"
+                          " if (el) el.scrollIntoView(); }")
+            page.wait_for_timeout(500)
             show_page(page, 140)
             return 0
         paths = [a for a in argv if a.endswith(".json")] or sorted(glob.glob(os.path.join(HERE, "plans", "*.json")))

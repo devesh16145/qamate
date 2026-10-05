@@ -51,6 +51,7 @@ ELEMENT_OPS = {"click", "dblclick", "rightclick", "hover", "fill", "select", "ch
 # of a segmented control, a tab.
 CHOICE_ROLES = {"radio", "menuitemradio", "option", "tab", "button", "switch"}
 MAX_REVEAL_TABS = 6          # other tabs of a panel that are opened to look for a target
+MAX_LOADING_S = 8            # how long a step waits for its target while the last action's requests are still open
 DIALOG_OPS = {"click", "dblclick", "press", "select", "check"}
 PART_ROLES = {"spinbutton", "textbox", "searchbox"}     # what a segmented field is made of
 SCOPE_ROLES = {"row", "listitem", "article", "group", "region", "dialog", "alertdialog", "form", "link"}
@@ -257,7 +258,9 @@ class Explorer:
                     if best is None or el.depth >= best.depth:     # the smallest thing that names the item
                         best = el
             # The item may still be on its way (a list filling in): look again while the page is busy.
-            if best is not None or time.monotonic() >= deadline or not self._settling():
+            now = time.monotonic()
+            if best is not None or not ((now < deadline and self._settling()) or
+                                        (now < deadline - 1.5 + MAX_LOADING_S and self._loading())):
                 break
             self.page.wait_for_timeout(200)
         if best is None:
@@ -594,16 +597,28 @@ class Explorer:
         rendering, a list loading), look again briefly -- that is far cheaper than asking the
         planner. A page that has gone quiet without the target fails at once. `also(obs)`
         says the page already offers another sure way to do the step."""
-        deadline = time.monotonic() + patience_ms / 1000
+        started = time.monotonic()
+        deadline = started + patience_ms / 1000
         while True:
             obs = observe(self.page)
             if self.page_map is not None:
                 self.page_map.see(obs)
             candidates = rank(ground, obs)
-            if (candidates and candidates[0].exact) or time.monotonic() >= deadline or not self._settling() \
-                    or (also is not None and also(obs)):
+            now = time.monotonic()
+            # ...and for as long as a request the last action made is still open (a slow API
+            # behind a route change), within reason.
+            waiting = (now < deadline and self._settling()) or (now < started + MAX_LOADING_S and self._loading())
+            if (candidates and candidates[0].exact) or not waiting or (also is not None and also(obs)):
                 return obs, candidates
             self.page.wait_for_timeout(200)
+
+    def _loading(self):
+        """True while a request made since the last action is still open, or styles are loading."""
+        try:
+            return bool(self.page.evaluate("""() => { const p = window.__qmProbe;
+                return !!p && ((!!p.loading && p.loading() > 0) || (!!p.styling && p.styling())); }"""))
+        except Exception:
+            return True   # mid-navigation
 
     def _settling(self):
         """True while the page has pending requests/timers or changed in the last second."""

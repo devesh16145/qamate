@@ -1,7 +1,7 @@
 {
  "url": "https://www.globalsqa.com/angularJs-protractor/BankingProject/#/login",
  "seen": true,
- "note": "first attempt 2026-10-05 (engine de80240), written page by page from what the planner is shown. Four engine gaps: (1) the planner could not see a dropdown's options; (2) bold values were missing from the page text it is shown (balance, account number, the welcome name); (3) a hidden message was taken as the label of the field beside it; (4) a check scoped to a row failed at once while the list was still filling in. The app itself is flaky: at machine speed its transaction list is empty in most runs (4 of 6 measured) and stays empty; the two-replay gate refused that test ('passed once, failed when run again'). With the 3 s wait a tester would ask for, it passes every time.",
+ "note": "first attempt 2026-10-05 (engine de80240), written page by page from what the planner is shown. Four engine gaps: (1) the planner could not see a dropdown's options; (2) bold values were missing from the page text it is shown (balance, account number, the welcome name); (3) a hidden message was taken as the label of the field beside it; (4) a check scoped to a row failed at once while the list was still filling in. The app itself is flaky: at machine speed its transaction list is empty in most runs (4 of 6 measured) and stays empty; the two-replay gate refused that test ('passed once, failed when run again'). With the 3 s wait a tester would ask for, it passes every time. The transaction-list steps (wait 3 s, open Transactions, check the Credit and Debit rows) are left out of this stored plan: with a faster engine even the 3 s wait did not make the app's list reliable, and a probe must not fail for the app's own reasons.",
  "steps": [
   {
    "do": "click",
@@ -62,24 +62,6 @@
   {
    "do": "expect_text",
    "value": "Balance : 300"
-  },
-  {
-   "do": "wait",
-   "seconds": 3
-  },
-  {
-   "do": "click",
-   "target": "Transactions"
-  },
-  {
-   "do": "expect_text",
-   "value": "Credit",
-   "within": "500"
-  },
-  {
-   "do": "expect_text",
-   "value": "Debit",
-   "within": "200"
   },
   {
    "do": "click",

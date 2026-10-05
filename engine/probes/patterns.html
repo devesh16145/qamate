@@ -85,6 +85,12 @@ const pages = {
     m.innerHTML = '<div role="tablist">' + Object.keys(panels).map((n, i) => `<button role="tab" aria-selected="${!i}">${n}</button>`).join('') + '</div><div id="panel" role="tabpanel"></div>';
     const open = (name) => { panel.innerHTML = panels[name]; m.querySelectorAll('[role=tab]').forEach((t) => t.setAttribute('aria-selected', t.textContent === name)); const b = document.getElementById('sb'); if (b) b.onclick = () => out('Billing saved: ' + tx.value); };
     m.querySelectorAll('[role=tab]').forEach((t) => t.onclick = () => open(t.textContent)); open('General'); },
+  slowswap: () => { const form = (kind) => `<form onsubmit="return false"><label>${kind === 'in' ? 'Amount to be deposited' : 'Amount to be withdrawn'} <input aria-label="amount" id="amt"></label><button id="go">${kind === 'in' ? 'Deposit money' : 'Withdraw money'}</button></form>`;
+    const show = (kind) => { box.innerHTML = form(kind); go.onclick = () => out(amt.value ? (kind === 'in' ? 'Deposited ' : 'Withdrew ') + amt.value : 'Enter an amount'); };
+    m.innerHTML = '<button id="t1">Deposit</button><button id="t2">Withdraw</button><div id="box"></div>'; show('in');
+    t1.onclick = () => show('in');
+    // the other form arrives with a request that takes 2.5 s; until then the old form stays, with a field of the same name
+    t2.onclick = () => fetch('slow?ms=2500').catch(() => {}).finally(() => show('out')); },
 };
 (pages[P] || (() => { m.innerHTML = Object.keys(pages).map(k => `<a href="?p=${k}">${k}</a>`).join(' '); }))();
 </script>

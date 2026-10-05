@@ -31,7 +31,7 @@ def _q(text):
 
 
 def _role_call(spec):
-    m = re.match(r"^([a-z-]+)((?:\[[^\]]*\])*)$", spec)
+    m = re.match(r'^([a-z-]+)((?:\[[a-z-]+=(?:"(?:[^"\\]|\\.)*"[is]?|[^\]]+)\])*)$', spec)    # a quoted name may hold "]"
     if not m:
         return None
     role, attrs = m.group(1), m.group(2)

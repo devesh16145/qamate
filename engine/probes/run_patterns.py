@@ -16,6 +16,12 @@ from qm_planner import page_summary, normalize_step
 from qm_verify import replay
 class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
+    def do_GET(self):
+        if '/slow' in self.path:                 # an API that takes its time: slow?ms=2500
+            time.sleep(min(int(self.path.rpartition('ms=')[2] or 0), 10000) / 1000)
+            self.send_response(200); self.send_header('Content-Type', 'text/plain'); self.end_headers(); self.wfile.write(b'ok')
+            return
+        return super().do_GET()
 srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(H, directory=HERE))
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 B = f'http://127.0.0.1:{srv.server_port}/patterns.html'
@@ -66,6 +72,7 @@ CASES = [
  ("List that takes several choices", "multiselect", [{"do": "select", "target": "Tags", "value": "Urgent"}, {"do": "select", "target": "Tags", "value": "Bug"}, txt("Tags: Urgent, Bug")]),
  ("Field on a tab not yet opened", "tabs", [f("Tax ID", "GST-22"), c("Save billing"), txt("Billing saved: GST-22")]),
  ("Field in a collapsed section", "accordion", [f("Timeout (s)", "45"), c("Apply"), txt("Timeout set to 45")]),
+ ("Form swapped in by a slow request", "slowswap", [c("Withdraw"), f("Amount to be withdrawn", "200"), c("Withdraw money"), txt("Withdrew 200")]),
  ("Tab whose content is built when opened", "lazytabs", [f("Tax ID", "GST-22"), c("Save billing"), txt("Billing saved: GST-22")]),
  ("Cell edited in place", "inlineedit", [{"do": "dblclick", "target": "Viewer", "within": "Bach"}, f("Role", "Admin", within="Bach"), {"do": "press", "value": "Enter"}, txt("Role of Bach is now Admin")]),
 ]

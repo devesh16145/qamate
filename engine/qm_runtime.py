@@ -11,8 +11,15 @@ Waiting is effect-based, never a guess:
     hidden, value) when one is given;
   * every step ends with `settle()`: wait until the page's DOM has been quiet, no
     fetch/XHR, script or stylesheet load is in flight and no short timer is pending,
-    capped at a few seconds (longer while a new page's stylesheets are still loading: a
-    page without its styles shows closed drawers open and hidden things visible). A page the action didn't change gets a short look (60 ms);
+    capped at a few seconds -- or at ten while the requests the step itself set off are
+    still unanswered (until a slow API answers, the page shows the old content) or a new
+    page's stylesheets are still loading (without its styles a page shows closed drawers
+    open and hidden things visible). A pending
+    short timer holds a step until it has fired (a debounced search, a form that is swapped
+    in after an animation) -- unless timers set from that same place in the app's code have
+    been seen to fire without changing anything, twice and never otherwise: UI libraries set
+    timers of 0.5-0.8 s after every click only to tidy up an effect, and waiting for those
+    made every step on such apps a second long. A page the action didn't change gets a short look (60 ms);
     one that is reacting must stay unchanged for 120 ms after its last change. Nodes
     that never stop changing (progress bars, clocks, spinners) are recognised and ignored.
 No `networkidle`, no fixed sleeps.
@@ -66,13 +73,43 @@ QUIET_PROBE = r"""
   document.addEventListener('input', acted, true);
   probe.busy = () => { const now = performance.now(); let n = 0;
     probe.pending.forEach((t) => { if (now - t < 1500) n++; }); return n; };
-  const bump = () => { probe.last = performance.now(); probe.wall = Date.now(); };
+  // Requests that are the page's answer to the last action, however slow (up to 30 s): one
+  // sent within 2 s of the action (or of the document starting), or right as another such
+  // request came back (a chain). A slow API is not background: until it has answered, the
+  // page still shows the old content and a step would act on that. Requests sent at any
+  // other moment (polling, beacons) only count while young -- see busy().
+  //   Only requests to the app's own site count this way from the start. A request to another
+  // site (analytics, error reporting -- such beacons are sent as a page opens and may never
+  // be answered) counts only once an answer from that origin has been seen to change the
+  // page: then it is one of the app's own APIs on another domain.
+  probe.acts = new Set(); probe.actDone = -1e9; probe.origins = new Map();
+  const siteOf = (host) => host.split('.').slice(-2).join('.');
+  const targetOf = (input) => { try { return new URL(typeof input === 'string' ? input : (input && input.url) || String(input), location.href); }
+                                catch (e) { return null; } };
+  probe.started = (input, beacon) => { const id = ++probe.seq, now = performance.now();
+    probe.pending.set(id, now);
+    const url = targetOf(input);
+    const own = !url || !/^https?:$/.test(url.protocol) || siteOf(url.hostname) === siteOf(location.hostname);
+    const foreign = own || !url ? null : url.origin;
+    if (!beacon && (own || probe.origins.get(foreign) === true) &&
+        (now - (probe.mark || 0) <= 2000 || now - probe.actDone <= 100)) probe.acts.add(id);
+    return [id, foreign]; };
+  probe.finished = ([id, foreign]) => { probe.pending.delete(id);
+    if (probe.acts.delete(id)) probe.actDone = performance.now();
+    if (foreign && probe.origins.get(foreign) !== true) {       // did the page change on its answer?
+      const seen = probe.changes;
+      (probe.rawSetTimeout || setTimeout)(() => { if (probe.changes > seen + 1) probe.origins.set(foreign, true); }, 120);
+    } };
+  probe.loading = () => { const now = performance.now(); let n = 0;
+    probe.acts.forEach((id) => { const t = probe.pending.get(id); if (t !== undefined && now - t < 30000) n++; }); return n; };
+  probe.changes = 0;     // real changes and requests so far: lets a timer be judged by what followed it
+  const bump = () => { probe.last = performance.now(); probe.wall = Date.now(); probe.changes++; };
   // Scripts and stylesheets being loaded (route chunks, preloads) are pending work too.
   const track = (node) => {
     const loads = (node.tagName === 'SCRIPT' && node.src) ||
                   (node.tagName === 'LINK' && /stylesheet|modulepreload|preload/.test(node.rel || ''));
     if (!loads) return;
-    const id = ++probe.seq; probe.pending.set(id, performance.now());
+    const id = ++probe.seq; probe.pending.set(id, performance.now());      // (a script or stylesheet: young-only)
     const done = () => { probe.pending.delete(id); bump(); };
     node.addEventListener('load', done, { once: true });
     node.addEventListener('error', () => { probe.failed.add(node); done(); }, { once: true });
@@ -156,15 +193,17 @@ QUIET_PROBE = r"""
   if (origFetch) {
     window.fetch = function (...args) {
       if (loop()) return origFetch.apply(this, args);
-      const id = ++probe.seq; probe.pending.set(id, performance.now()); bump();
-      return origFetch.apply(this, args).finally(() => { probe.pending.delete(id); bump(); });
+      const id = probe.started(args[0], !!(args[1] && args[1].keepalive)); bump();
+      return origFetch.apply(this, args).finally(() => { probe.finished(id); bump(); });
     };
   }
+  const open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) { this.__qmUrl = url; return open.call(this, method, url, ...rest); };
   const send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...args) {
     if (loop()) return send.apply(this, args);
-    const id = ++probe.seq; probe.pending.set(id, performance.now()); bump();
-    this.addEventListener('loadend', () => { probe.pending.delete(id); bump(); }, { once: true });
+    const id = probe.started(this.__qmUrl); bump();
+    this.addEventListener('loadend', () => { probe.finished(id); bump(); }, { once: true });
     return send.apply(this, args);
   };
   // Short one-shot timers count as pending work (debounced search, simulated saves). Long
@@ -174,13 +213,35 @@ QUIET_PROBE = r"""
   const setT = probe.rawSetTimeout = window.setTimeout, clearT = window.clearTimeout;
   const within = (depth, fn, args) => { const outer = probe.depth; probe.depth = depth;
     try { return fn(...args); } finally { probe.depth = outer; } };
+  // Which timers matter is learned, per place in the app's code that sets them (the callback's
+  // source and delay): one whose firing was followed by a change to the page or a request
+  // always holds a step; one that fired twice with nothing following, and never otherwise,
+  // stops holding steps (the 0.5-0.8 s tidy-up timers UI libraries set after every click).
+  const sites = probe.sites = new Map();
+  const judged = (fn, ms) => {
+    if (ms < 100 || ms > 1500) return null;                  // too short to cost anything / not held anyway
+    let source = '';
+    try { source = Function.prototype.toString.call(fn); } catch (e) {}
+    const key = source.length + ':' + source.slice(0, 160) + '|' + ms;
+    let record = sites.get(key);
+    if (!record) { record = { idle: 0, acted: false }; if (sites.size < 400) sites.set(key, record); }
+    return record;
+  };
   window.setTimeout = function (fn, delay, ...rest) {
     if (typeof fn !== 'function') return setT.call(this, fn, delay, ...rest);
     const ms = Number(delay) || 0, depth = probe.depth + 1;
     const counted = ms > 0 && ms <= 60000 && depth <= 2;
     const short = ms <= 1500;
-    const id = setT.call(this, (...a) => { if (counted) { timers.delete(id); slow.delete(id); bump(); } return within(depth, fn, a); }, delay, ...rest);
-    if (counted) { if (short) timers.add(id); else slow.set(id, performance.now()); }
+    const record = counted && short ? judged(fn, ms) : null;
+    const holds = !record || record.acted || record.idle < 2;
+    const id = setT.call(this, (...a) => {
+      if (counted) { timers.delete(id); slow.delete(id); if (holds) bump(); }
+      if (!record) return within(depth, fn, a);
+      const seen = probe.changes;
+      try { return within(depth, fn, a); }
+      finally { setT(() => { if (probe.changes !== seen) record.acted = true; else record.idle++; }, 80); }
+    }, delay, ...rest);
+    if (counted) { if (!short) slow.set(id, performance.now()); else if (holds) timers.add(id); }
     return id;
   };
   window.clearTimeout = function (id) { timers.delete(id); slow.delete(id); return clearT.call(this, id); };
@@ -207,7 +268,8 @@ SETTLE_JS = r"""
   const start = performance.now();
   if (!probe) { resolve({ quiet: false, probe: false, ms: 0 }); return; }
   const styling = () => !!probe.styling && probe.styling();
-  const idle = () => probe.busy() === 0 && (!probe.timers || probe.timers.size === 0) && !styling();
+  const loading = () => !!probe.loading && probe.loading() > 0;
+  const idle = () => probe.busy() === 0 && (!probe.timers || probe.timers.size === 0) && !styling() && !loading();
   // A page that hasn't changed lately and has nothing pending only needs a short look for
   // a delayed reaction; once it changes, it must then stay unchanged for the full period.
   const calm = idle() && start - probe.last >= calmMs;
@@ -219,7 +281,7 @@ SETTLE_JS = r"""
     const need = calm && !changed ? calmMs : quietMs;
     if (idle() && now - Math.max(probe.last, start) >= need)
       return resolve({ quiet: true, ms: Math.round(now - start), calm: calm && !changed });
-    if (now - start >= (styling() ? Math.max(maxMs, 10000) : maxMs))
+    if (now - start >= (styling() || loading() ? Math.max(maxMs, 10000) : maxMs))
       return resolve({ quiet: false, ms: Math.round(now - start), requests: probe.busy(),
                        timers: probe.timers ? probe.timers.size : 0 });
     (probe.rawSetTimeout || setTimeout)(tick, 20);   // our own poll must not count as page work
@@ -474,8 +536,10 @@ class Flow:
         return self.page.locator(target) if isinstance(target, str) else target
 
     def _find(self, target):
-        """The locator for a target, after scrolling lazily loaded lists until it exists.
-        Returns at once when the element is already there."""
+        """The locator for a target, once it exists. Returns at once when it is already there.
+        Otherwise the step's time is spent the way a person would spend it: while the page is
+        still arriving (scripts loading, requests open, things appearing) it is waited for;
+        once the page is at rest, lazily loaded lists are scrolled a screen at a time."""
         loc = self._target(target)
         try:
             loc.first.wait_for(state="attached", timeout=1500)
@@ -483,15 +547,30 @@ class Flow:
         except Exception:
             pass
         scrolled, deadline = False, time.monotonic() + self.timeout_ms / 1000
-        while time.monotonic() < deadline:      # one screen at a time, so virtualised lists render every row
-            if not self.scroll_more():
-                break
-            scrolled = True
-            if loc.count():
-                return loc
-        if scrolled and not loc.count():
-            raise StepError("the target is not on the page, even after scrolling to the end of its lists")
-        return loc    # nothing to scroll: let the action's own wait report it
+        while time.monotonic() < deadline:
+            if self._arriving():
+                self.page.wait_for_timeout(200)
+            elif self.scroll_more():             # one screen at a time, so virtualised lists render every row
+                scrolled = True
+            else:
+                self.page.wait_for_timeout(250)  # at rest, nothing left to scroll: a slow render may still bring it
+            try:
+                if loc.count():
+                    return loc
+            except Exception:
+                pass                             # the document changed under us: look again
+        raise StepError("the target is not on the page" + (", even after scrolling to the end of its lists" if scrolled
+                                                            else f" after {self.timeout_ms / 1000:g} s"))
+
+    def _arriving(self):
+        """Is the page still loading or reacting -- its document not complete, a request or a
+        short timer pending, something changed a moment ago?"""
+        try:
+            return bool(self.page.evaluate("""() => { const p = window.__qmProbe;
+                return document.readyState !== 'complete' || (!!p && (p.busy() > 0 || (p.timers && p.timers.size > 0) ||
+                       performance.now() - p.last < 300 || (!!p.loading && p.loading() > 0))); }"""))
+        except Exception:
+            return True
 
     def scroll_more(self):
         """Scroll the page and its scrollable areas one screen further; False at the end."""

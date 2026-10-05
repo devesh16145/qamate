@@ -626,7 +626,25 @@ def test_page_summary_keeps_controls_ahead_of_navigation_links():
     summary = page_summary(SimpleNamespace(elements=elements, page_text=texts, url="https://x.test/a", title="t"))
     assert 'textbox "Email"' in summary["elements"] and 'button "Submit"' in summary["elements"]
     assert sum(line.startswith('link "Nav') for line in summary["elements"]) == 15
-    assert summary["elements"][-1].endswith("more links not shown)")
+    assert "125 more not shown" in summary["elements"][-1]
+
+
+def test_a_page_too_big_to_show_is_cut_the_way_attention_is():
+    """What is in the window comes first, then what the task names, then what is nearest."""
+    from qm_planner import page_summary
+    rows = "".join(f'- button "Edit row {i}" [ref=r{i}] [box=10,{i * 40},80,30]\n' for i in range(300))
+    late = '- button "Export invoices" [ref=x1] [box=10,30000,120,30]\n- textbox "Coupon" [ref=x2] [box=10,6100,120,30]\n'
+    elements, texts = parse(rows + late)
+    page = SimpleNamespace(elements=elements, page_text=texts, url="https://x.test/a", title="t", viewport=(1280, 800))
+    for el in elements:                                  # scrolled down: the window shows rows 150-169
+        x, y, w, h = el.box
+        el.box = (x, y - 6000, w, h)
+    lines = page_summary(page, focus="Export the invoices and check the file")["elements"]
+    assert 'button "Edit row 150"' in lines and 'button "Edit row 169"' in lines      # in the window
+    assert 'button "Export invoices"' in lines                                         # named by the task, far below
+    assert 'textbox "Coupon"' in lines                                                 # just outside the window
+    assert 'button "Edit row 0"' not in lines and 'button "Edit row 299"' not in lines
+    assert len(lines) == 121 and "more not shown" in lines[-1]
 
 
 # ── the chooser: asked twice in opposite orders ──────────────────────────────

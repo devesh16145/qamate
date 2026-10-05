@@ -1,0 +1,68 @@
+{
+ "url": "https://ant.design/~demos/form-demo-validate-other",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine 0e88f34): Ant Design's form demo -- its Select, multiple Select, InputNumber, Switch, Radio group, Checkbox and Upload. Seven of eight widget steps ran first time. Gaps: (1) the number field was labelled by the unit after it ('machines'), not by its form label -- the label is not tied to the input; (2) the upload button's name starts with its icon's name ('upload Click to upload'); (3) every step took about a second: the library sets 0.5-0.8 s timers after each click only to tidy up an effect, and each was waited for.",
+ "steps": [
+  {
+   "do": "select",
+   "target": "Select",
+   "value": "China"
+  },
+  {
+   "do": "select",
+   "target": "Select[multiple]",
+   "value": "Red"
+  },
+  {
+   "do": "select",
+   "target": "Select[multiple]",
+   "value": "Green"
+  },
+  {
+   "do": "fill",
+   "target": "InputNumber",
+   "value": "5"
+  },
+  {
+   "do": "check",
+   "target": "Switch"
+  },
+  {
+   "do": "check",
+   "target": "item 2"
+  },
+  {
+   "do": "check",
+   "target": "C"
+  },
+  {
+   "do": "upload",
+   "target": "Click to upload"
+  },
+  {
+   "do": "expect_value",
+   "target": "InputNumber",
+   "value": "5"
+  },
+  {
+   "do": "expect_checked",
+   "target": "Switch"
+  },
+  {
+   "do": "expect_checked",
+   "target": "item 2"
+  },
+  {
+   "do": "expect_checked",
+   "target": "C"
+  },
+  {
+   "do": "expect_text",
+   "value": "test_upload.png"
+  },
+  {
+   "do": "click",
+   "target": "Submit"
+  }
+ ]
+}

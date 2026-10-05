@@ -13,6 +13,8 @@ import threading
 import time
 
 from llm import make_provider, extract_json, LLMError
+from qm_ground import canonical_words
+from qm_observe import on_screen
 from qm_runtime import relative_url
 
 SYSTEM = """You plan the steps of a browser test for QAmate, a test-automation tool.
@@ -85,11 +87,23 @@ _CHROME = ("navigation", "banner", "contentinfo", "menubar")
 _FIELDS = ("textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio", "switch", "listbox")
 
 
-def page_summary(observation):
+_FILLER = {"and", "the", "for", "with", "that", "then", "this", "from", "into", "check", "verify", "page", "should",
+           "click", "open", "test", "value", "field", "button", "link", "make", "sure", "shows", "show", "after", "before"}
+
+
+def _focus_words(focus):
+    return {w for w in canonical_words(focus or "") if len(w) >= 3 and w not in _FILLER}
+
+
+def page_summary(observation, focus=""):
     """What the planner is shown of a page: its controls and headings, then its text.
-    When a page has more than fits, what a task works with is kept first -- fields, buttons,
-    dialogs, messages, then links in the content -- and site navigation and footer links are
-    cut back to a sample."""
+
+    A page that fits is shown whole, in page order. One that does not (a long page, a big
+    menu, hundreds of rows) is cut the way a person's attention is: what is in the window
+    now, then anything named like the words of the task (`focus`), then the other controls
+    nearest the window, then links, a sample of the navigation, and last what is off-screen."""
+    view = getattr(observation, "viewport", None)
+    wanted = _focus_words(focus)
     entries, seen = [], {}
     for order, el in enumerate(observation.elements):
         if not (el.interactive or el.role in ("heading", "alert", "status", "dialog")):
@@ -101,23 +115,35 @@ def page_summary(observation):
             seen[line] += 1                            # identical items: listed once, with how many there are
             continue
         seen[line] = 1
-        chrome = el.region(*_CHROME) is not None
-        # what cannot be used until something else is opened (a closed drawer, a later slide) comes last
-        priority = 3 if getattr(el, "offscreen", False) else 2 if (el.role == "link" and chrome) else 1 if el.role == "link" else 0
-        entries.append((priority, order, line))
-    kept = sorted(entries)[:MAX_ELEMENT_LINES] if len(entries) > MAX_ELEMENT_LINES else entries
+        if getattr(el, "offscreen", False):
+            kind, far = 5, 0                           # unusable until something else is opened: last
+        else:
+            box = None if getattr(el, "framed", False) else getattr(el, "box", None)
+            far = 0
+            if view and box:
+                far = max(0, box[1] - view[1], -(box[1] + box[3])) // 400       # how far above or below the window
+            navigation = el.region(*_CHROME) is not None if el.role == "link" else el.role in ("menuitem", "treeitem")
+            kind = (0 if on_screen(el, view) else
+                    1 if wanted and wanted & set(canonical_words(el.label)) else
+                    4 if navigation else 3 if el.role == "link" else 2)
+        entries.append((kind, far, order, line))
     if len(entries) > MAX_ELEMENT_LINES:
-        nav = [e for e in kept if e[0] == 2]
-        if len(nav) > 15:                               # navigation never crowds out content
-            kept = [e for e in kept if e[0] != 2] + nav[:15]
-        away = [e for e in kept if e[0] == 3]
-        if len(away) > 25:                              # nor does what is off-screen
-            kept = [e for e in kept if e[0] != 3] + away[:25]
+        kept = sorted(entries)[:MAX_ELEMENT_LINES]
+        for kind, most in ((4, 15), (5, 25)):          # navigation and off-screen never crowd out content
+            some = [e for e in kept if e[0] == kind]
+            if len(some) > most:
+                kept = [e for e in kept if e[0] != kind] + some[:most]
+    else:
+        kept = entries
     lines = [line + (f"  [x{seen[line]}, identical]" if seen[line] > 1 else "")
-             for _, _, line in sorted(kept, key=lambda e: e[1])]
+             for _, _, _, line in sorted(kept, key=lambda e: e[2])]
     if len(lines) < len(entries):
-        lines.append(f"... ({len(entries) - len(lines)} more links not shown)")
-    text = [t[:200] for t in dict.fromkeys(t.strip() for t in observation.page_text) if t][:MAX_TEXT_LINES]
+        lines.append(f"... ({len(entries) - len(lines)} more not shown: further down the page, navigation, or off-screen)")
+    texts = list(observation.page_text)
+    shown = getattr(observation, "text_on_screen", None)
+    if shown and len(texts) > MAX_TEXT_LINES and len(shown) == len(texts):
+        texts = [t for t, on in zip(texts, shown) if on] + [t for t, on in zip(texts, shown) if not on]
+    text = [t[:200] for t in dict.fromkeys(t.strip() for t in texts) if t][:MAX_TEXT_LINES]
     return {"url": relative_url(observation.url), "title": observation.title,
             "elements": lines, "text": text}
 
@@ -133,7 +159,7 @@ class Planner:
         message = {
             "task": task,
             "test_data": test_data or {},
-            "page": page_summary(observation),
+            "page": page_summary(observation, focus=" ".join([str(task)] + [str(v) for v in (test_data or {}).values()])),
             "steps_done": [s.get("name") or s["op"] for s in done_steps][-30:],
             "problem": problem,
             "earlier_tasks": list(history)[-5:],

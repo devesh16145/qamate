@@ -306,6 +306,7 @@ def parse(snapshot_text):
     so nameless controls keep only what the snapshot says about them."""
     elements, texts = parse_tree(snapshot_text)
     _add_content(elements)
+    _add_plain_names(elements)
     _add_context(elements)
     return elements, texts
 
@@ -325,6 +326,23 @@ def _add_content(elements):
         if e.interactive and not (e.name or (e.role not in VALUE_ROLES and (e.inline or e.text))):
             inner = [n.name or n.inline or " ".join(n.text) for n in _subtree(e)[:12] if not n.interactive]
             e.content = " ".join(dict.fromkeys(l.strip() for l in inner if l and l.strip()))[:100]
+
+
+def _add_plain_names(elements):
+    """A button whose name starts with its icon's name ("upload Click to upload", from an
+    icon labelled "upload") is also known by its words alone."""
+    for e in elements:
+        if not (e.interactive and e.name):
+            continue
+        icons = [n.name for n in _subtree(e)[:8] if n.role == "img" and n.name]
+        if not icons:
+            continue
+        rest = f" {e.name} "
+        for icon in icons:
+            rest = rest.replace(f" {icon} ", " ", 1)
+        rest = " ".join(rest.split())
+        if rest and rest != e.name and words(rest) and rest not in e.aliases:
+            e.aliases.append(rest)
 
 
 def _add_context(elements):
@@ -363,6 +381,8 @@ class Observation:
     elements: list
     page_text: list
     ms: int
+    viewport: tuple = None                 # (width, height) of the window, when known
+    text_on_screen: list = None            # for each line of page_text: is it in the window now?
 
     def by_ref(self, ref):
         return next((e for e in self.elements if e.ref == ref), None)
@@ -422,6 +442,26 @@ DESCRIBE_JS = r"""(el, asField) => {
     };
     // Alone in its cell, a field is what its column says -- not the text of the cell before it.
     if (!text && cell && cell.querySelectorAll('input, select, textarea').length === 1) text = header();
+    // A <label> (or legend) written before the field in its own form row is its label even when
+    // the page forgot to tie the two together -- and a better one than a unit or hint after the
+    // field ("machines", "kg"). Looked for before settling on text that follows.
+    const before = () => {
+      let box = el.parentElement;
+      for (let up = 0; up < 7 && box && box !== document.body; up++, box = box.parentElement) {
+        // (fields of any make: a date typed as three editable segments is three fields, and the
+        // label before them names the group, not its first segment)
+        if (box.querySelectorAll('input:not([type=hidden]), select, textarea, [contenteditable=""], [contenteditable="true"], ' +
+                                 '[role=spinbutton], [role=textbox], [role=combobox], [role=slider]').length > 1) return '';
+        for (const label of box.querySelectorAll('label, legend')) {
+          if (label.contains(el) || label.querySelector('input, select, textarea')) continue;
+          if (!(label.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+          const said = attr(label, 'title') || labelText(label);
+          if (seen(label) && said && said.length <= 60) return said;
+        }
+      }
+      return '';
+    };
+    if (!after && !sibling(-1)) text = before() || text;
     let node = el;
     for (let up = 0; !text && up < 3 && node.parentElement; up++) {
       const parent = node.parentElement;
@@ -862,7 +902,16 @@ def _away(element):
 
 _BOXES = re.compile(r" \[box=[^\]]*\]")
 _METRICS_JS = ("() => { const page = document.scrollingElement || document.documentElement;"
-               " return [Math.round(scrollX), Math.round(scrollY), page.scrollWidth, page.scrollHeight]; }")
+               " return [Math.round(scrollX), Math.round(scrollY), page.scrollWidth, page.scrollHeight,"
+               " innerWidth, innerHeight]; }")
+
+
+def on_screen(element, viewport):
+    """Is any of the element inside the window right now? (False when that is not known.)"""
+    if not viewport or element is None or element.box is None or element.framed or element.offscreen:
+        return False
+    x, y, w, h = element.box
+    return x < viewport[0] and y < viewport[1] and x + w > 0 and y + h > 0
 
 
 def observe(page, timeout_ms=5000):
@@ -880,10 +929,14 @@ def observe(page, timeout_ms=5000):
     elements, page_text = parse_tree(text, owners)
     text = _BOXES.sub("", text)                    # positions are not part of what the page shows
     _add_content(elements)
+    _add_plain_names(elements)
     enrich(page, elements, metrics=metrics)
     # What is said in a closed drawer or on a slide that is not showing comes after what is on show.
     away = [_away(owner) for owner in owners]
-    page_text = [t for t, gone in zip(page_text, away) if not gone] + [t for t, gone in zip(page_text, away) if gone]
+    viewport = tuple(metrics[4:6]) if metrics and len(metrics) >= 6 else None
+    shown = [on_screen(owner, viewport) for owner in owners]
+    order = [i for i, gone in enumerate(away) if not gone] + [i for i, gone in enumerate(away) if gone]
+    page_text, shown = [page_text[i] for i in order], [shown[i] for i in order]
     _add_frame_editors(page, elements)
     _add_editables(page, elements)
     _add_context(elements)
@@ -892,4 +945,5 @@ def observe(page, timeout_ms=5000):
     except Exception:
         title = ""
     return Observation(url=page.url, title=title, text=text, elements=elements,
-                       page_text=page_text, ms=round((time.monotonic() - started) * 1000))
+                       page_text=page_text, ms=round((time.monotonic() - started) * 1000),
+                       viewport=viewport, text_on_screen=shown)

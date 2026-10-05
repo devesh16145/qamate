@@ -28,7 +28,7 @@ def test_every_common_web_pattern_is_handled():
     patterns = _load("run_patterns")
     failed = [f"{name}: {why}" for name, verdict, why in patterns.RESULTS if verdict != "PASS"]
     assert not failed, "\n".join(failed)
-    assert len(patterns.RESULTS) >= 44
+    assert len(patterns.RESULTS) >= 45
 
 
 def test_tests_that_create_data_are_saved_only_when_they_can_run_again():
