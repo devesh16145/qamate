@@ -1,0 +1,83 @@
+{
+ "url": "https://demoqa.com/automation-practice-form",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine 64ad47c) failed at step 7 of 16: a key press aimed at 'Date of Birth' hesitated between the field and its caption; nothing else needed fixing (date picker, type-ahead, custom radios, dependent dropdowns, confirmation table)",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "First Name",
+   "value": "Asha"
+  },
+  {
+   "do": "fill",
+   "target": "Last Name",
+   "value": "Probe"
+  },
+  {
+   "do": "fill",
+   "target": "Email",
+   "value": "asha.probe@example.com"
+  },
+  {
+   "do": "check",
+   "target": "Female"
+  },
+  {
+   "do": "fill",
+   "target": "Mobile Number",
+   "value": "9876543210"
+  },
+  {
+   "do": "fill",
+   "target": "Date of Birth",
+   "value": "15 Aug 1995"
+  },
+  {
+   "do": "press",
+   "key": "Enter",
+   "target": "Date of Birth"
+  },
+  {
+   "do": "select",
+   "target": "subjects",
+   "value": "Maths"
+  },
+  {
+   "do": "check",
+   "target": "Reading"
+  },
+  {
+   "do": "fill",
+   "target": "Current Address",
+   "value": "12 MG Road, Pune"
+  },
+  {
+   "do": "select",
+   "target": "Select State",
+   "value": "NCR"
+  },
+  {
+   "do": "select",
+   "target": "Select City",
+   "value": "Delhi"
+  },
+  {
+   "do": "click",
+   "target": "Submit"
+  },
+  {
+   "do": "expect_text",
+   "value": "Thanks for submitting the form"
+  },
+  {
+   "do": "expect_text",
+   "value": "Asha Probe",
+   "within": "Student Name"
+  },
+  {
+   "do": "expect_text",
+   "value": "9876543210",
+   "within": "Mobile"
+  }
+ ]
+}

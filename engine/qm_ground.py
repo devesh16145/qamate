@@ -228,8 +228,10 @@ def fit(op, element, container=None):
     """How well the element can take the action: 0 is the natural kind of control, larger
     is a poorer fit, None means it cannot (a paragraph can't be filled)."""
     tiers = _TIERS.get(op)
-    if tiers is None:                      # hover, press, expect_visible/hidden/text: anything named
-        return 0
+    if tiers is None:
+        # hover, press, expect_visible/hidden/text: anything named can take it, but a control
+        # comes before the plain text that labels it ("Date of Birth" the field, not its caption).
+        return 0 if (container or element).interactive else 1
     actor = container or element
     for index, roles in enumerate(tiers):
         if actor.role in roles:
@@ -422,6 +424,8 @@ def decide(candidates, step=None):
                 pool = narrower
         if len(pool) == 1:
             return pool[0]
+        if step and step.get("op") in ("expect_visible", "expect_hidden"):
+            return pool[0]                 # several things with this name: any of them answers "is it shown?"
         urls = {c.element.url for c in pool}
         if all(c.element.role == "link" for c in pool) and len(urls) == 1 and _REAL_URL.match(next(iter(urls)) or ""):
             return pool[0]                 # the same destination, listed twice

@@ -329,10 +329,13 @@ DESCRIBE_JS = r"""el => {
     let node = el;
     for (let up = 0; !text && up < 3 && node.parentElement; up++) {
       const parent = node.parentElement;
+      // A box holding several fields is a form row or section: its caption is not this field's label.
+      if (parent.querySelectorAll('input, select, textarea').length > 1) break;
       const rest = clean((parent.innerText || '').replace(el.innerText || '', ''));
-      if (rest && rest.length <= 60 && parent.querySelectorAll('input, select, textarea').length <= 1) { text = rest; break; }
+      if (rest && rest.length <= 60) { text = rest; break; }
       const prev = parent.previousElementSibling;
-      if (prev && !prev.querySelector('input, select, textarea, button') && own(prev) && own(prev).length <= 60) { text = own(prev); break; }
+      if (prev && !/^H[1-6]$/.test(prev.tagName) && !prev.querySelector('input, select, textarea, button') &&
+          own(prev) && own(prev).length <= 60) { text = own(prev); break; }
       node = parent;
     }
     if (!text) {                        // a field in a table: its column header
