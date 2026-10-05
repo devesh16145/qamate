@@ -1,0 +1,30 @@
+{
+ "url": "https://www.lambdatest.com/selenium-playground/table-sort-search-demo",
+ "seen": true,
+ "note": "PASSED on the first attempt 2026-10-05 (engine f29c5ad + planner-view changes): written from the planner's view of the page",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Search:",
+   "value": "London"
+  },
+  {
+   "do": "expect_text",
+   "value": "B. Greer"
+  },
+  {
+   "do": "expect_text",
+   "value": "A. Bennett",
+   "present": false
+  },
+  {
+   "do": "expect_text",
+   "value": "London",
+   "within": "B. Greer"
+  },
+  {
+   "do": "expect_text",
+   "value": "filtered from 24 total entries"
+  }
+ ]
+}

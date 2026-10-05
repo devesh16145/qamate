@@ -595,3 +595,35 @@ def test_a_blocked_click_says_what_blocked_it():
                                         '<div class="float-cart float-cart--open">…</div>')
     assert _short(Exception("Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - element is not enabled")) \
         .endswith("-- it is disabled")
+
+
+def test_the_planner_sees_table_rows_and_grid_cells():
+    """Probe 2026-10-05: a data grid's cells have role gridcell; none of the table reached
+    the planner, so it could neither plan around the data nor check it."""
+    elements, texts = parse('''- grid [ref=g]:
+  - rowgroup [ref=h]:
+    - row [ref=r0]:
+      - 'columnheader "Name: activate to sort column descending" [ref=c0] [cursor=pointer]': Name
+      - columnheader "Office" [ref=c1]
+  - rowgroup [ref=b]:
+    - row [ref=r1]:
+      - gridcell "B. Greer" [ref=c2]
+      - gridcell "London" [ref=c3]
+    - row "T. Nixon Tokyo" [ref=r2]:
+      - cell "T. Nixon" [ref=c4]
+      - cell "Tokyo" [ref=c5]
+- status [ref=s]: Showing 1 to 2 of 2 entries
+''')
+    assert texts == ["Name: activate to sort column descending | Office", "B. Greer | London", "T. Nixon | Tokyo",
+                     "Showing 1 to 2 of 2 entries"]
+
+
+def test_page_summary_keeps_controls_ahead_of_navigation_links():
+    from qm_planner import page_summary
+    nav = "- navigation [ref=n]:\n" + "".join(f'  - link "Nav {i}" [ref=n{i}]:\n    - /url: /n{i}\n' for i in range(140))
+    form = '- main [ref=m]:\n  - textbox "Email" [ref=f1]\n  - button "Submit" [ref=f2]\n'
+    elements, texts = parse(nav + form)
+    summary = page_summary(SimpleNamespace(elements=elements, page_text=texts, url="https://x.test/a", title="t"))
+    assert 'textbox "Email"' in summary["elements"] and 'button "Submit"' in summary["elements"]
+    assert sum(line.startswith('link "Nav') for line in summary["elements"]) == 15
+    assert summary["elements"][-1].endswith("more links not shown)")

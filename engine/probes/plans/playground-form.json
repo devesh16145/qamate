@@ -1,0 +1,40 @@
+{
+ "url": "https://www.lambdatest.com/selenium-playground/simple-form-demo",
+ "seen": true,
+ "note": "PASSED on the first attempt 2026-10-05 (engine f29c5ad + planner-view changes): written from the planner's view of the page",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Enter Message",
+   "value": "Hello QAmate"
+  },
+  {
+   "do": "click",
+   "target": "Get Checked Value"
+  },
+  {
+   "do": "expect_text",
+   "value": "Hello QAmate",
+   "within": "Your Message:"
+  },
+  {
+   "do": "fill",
+   "target": "Enter first value",
+   "value": "12"
+  },
+  {
+   "do": "fill",
+   "target": "Enter second value",
+   "value": "30"
+  },
+  {
+   "do": "click",
+   "target": "Get Sum"
+  },
+  {
+   "do": "expect_text",
+   "value": "42",
+   "within": "Result:"
+  }
+ ]
+}

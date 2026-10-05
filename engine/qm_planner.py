@@ -72,23 +72,35 @@ Rules:
 """
 
 MAX_ELEMENT_LINES = 120
-MAX_TEXT_LINES = 40
+MAX_TEXT_LINES = 60
+_CHROME = ("navigation", "banner", "contentinfo", "menubar")
 
 
 def page_summary(observation):
-    lines, seen = [], set()
-    for el in observation.elements:
+    """What the planner is shown of a page: its controls and headings, then its text.
+    When a page has more than fits, what a task works with is kept first -- fields, buttons,
+    dialogs, messages, then links in the content -- and site navigation and footer links are
+    cut back to a sample."""
+    entries, seen = [], set()
+    for order, el in enumerate(observation.elements):
         if not (el.interactive or el.role in ("heading", "alert", "status", "dialog")):
             continue
         line = el.summary()[:140]
         if line in seen:
             continue
         seen.add(line)
-        lines.append(line)
-        if len(lines) >= MAX_ELEMENT_LINES:
-            lines.append("... (more elements not shown)")
-            break
-    text = [t for t in dict.fromkeys(t.strip() for t in observation.page_text) if t][:MAX_TEXT_LINES]
+        chrome = el.region(*_CHROME) is not None
+        priority = 2 if (el.role == "link" and chrome) else 1 if el.role == "link" else 0
+        entries.append((priority, order, line))
+    kept = sorted(entries)[:MAX_ELEMENT_LINES] if len(entries) > MAX_ELEMENT_LINES else entries
+    if len(entries) > MAX_ELEMENT_LINES:
+        nav = [e for e in kept if e[0] == 2]
+        if len(nav) > 15:                               # navigation never crowds out content
+            kept = [e for e in kept if e[0] < 2] + nav[:15]
+    lines = [line for _, _, line in sorted(kept, key=lambda e: e[1])]
+    if len(lines) < len(entries):
+        lines.append(f"... ({len(entries) - len(lines)} more links not shown)")
+    text = [t[:200] for t in dict.fromkeys(t.strip() for t in observation.page_text) if t][:MAX_TEXT_LINES]
     return {"url": relative_url(observation.url), "title": observation.title,
             "elements": lines, "text": text}
 

@@ -110,6 +110,15 @@ class Element:
         return " ".join(bits)
 
 
+CELL_ROLES = {"cell", "gridcell", "columnheader", "rowheader"}
+
+
+class _Row:
+    """Placeholder for a table row's text while the tree is still being read."""
+    def __init__(self, element, name):
+        self.element, self.name = element, name
+
+
 def _unquote(raw):
     try:
         return json.loads(f'"{raw}"')
@@ -200,14 +209,27 @@ def parse_tree(snapshot_text):
             if ancestor is not None:
                 ancestor.children.append(el)
             elements.append(el)
-        if inline and not el:
+        in_row = any(r == "row" for _, _, r, _ in stack)
+        if role == "row":
+            texts.append(_Row(el, name))             # one line per table row, filled in below
+        elif role in CELL_ROLES and in_row:
+            pass                                      # said by its row
+        elif inline and not el:
             texts.append(inline)
-        elif inline and role in ("paragraph", "heading", "generic", "cell", "status", "alert", "listitem"):
+        elif inline and role in ("paragraph", "heading", "generic", "cell", "gridcell", "status", "alert", "listitem"):
             texts.append(inline)
-        if name and role in ("heading", "cell", "status", "alert"):
-            texts.append(name)
+        if name and role not in CELL_ROLES and role not in INTERACTIVE_ROLES and role not in REGION_ROLES \
+                and role not in ("img", "generic", "rowgroup", "row", "document", "application", "figure"):
+            texts.append(name)                        # content named by its own text: headings, status, definitions...
         stack.append((indent, el, role, name))
-    return elements, texts
+    lines = []
+    for text in texts:
+        if isinstance(text, _Row):
+            cells = [c.label for c in (text.element.children if text.element is not None else []) if c.role in CELL_ROLES]
+            text = " | ".join(" ".join(c.split()) for c in cells if c) or text.name
+        if text:
+            lines.append(text)
+    return elements, lines
 
 
 def parse(snapshot_text):
