@@ -769,3 +769,41 @@ def test_plain_content_is_a_last_resort_and_never_a_container():
     # Text that sits directly in a container is not "the container": nothing to click here.
     loose = {"op": "click", "target": "Choose document"}
     assert plain_pick(rank(loose, obs), loose) is None
+
+
+def test_the_planner_sees_dropdown_choices_bold_values_and_no_field_values_as_text():
+    """From the first look at a banking demo: the account dropdown's options, the balance
+    (in bold) and the welcome name were all missing from what the planner is shown."""
+    from qm_planner import page_summary
+    snapshot = '''- generic [ref=e1]:
+  - strong [ref=e2]: Welcome Harry Potter !!
+  - combobox [ref=e3]:
+    - option "1004" [selected]
+    - option "1005"
+    - option "1006"
+  - generic [ref=e4]:
+    - text: "Account Number :"
+    - strong [ref=e5]: "1004"
+    - text: ", Balance :"
+    - strong [ref=e6]: "0"
+  - textbox [ref=e7]:
+    - /placeholder: yyyy-MM-dd
+    - text: 2026-10-05
+  - paragraph [ref=e8]: Plain paragraph'''
+    elements, text = parse(snapshot)
+    account = next(e for e in elements if e.role == "combobox")
+    assert account.options == [("1004", True), ("1005", False), ("1006", False)]
+    assert 'options: 1004 | 1005 | 1006; chosen "1004"' in account.summary()
+    # One sentence stays one line; what a field holds is its value, not page text.
+    assert text == ["Welcome Harry Potter !!", "Account Number : 1004 , Balance : 0", "Plain paragraph"]
+    date = next(e for e in elements if e.role == "textbox")
+    assert date.inline == "2026-10-05" and date.label == "yyyy-MM-dd"
+    summary = page_summary(SimpleNamespace(elements=elements, page_text=text, url="http://x/", title=""))
+    assert any("options: 1004" in line for line in summary["elements"]) and "Account Number : 1004 , Balance : 0" in summary["text"]
+
+
+def test_a_pause_is_a_step_only_when_asked_for():
+    from qm_planner import SYSTEM, normalize_step
+    assert render({"op": "wait", "value": 3.0, "name": "Wait 3 s"}) == 'flow.wait(3.0, "Wait 3 s")'
+    assert normalize_step({"do": "sleep", "value": 2})["seconds"] == 2
+    assert "only when the task itself says to wait" in SYSTEM

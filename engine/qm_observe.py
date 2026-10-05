@@ -70,6 +70,7 @@ class Element:
     aliases: list = field(default_factory=list)       # what else a user would call it: the visible label beside a field
     selector: str = ""                                # how to reach it when the snapshot gave it no ref (see _add_editables)
     hints: list = field(default_factory=list)         # selectors that may identify it in a test, most stable first
+    options: list = field(default_factory=list)       # a dropdown's choices as listed: [(label, chosen), ...]
 
     @property
     def label(self):
@@ -106,6 +107,11 @@ class Element:
         if not self.name and self.label and self.label == self.fallback and self.label_source in ("icon", "nearby", "id"):   # a guess, say so
             state.append({"icon": "unnamed, from its icon", "nearby": "unnamed, from the text beside it",
                           "id": "unnamed, from its id"}[self.label_source])
+        if self.options:               # what a `select` step may choose, and what is chosen now
+            shown = " | ".join(label[:30] for label, _ in self.options[:12])
+            more = f" | +{len(self.options) - 12} more" if len(self.options) > 12 else ""
+            chosen = next((label for label, on in self.options if on), None)
+            state.append(f"options: {shown}{more}" + (f'; chosen "{chosen[:30]}"' if chosen else ""))
         if state:
             bits.append("(" + ", ".join(state) + ")")
         where = self.region("dialog", "alertdialog", "row", "form", "navigation", "listitem")
@@ -117,6 +123,9 @@ class Element:
 
 
 CELL_ROLES = {"cell", "gridcell", "columnheader", "rowheader"}
+# Wording inside a sentence: with the text around it, it reads as one line
+# ("Account Number : **1004** , Balance : **0**").
+PHRASE_ROLES = {"strong", "emphasis", "code", "time", "mark", "subscript", "superscript", "insertion", "deletion"}
 
 
 class _Row:
@@ -175,6 +184,18 @@ def parse_tree(snapshot_text):
     """AI snapshot text -> (elements with refs, page text lines), before labels are completed."""
     elements, texts = [], []
     stack = []   # (indent, Element or None, role, name)
+    phrase = None    # the stack entry whose running text the last line of `texts` belongs to
+
+    def say(text, piece_of=None):
+        """Add page text. Pieces of one sentence (bare text and bold/italic/code wording
+        directly inside the same element) are joined into one line."""
+        nonlocal phrase
+        if piece_of is not None and piece_of is phrase and texts and isinstance(texts[-1], str):
+            texts[-1] = f"{texts[-1]} {text}"
+        else:
+            texts.append(text)
+        phrase = piece_of
+
     for raw in snapshot_text.splitlines():
         stripped = raw.lstrip(" ")
         if not stripped.startswith("- "):
@@ -193,7 +214,10 @@ def parse_tree(snapshot_text):
             continue
         if key == "text":
             text = value or ""
-            texts.append(text)
+            if parent is not None and parent.role in VALUE_ROLES and stack[-1][1] is parent:
+                parent.inline = parent.inline or text     # what a field holds (listed below it when it has a placeholder)
+                continue
+            say(text, stack[-1] if stack else None)
             if parent is not None:
                 parent.text.append(text)
             continue
@@ -216,17 +240,22 @@ def parse_tree(snapshot_text):
                 ancestor.children.append(el)
             elements.append(el)
         in_row = any(r == "row" for _, _, r, _ in stack)
-        if role == "row":
-            texts.append(_Row(el, name))             # one line per table row, filled in below
+        if role == "option" and el is None:
+            # A native dropdown lists its choices without refs: they belong to the dropdown.
+            owner = next((e for _, e, _, _ in reversed(stack) if e is not None), None)
+            if owner is not None and owner.role in ("combobox", "listbox"):
+                owner.options.append((name or inline, bool(attrs.get("selected"))))
+        elif role == "row":
+            say(_Row(el, name))                       # one line per table row, filled in below
         elif role in CELL_ROLES and in_row:
             pass                                      # said by its row
-        elif inline and not el:
-            texts.append(inline)
-        elif inline and role in ("paragraph", "heading", "generic", "cell", "gridcell", "status", "alert", "listitem"):
-            texts.append(inline)
+        elif inline and role in PHRASE_ROLES:
+            say(inline, stack[-1] if stack else None)
+        elif inline and (not el or (role not in INTERACTIVE_ROLES and role not in VALUE_ROLES)):
+            say(inline)                               # what any piece of content says (a field's inline text is its value)
         if name and role not in CELL_ROLES and role not in INTERACTIVE_ROLES and role not in REGION_ROLES \
                 and role not in ("img", "generic", "rowgroup", "row", "document", "application", "figure"):
-            texts.append(name)                        # content named by its own text: headings, status, definitions...
+            say(name)                                 # content named by its own text: headings, status, definitions...
         stack.append((indent, el, role, name))
     lines = []
     for text in texts:
@@ -313,7 +342,19 @@ DESCRIBE_JS = r"""(el, asField) => {
   const tag = el.tagName.toLowerCase();
   const isField = !!asField || /^(input|select|textarea)$/.test(tag) || el.isContentEditable ||
                   /^(textbox|combobox|listbox|spinbutton|slider|checkbox|radio|switch|searchbox)$/.test(attr(el, 'role'));
-  const own = (node) => clean(node.nodeType === 3 ? node.textContent : (node.innerText || node.textContent || ''));
+  const seen = (node) => node.nodeType !== 1 || !node.checkVisibility || node.checkVisibility({ visibilityProperty: true });
+  // What a node says to someone looking at the page: nothing when it is hidden (a message
+  // kept in the page for later is not the label of the field next to it).
+  const own = (node) => node.nodeType === 3 ? clean(node.textContent) : (seen(node) ? clean(node.innerText || node.textContent || '') : '');
+  // A label's own words, without the text of the control it wraps (a <select>'s options).
+  const labelText = (node) => {
+    let text = '';
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) text += child.textContent;
+      else if (child.nodeType === 1 && !/^(SELECT|TEXTAREA|INPUT|BUTTON|OPTION|SCRIPT|STYLE)$/.test(child.tagName)) text += ' ' + labelText(child) + ' ';
+    }
+    return clean(text);
+  };
   const sibling = (dir) => {            // text right before / after the control, up to the next control or line break
     let node = el, acc = '';
     for (let i = 0; i < 5; i++) {
@@ -366,7 +407,7 @@ DESCRIBE_JS = r"""(el, asField) => {
     let node = el;
     for (let up = 0; up < 8 && node && node !== document.body; up++) {
       const prev = node.previousElementSibling;
-      if (prev && prev.tagName === 'TEXTAREA' && prev.labels && prev.labels.length) return clean([...prev.labels].map(own).join(' '));
+      if (prev && prev.tagName === 'TEXTAREA' && prev.labels && prev.labels.length) return clean([...prev.labels].map(labelText).join(' '));
       node = node.parentElement;
     }
     return '';
@@ -396,10 +437,10 @@ DESCRIBE_JS = r"""(el, asField) => {
   const root = el.getRootNode();
   const byIds = (ids) => clean((ids || '').split(/\s+/).map((id) => {
     const node = id && (root.getElementById ? root.getElementById(id) : document.getElementById(id));
-    return node ? own(node) : ''; }).join(' '));
+    return node ? clean(node.innerText || node.textContent || '') : ''; }).join(' '));     // a hidden element may still name one
   const wrapping = el.closest('label');
   const named = byIds(attr(el, 'aria-labelledby')) || attr(el, 'aria-label') ||
-                (el.labels && el.labels.length ? clean([...el.labels].map(own).join(' ')) : (wrapping && wrapping !== el ? own(wrapping) : ''));
+                (el.labels && el.labels.length ? clean([...el.labels].map(labelText).join(' ')) : (wrapping && wrapping !== el ? labelText(wrapping) : ''));
   return {
     tag, field: isField, named: named.slice(0, 120),
     hidden: (box.width <= 1 && box.height <= 1) || style.visibility === 'hidden' || style.display === 'none',

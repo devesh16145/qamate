@@ -188,6 +188,12 @@ class Explorer:
                                         "name": intent.get("name") or f"Open {intent['url']}"})
             elif op == "close_tab":
                 outcome = self._record({"op": "close_tab", "name": intent.get("name") or "Close the tab"})
+            elif op == "wait":
+                seconds = max(0.0, min(float(live.get("seconds") or live.get("value") or 1), 60.0))
+                outcome = self._record({"op": "wait", "value": seconds, "name": intent.get("name") or f"Wait {seconds:g} s"})
+                if outcome["ok"]:
+                    self.notes.append(f"The test pauses for {seconds:g} s at a fixed point: that makes it slower and can "
+                                      f"hide a timing bug in the app")
             elif op == "press" and not intent.get("target"):
                 outcome = self._record({"op": "press", "value": live["key"],
                                         "name": intent.get("name") or f"Press {intent['key']}"})
@@ -241,12 +247,18 @@ class Explorer:
         that names the item -- not merely somewhere on the page."""
         within, value, present = live["within"], live["value"], intent.get("present", True)
         want = set(words(within))
-        obs = observe(self.page)
-        best = None
-        for el in obs.elements:
-            if el.role in SCOPE_ROLES and not el.attrs.get("aria-hidden") and want <= set(words(shown_text(el, limit=80))):
-                if best is None or el.depth >= best.depth:     # the smallest thing that names the item
-                    best = el
+        deadline = time.monotonic() + 1.5
+        while True:
+            obs = observe(self.page)
+            best = None
+            for el in obs.elements:
+                if el.role in SCOPE_ROLES and not el.attrs.get("aria-hidden") and want <= set(words(shown_text(el, limit=80))):
+                    if best is None or el.depth >= best.depth:     # the smallest thing that names the item
+                        best = el
+            # The item may still be on its way (a list filling in): look again while the page is busy.
+            if best is not None or time.monotonic() >= deadline or not self._settling():
+                break
+            self.page.wait_for_timeout(200)
         if best is None:
             return self._adjacent_text_check(intent, within, value, present, obs)
         loc = anchored_locator(self.page, best, within) or locator_for(self.page, best)
@@ -767,7 +779,7 @@ class Explorer:
     def _record(self, step, check=False, state=None, data=None, obs=None, element=None):
         if len(self.steps) >= MAX_STEPS:
             return {"ok": False, "reason": "too_long", "detail": f"the test already has {MAX_STEPS} steps"}
-        if not check and self._stuck(step, state if state is not None else self._state(obs)):
+        if not check and step["op"] != "wait" and self._stuck(step, state if state is not None else self._state(obs)):
             return {"ok": False, "reason": "repeating",
                     "detail": f"'{step.get('name')}' was already tried twice here and the page did not change"}
         fresh_key = data is not None and data[0] not in self.data

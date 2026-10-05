@@ -1,0 +1,93 @@
+{
+ "url": "https://www.globalsqa.com/angularJs-protractor/BankingProject/#/login",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine de80240), written page by page from what the planner is shown. Four engine gaps: (1) the planner could not see a dropdown's options; (2) bold values were missing from the page text it is shown (balance, account number, the welcome name); (3) a hidden message was taken as the label of the field beside it; (4) a check scoped to a row failed at once while the list was still filling in. The app itself is flaky: at machine speed its transaction list is empty in most runs (4 of 6 measured) and stays empty; the two-replay gate refused that test ('passed once, failed when run again'). With the 3 s wait a tester would ask for, it passes every time.",
+ "steps": [
+  {
+   "do": "click",
+   "target": "Customer Login"
+  },
+  {
+   "do": "select",
+   "target": "Your Name",
+   "value": "Harry Potter"
+  },
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "expect_text",
+   "value": "Welcome Harry Potter"
+  },
+  {
+   "do": "click",
+   "target": "Deposit"
+  },
+  {
+   "do": "fill",
+   "target": "Amount to be Deposited",
+   "value": "500"
+  },
+  {
+   "do": "click",
+   "target": "Deposit",
+   "within": "Amount to be Deposited"
+  },
+  {
+   "do": "expect_text",
+   "value": "Deposit Successful"
+  },
+  {
+   "do": "expect_text",
+   "value": "Balance : 500"
+  },
+  {
+   "do": "click",
+   "target": "Withdrawl"
+  },
+  {
+   "do": "fill",
+   "target": "Amount to be Withdrawn",
+   "value": "200"
+  },
+  {
+   "do": "click",
+   "target": "Withdraw"
+  },
+  {
+   "do": "expect_text",
+   "value": "Transaction successful"
+  },
+  {
+   "do": "expect_text",
+   "value": "Balance : 300"
+  },
+  {
+   "do": "wait",
+   "seconds": 3
+  },
+  {
+   "do": "click",
+   "target": "Transactions"
+  },
+  {
+   "do": "expect_text",
+   "value": "Credit",
+   "within": "500"
+  },
+  {
+   "do": "expect_text",
+   "value": "Debit",
+   "within": "200"
+  },
+  {
+   "do": "click",
+   "target": "Logout"
+  },
+  {
+   "do": "expect_visible",
+   "target": "Your Name"
+  }
+ ]
+}

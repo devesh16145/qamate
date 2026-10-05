@@ -44,7 +44,7 @@ class Code:
 
 
 ACTIONS = {"goto", "click", "dblclick", "hover", "drag", "fill", "type", "select", "check", "press", "upload",
-           "close_tab"}
+           "close_tab", "wait"}
 CHECKS = {"expect_url", "expect_visible", "expect_hidden", "expect_text", "expect_value",
           "expect_checked", "expect_page_text", "expect_count"}
 OPS = ACTIONS | CHECKS
@@ -93,6 +93,8 @@ def call_spec(step):
         return "goto", [step["value"], name], {}
     if op == "close_tab":
         return "close_tab", [name], {}
+    if op == "wait":
+        return "wait", [step["value"], name], {}
     if op == "click":
         return op, [target, name], {**_effects(step), **_dialog(step), **({"new_tab": True} if step.get("new_tab") else {}),
                                     **({"button": step["button"]} if step.get("button") else {}),

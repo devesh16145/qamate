@@ -642,6 +642,15 @@ class Flow:
                 self.page.bring_to_front()
                 self.settle()
 
+    def wait(self, seconds, name=None):
+        """Pause. Only for what the page gives no sign of (the app needs a moment before its
+        data is really saved); everything the page does show is waited for by the steps
+        themselves. A fixed pause makes a test slower and can hide a timing bug in the app."""
+        seconds = max(0.0, min(float(seconds), 60.0))
+        with self._step(name or f"Wait {seconds:g} s"):
+            self.page.wait_for_timeout(seconds * 1000)
+            self.settle()
+
     # ── actions ─────────────────────────────────────────────────────────────
     def click(self, target, name=None, *, expect_url=None, expect_visible=None, expect_hidden=None,
               dialog=None, dialog_text=None, new_tab=False, button=None, download=None):
@@ -908,17 +917,33 @@ class Flow:
         with self._step(name or f"Value is '{value}'"):
             loc = self._find(target)
             try:
-                kind = loc.evaluate("el => 'value' in el && !el.isContentEditable ? 'value' :"
+                kind = loc.evaluate("el => el.tagName === 'SELECT' ? 'choice' : 'value' in el && !el.isContentEditable ? 'value' :"
                                     " el.isContentEditable ? 'text' : el.hasAttribute('aria-valuenow') ? 'aria' : 'value'",
                                     timeout=2000)
             except Exception:
                 kind = "value"
-            if kind == "text":
+            if kind == "choice":
+                self._expect_choice(loc, str(value), self._ms(timeout))
+            elif kind == "text":
                 expect(loc).to_have_text(str(value), timeout=self._ms(timeout))
             elif kind == "aria":
                 expect(loc).to_have_attribute("aria-valuenow", str(value), timeout=self._ms(timeout))
             else:
                 expect(loc).to_have_value(str(value), timeout=self._ms(timeout))
+
+    def _expect_choice(self, loc, value, timeout_ms):
+        """A dropdown has `value` chosen: by the option's text as the page shows it, or by its
+        underlying value (apps often give options internal values such as "number:1004")."""
+        deadline = time.monotonic() + timeout_ms / 1000
+        while True:
+            shown = loc.evaluate("""(el, want) => { const chosen = [...el.selectedOptions];
+                return { ok: el.value === want || chosen.some((o) => (o.label || o.text).trim() === want),
+                         shown: chosen.map((o) => (o.label || o.text).trim()).join(', ') }; }""", value)
+            if shown["ok"]:
+                return
+            if time.monotonic() >= deadline:
+                raise StepError(f"the dropdown has {shown['shown']!r} chosen, not {value!r}")
+            self.page.wait_for_timeout(100)
 
     def expect_checked(self, target, checked=True, name=None, *, timeout=None):
         with self._step(name or ("Is checked" if checked else "Is not checked")):

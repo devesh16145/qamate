@@ -5,6 +5,7 @@ ENGINE (observe, ground, act, record, replay), not the planner.
     venv/bin/python engine/probes/run_plans.py                    # every plan in plans/
     venv/bin/python engine/probes/run_plans.py plans/smoke.json -v
     venv/bin/python engine/probes/run_plans.py --look URL         # what the planner would see
+    venv/bin/python engine/probes/run_plans.py plans/x.json --show   # ... after the plan's steps (no replay)
 
 A plan is {"url", "seen", "steps": [intent, ...]}; "seen": false marks an app the engine was
 never tuned on -- write its plan from --look output only, run it once, and keep the result.
@@ -38,7 +39,7 @@ def show_page(page, limit=60):
     print("        text:", s["text"][:20])
 
 
-def run_plan(browser, path, fixtures, verbose):
+def run_plan(browser, path, fixtures, verbose, show=False):
     plan = json.load(open(path, encoding="utf-8"))
     url = plan["url"].replace("fixture:", fixtures)
     context = browser.new_context(viewport={"width": 1280, "height": 800})
@@ -61,6 +62,15 @@ def run_plan(browser, path, fixtures, verbose):
             break
     authoring = time.monotonic() - started
     replays = []
+    if show:                       # writing a plan page by page, as a planner is shown each new page
+        if problem is None:
+            show_page(page, 140)
+        for step in explorer.steps:
+            print("     ", __import__("qm_steps").render(step)[:230])
+        context.close()
+        return {"name": os.path.basename(path)[:-5], "seen": plan.get("seen", True), "ok": problem is None,
+                "steps": len(explorer.steps), "authoring_s": round(authoring, 1), "checks": 0, "weak": 0,
+                "replay_s": None, "problem": problem or "(shown, not replayed)"}
     if problem is None:
         replays = [replay(browser, explorer.steps, explorer.data, secrets=explorer.secrets) for _ in range(2)]
         bad = next((r for r in replays if not r["ok"]), None)
@@ -90,7 +100,7 @@ def main(argv):
         for path in paths:
             if verbose:
                 print(os.path.basename(path))
-            rows.append(run_plan(browser, path, fixtures, verbose))
+            rows.append(run_plan(browser, path, fixtures, verbose or "--show" in argv, "--show" in argv))
         browser.close()
     print(f"\n{'plan':22s} {'app':7s} result  steps  authoring  replay  checks (no change)")
     for r in rows:

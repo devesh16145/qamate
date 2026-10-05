@@ -35,6 +35,7 @@ Each STEP is one of:
   {"do": "hover", "target": "<label>"}              only when something appears on hover
   {"do": "drag", "target": "<what to drag>", "to": "<where to drop it: a column, a list, an item>"}
   {"do": "upload", "target": "<file field, or the button that opens the file chooser>"}
+  {"do": "wait", "seconds": 2}                      only when the task itself says to wait
   {"do": "close_tab"}                               return from a tab that a click opened
   {"do": "expect_text", "value": "<text>", "within": "<row, card or section it belongs to>"}
   {"do": "expect_text", "value": "<text that must be visible>"}          anywhere on the page
@@ -303,6 +304,10 @@ def normalize_step(step):
         step["do"] = "rightclick"
     if step["do"] in ("double_click", "doubleclick"):
         step["do"] = "dblclick"
+    if step["do"] in ("sleep", "pause", "wait_for"):
+        step["do"] = "wait"
+    if step["do"] == "wait" and step.get("seconds") is None:
+        step["seconds"] = step.pop("value", None) or step.pop("duration", None) or 1
     if step["do"] in ("drag_and_drop", "drag_to", "dragdrop") or (step["do"] == "drag" and not step.get("to")):
         step["do"] = "drag"
         step.setdefault("to", step.pop("destination", None) or step.pop("value", None) or "")
