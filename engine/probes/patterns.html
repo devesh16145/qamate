@@ -29,6 +29,24 @@ const pages = {
     const input = m.querySelector('input'); const draw = () => { rows.innerHTML = data.filter(d => d[0].toLowerCase().includes(input.value.toLowerCase())).map(d => `<article><h3>${d[0]}</h3><p>${d[1]}</p></article>`).join('') || '<p>No companies found</p>'; };
     input.oninput = draw; draw(); },
   danger: () => { m.innerHTML = '<button id="c">Clean up</button>'; c.onclick = () => out(confirm('Delete all archived reports?') ? 'Archive emptied' : 'Archive kept'); },
+  styled: () => { m.innerHTML = '<h4>Vendors:</h4>' + ['Apple', 'Samsung'].map(v => `<label style="display:block;position:relative"><input type="checkbox" value="${v}" style="opacity:0;position:absolute"><span class="checkmark" style="padding-left:20px">${v}</span></label>`).join('');
+    m.onchange = () => out('Showing: ' + [...m.querySelectorAll('input:checked')].map(i => i.value).join(', ')); },
+  segments: () => { m.innerHTML = '<label id="dl">Join date</label><div role="group" aria-labelledby="dl" style="border:1px solid #999;display:inline-block;padding:4px">' +
+      [['Month', 'MM', 2], ['Day', 'DD', 2], ['Year', 'YYYY', 4]].map(([n, ph, len], i) => `<span role="spinbutton" aria-label="${n}" contenteditable="true" data-len="${len}" data-ph="${ph}" tabindex="${i ? -1 : 0}">${ph}</span>${i < 2 ? '<span>/</span>' : ''}`).join('') + '</div><button id="s">Save date</button>';
+    const parts = [...m.querySelectorAll('[role=spinbutton]')];
+    parts.forEach((part, i) => { part.addEventListener('focus', () => { const r = document.createRange(); r.selectNodeContents(part); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); });
+      part.addEventListener('beforeinput', (e) => { e.preventDefault(); if (!/^\d$/.test(e.data || '')) return;
+        const cur = /^\d+$/.test(part.textContent) && part.textContent.length < +part.dataset.len ? part.textContent : '';
+        part.textContent = cur + e.data; if (part.textContent.length >= +part.dataset.len && parts[i + 1]) parts[i + 1].focus(); }); });
+    s.onclick = () => out('Joined ' + parts.map(p => p.textContent).join('/')); },
+  hiddenapp: () => { m.innerHTML = '<div aria-hidden="true"><label for="hn">Name</label><input id="hn"><button id="s"><fa-icon><svg aria-hidden="true" role="img" width="12" height="12"><rect width="12" height="12"/></svg></fa-icon>Create </button></div>';
+    s.onclick = () => out('Created ' + hn.value); },
+  placeholder: () => { m.innerHTML = '<div><label>Email</label><div><input placeholder="name@example.com" id="pe"></div></div><div><label>Age</label><div><input placeholder="Age" id="pa"></div></div><button id="s">Submit</button>';
+    s.onclick = () => out('Submitted ' + pe.value + ' / ' + pa.value); },
+  namesakes: () => { m.innerHTML = ['Galaxy S20', 'Galaxy S20+', 'Galaxy S20 Ultra'].map(n => `<div class="card"><p>${n}</p><div class="buy" style="cursor:pointer">Add to cart</div></div>`).join('');
+    m.onclick = (e) => { if (e.target.className === 'buy') out('Added ' + e.target.previousElementSibling.textContent); }; },
+  ticker: () => { m.innerHTML = '<button id="s">Save settings</button><span id="clock"></span>'; const tick = () => { clock.dataset.t = Date.now(); setTimeout(tick, 120); }; tick();
+    setInterval(() => setTimeout(() => {}, 300), 150); s.onclick = () => setTimeout(() => out('Settings stored'), 400); },
   dup: () => { m.innerHTML = '<section aria-label="Billing address"><label>City <input></label><button>Save</button></section><section aria-label="Shipping address"><label>City <input></label><button>Save</button></section>'; m.querySelectorAll('button').forEach((b, i) => b.onclick = () => out((i ? 'Shipping' : 'Billing') + ' saved: ' + m.querySelectorAll('input')[i].value)); },
 };
 (pages[P] || (() => { m.innerHTML = Object.keys(pages).map(k => `<a href="?p=${k}">${k}</a>`).join(' '); }))();

@@ -557,3 +557,41 @@ def test_a_field_is_also_known_by_the_visible_label_beside_it():
     assert pick.element.ref == "mail" and pick.match == "decorated"       # a real match, one notch below a name
     assert decide(rank({"op": "fill", "target": "name@example.com"}, obs)).match == "exact"
     assert 'labelled "Email"' in by["mail"].summary()
+
+
+def test_within_picks_the_item_named_exactly_so():
+    """Probe 2026-10-05 (store): "Add to cart" for "Galaxy S20" must not hesitate between
+    Galaxy S20, Galaxy S20+ and Galaxy S20 Ultra."""
+    snap = "- main [ref=m]:\n" + "".join(f'''  - generic [ref=c{i}]:
+    - paragraph [ref=p{i}]: {name}
+    - generic [ref=a{i}] [cursor=pointer]: Add to cart
+''' for i, name in enumerate(["Galaxy S20", "Galaxy S20+", "Galaxy S20 Ultra", "Galaxy S10"]))
+    elements, _ = parse(snap)
+    obs = SimpleNamespace(elements=elements)
+    pick = lambda within: decide(rank({"op": "click", "target": "Add to cart", "within": within}, obs))
+    assert pick("Galaxy S20").element.ref == "a0"
+    assert pick("Galaxy S20+").element.ref == "a1"
+    assert pick("Galaxy S20 Ultra").element.ref == "a2"
+    assert pick("Galaxy") is None                       # four items say "Galaxy": ask
+
+
+def test_reading_text_is_in_order_and_says_things_once():
+    from qm_ground import reading_text
+    elements, _ = parse('''- generic [ref=box]:
+  - generic [ref=l]: SUBTOTAL
+  - generic [ref=v]:
+    - paragraph [ref=p]: $ 999.00
+    - generic [ref=n]: OR UP TO 9 x $ 111.00
+  - generic [ref=c] [cursor=pointer]: Checkout
+''')
+    assert reading_text(elements[0]) == "SUBTOTAL $ 999.00 OR UP TO 9 x $ 111.00 Checkout"
+
+
+def test_a_blocked_click_says_what_blocked_it():
+    from qm_explorer import _short
+    error = ('Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator("#x")\n'
+             '    - <div class="float-cart float-cart--open">…</div> intercepts pointer events\n    - retrying click action')
+    assert _short(Exception(error)) == ('Locator.click: Timeout 8000ms exceeded. -- something else is on top of it: '
+                                        '<div class="float-cart float-cart--open">…</div>')
+    assert _short(Exception("Locator.click: Timeout 8000ms exceeded.\nCall log:\n  - element is not enabled")) \
+        .endswith("-- it is disabled")

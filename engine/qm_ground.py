@@ -249,12 +249,35 @@ def shown_text(element, limit=40):
     return " ".join(p for p in parts if p)
 
 
-def context_words(element, levels=6, item_size=30):
-    """Words that say where an element is: the labels of its item (row, card, list entry),
-    the names and headings of the sections and dialogs it sits in."""
-    have = set(words(element.context))
-    for _, name in element.regions:
-        have.update(words(name))
+def reading_text(element, limit=120):
+    """What an element says, once and in reading order: its own text, then its children's."""
+    out = []
+
+    def visit(node):
+        if len(out) >= limit:
+            return
+        own = node.inline or " ".join(node.text)
+        if own:
+            out.append(own)
+        elif not node.children and node.name:
+            out.append(node.name)             # a leaf named by an attribute (an image, an icon button)
+        for child in node.children:
+            visit(child)
+    visit(element)
+    return " ".join(" ".join(out).split())
+
+
+def _strict(text):
+    return " ".join((text or "").casefold().split())
+
+
+def context(element, levels=6, item_size=30):
+    """What says where an element is: the labels of its item (row, card, list entry) and the
+    names and headings of the sections and dialogs it sits in. Returns (words, labels):
+    every word, and each label as written (lower-cased) for telling "Galaxy S20" from
+    "Galaxy S20+" and "Galaxy S20 Ultra"."""
+    labels = {_strict(part) for part in (element.context or "").split(" · ")}
+    labels.update(_strict(name) for _, name in element.regions)
     twin = (element.role, _norm(element.label))
     node, own_item = element.parent, True
     for _ in range(levels):
@@ -270,19 +293,24 @@ def context_words(element, levels=6, item_size=30):
         if any(n is not element and (n.role, _norm(n.label)) == twin for n in inside):
             own_item = False
         if own_item:
-            have.update(words(node.name))
-            have.update(w for t in node.text for w in words(t))
+            labels.add(_strict(node.name))
+            labels.update(_strict(t) for t in node.text)
             if len(inside) <= item_size:             # a small container is the item: all its labels
                 for inner in inside:
                     if inner is not element:
-                        have.update(words(inner.label))
-                        have.update(w for t in inner.text for w in words(t))
+                        labels.add(_strict(inner.label))
+                        labels.update(_strict(t) for t in inner.text)
             else:
                 for child in node.children:          # a larger section is named by its heading
                     if child.role in ("heading", "caption", "legend"):
-                        have.update(words(child.label))
+                        labels.add(_strict(child.label))
         node = node.parent
-    return have
+    labels.discard("")
+    return {w for label in labels for w in words(label)}, labels
+
+
+def context_words(element):
+    return context(element)[0]
 
 
 @dataclass
@@ -295,6 +323,7 @@ class Candidate:
     tier: object = None     # role fit (0 best); None = cannot take the action
     context: object = None  # share of the step's `within` words found around it (None: no `within`)
     shows: bool = False     # for a text check: the element displays the expected text
+    in_item: int = 0        # a label around it IS the step's `within`: 2 as written, 1 punctuation aside, 0 no
 
     @property
     def exact(self):
@@ -340,14 +369,19 @@ def rank(step, observation, limit=10):
         tier = fit(op, el, container)
         if tier is not None and el.attrs.get("disabled") and not op.startswith("expect"):
             tier += 10                      # a disabled control is the last resort
-        context = len(want & context_words(el)) / len(want) if want else None
-        score = relevance - (0.35 if tier is None else 0.02 * min(tier, 5)) + 0.1 * (context or 0)
+        around_words, around_labels = context(el) if want else (set(), set())
+        context_share = len(want & around_words) / len(want) if want else None
+        in_item = 0
+        if want:
+            in_item = 2 if _strict(step.get("within")) in around_labels else \
+                1 if _norm(step.get("within")) in {_norm(label) for label in around_labels} else 0
+        score = relevance - (0.35 if tier is None else 0.02 * min(tier, 5)) + 0.1 * (context_share or 0) + (0.05 if in_item else 0)
         shows = bool(value) and value in _norm(shown_text(el))
         if shows:
             score += 0.05                   # "Company shows X": the control displaying X
         out.append(Candidate(el, round(score, 3), f"{kind} name" + ("" if tier is not None else ", wrong kind of control")
                              + (f", inside {container.role}" if container else ""),
-                             actor.ref, kind, tier, context, shows))
+                             actor.ref, kind, tier, context_share, shows, in_item))
     # One candidate per clickable thing; prefer readable text over an image of the same name.
     best = {}
     for c in sorted(out, key=lambda c: (-MATCH_RANK[c.match] if c.tier is not None else 1, -c.score, c.element.role == "img")):
@@ -374,6 +408,9 @@ def decide(candidates, step=None):
             pool = [c for c in pool if c.context == 1.0]
             if not pool:
                 return None                # right name, but not where the step said
+            closest = max(c.in_item for c in pool)      # "Galaxy S20" itself, not "Galaxy S20+" or "... Ultra"
+            if closest:
+                pool = [c for c in pool if c.in_item == closest]
         in_dialog = [c for c in pool if c.element.region("dialog", "alertdialog")]
         if in_dialog and len(in_dialog) < len(pool):
             pool = in_dialog

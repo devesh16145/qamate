@@ -127,7 +127,7 @@ QUIET_PROBE = r"""
   // Short one-shot timers count as pending work (debounced search, simulated saves). Long
   // ones (up to a minute) are remembered separately: they don't hold up every step, but a
   // check that isn't true yet keeps waiting while one is running (a report being built).
-  const timers = probe.timers = new Set(), slow = probe.slow = new Set();
+  const timers = probe.timers = new Set(), slow = probe.slow = new Map();   // slow: id -> when it was set
   const setT = probe.rawSetTimeout = window.setTimeout, clearT = window.clearTimeout;
   const within = (depth, fn, args) => { const outer = probe.depth; probe.depth = depth;
     try { return fn(...args); } finally { probe.depth = outer; } };
@@ -135,9 +135,9 @@ QUIET_PROBE = r"""
     if (typeof fn !== 'function') return setT.call(this, fn, delay, ...rest);
     const ms = Number(delay) || 0, depth = probe.depth + 1;
     const counted = ms > 0 && ms <= 60000 && depth <= 2;
-    const set = ms <= 1500 ? timers : slow;
-    const id = setT.call(this, (...a) => { if (counted) { set.delete(id); bump(); } return within(depth, fn, a); }, delay, ...rest);
-    if (counted) set.add(id);
+    const short = ms <= 1500;
+    const id = setT.call(this, (...a) => { if (counted) { timers.delete(id); slow.delete(id); bump(); } return within(depth, fn, a); }, delay, ...rest);
+    if (counted) { if (short) timers.add(id); else slow.set(id, performance.now()); }
     return id;
   };
   window.clearTimeout = function (id) { timers.delete(id); slow.delete(id); return clearT.call(this, id); };
@@ -146,10 +146,15 @@ QUIET_PROBE = r"""
     if (typeof fn !== 'function') return setI.call(this, fn, delay, ...rest);
     return setI.call(this, (...a) => within(3, fn, a), delay, ...rest);      // whatever an interval starts is a loop
   };
-  // Still working on something that takes a while? (a request in flight for up to a minute,
-  // or a slow timer) -- a check that isn't true yet keeps waiting while this holds.
-  probe.working = () => { const now = performance.now(); let n = slow.size + timers.size;
-    probe.pending.forEach((t) => { if (now - t < 60000) n++; }); return n > 0; };
+  // Is the page still working on what the last action started? (a request it made that is
+  // still in flight, a slow timer it set) -- a check that isn't true yet keeps waiting while
+  // this holds. Work that was already going on before the action (a hanging beacon, a
+  // long poll) does not count: `mark` is when the action began.
+  probe.mark = 0;
+  probe.working = () => { const now = performance.now(); let n = timers.size;
+    probe.pending.forEach((t) => { if (t >= probe.mark && now - t < 60000) n++; });
+    slow.forEach((t) => { if (t >= probe.mark) n++; });
+    return n > 0; };
 })();
 """
 
@@ -449,7 +454,7 @@ class Flow:
         self._sync_page()
         self._dialog_policy, self._dialog_text = dialog, dialog_text
         try:
-            self.page.evaluate("() => { if (window.__qmProbe) window.__qmProbe.flash = []; }")
+            self.page.evaluate("() => { const p = window.__qmProbe; if (p) { p.flash = []; p.mark = performance.now(); } }")
         except Exception:
             pass
         try:
@@ -648,9 +653,40 @@ class Flow:
             self.settle()
 
     def check(self, target, checked=True, name=None, *, dialog=None):
+        """Tick or untick. A styled checkbox keeps its real <input> invisible or covered and
+        shows a painted label instead; then the label is clicked, as a user would."""
+        checked = bool(checked)
         with self._action(name or ("Check" if checked else "Uncheck"), dialog):
-            self._find(target).set_checked(bool(checked), timeout=self.timeout_ms)
+            box = self._find(target)
+            try:
+                painted = box.evaluate("el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el);"
+                                       " return s.opacity === '0' || r.width < 3 || r.height < 3; }", timeout=2000)
+            except Exception:
+                painted = False
+            try:
+                if painted:
+                    raise StepError("styled checkbox")      # straight to its label, no waiting
+                box.set_checked(checked, timeout=min(self.timeout_ms, 2500))
+            except Exception:
+                if self._is_checked(box) != checked:
+                    try:
+                        label = box.evaluate_handle("el => (el.labels && el.labels[0]) || el.closest('label')").as_element()
+                        if label is not None:
+                            label.click(timeout=2500)
+                    except Exception:
+                        pass
+                if self._is_checked(box) != checked:
+                    box.set_checked(checked, force=True, timeout=self.timeout_ms)
+                if self._is_checked(box) != checked:
+                    raise StepError(f"the box is still {'unticked' if checked else 'ticked'} after clicking it")
             self.settle()
+
+    @staticmethod
+    def _is_checked(loc):
+        try:
+            return bool(loc.is_checked(timeout=1000))
+        except Exception:
+            return None
 
     def press(self, key, target=None, name=None, *, expect_url=None, expect_visible=None, expect_hidden=None,
               dialog=None, dialog_text=None):

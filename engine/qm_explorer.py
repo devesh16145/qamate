@@ -27,7 +27,7 @@ import time
 from urllib.parse import urljoin
 
 from qm_decide import choose
-from qm_ground import _norm, decide, rank, shown_text, words
+from qm_ground import _norm, decide, rank, reading_text, shown_text, words
 from qm_map import route_of
 from qm_observe import observe
 from qm_runtime import _SECRET, Flow, generic_url, relative_url
@@ -204,8 +204,7 @@ class Explorer:
                 if best is None or el.depth >= best.depth:     # the smallest thing that names the item
                     best = el
         if best is None:
-            return {"ok": False, "reason": "not_found",
-                    "detail": f"no row, card or section on the page is named {within!r}"}
+            return self._adjacent_text_check(intent, within, value, present, obs)
         loc = anchored_locator(self.page, best, within) or locator_for(self.page, best)
         if not loc["unique"]:
             return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {best.summary()}"}
@@ -215,6 +214,31 @@ class Explorer:
         outcome = self._record(step, check=True, element=best)
         outcome["element"] = best.summary()
         return outcome
+
+    def _adjacent_text_check(self, intent, within, value, present, obs):
+        """No row, card or section is named `within` -- it is a plain label beside the value
+        ("SUBTOTAL  $ 999.00"). Check the two together, as one phrase in reading order: that
+        ties the value to its label without needing a locator for an unnamed box."""
+        phrase = None
+        if present:
+            low_within, low_value = " ".join(within.split()).casefold(), " ".join(value.split()).casefold()
+            for el in sorted(obs.elements, key=lambda e: -e.depth):          # smallest boxes first
+                text = reading_text(el)
+                low = text.casefold()
+                i, j = low.find(low_within), low.find(low_value)
+                if i < 0 or j < 0:
+                    continue
+                start, end = min(i, j), max(i + len(low_within), j + len(low_value))
+                if end - start <= len(low_within) + len(low_value) + 40:     # side by side, not merely on the same page
+                    phrase = text[start:end]
+                    break
+        if phrase is None:
+            return {"ok": False, "reason": "not_found",
+                    "detail": (f"no row, card or section on the page is named {within!r}"
+                               + ("" if not present else f", and {value!r} is not shown beside it"))}
+        step = {"op": "expect_page_text", "value": phrase, "present": True,
+                "name": intent.get("name") or f"{intent['within']} shows '{intent['value']}'"}
+        return self._record(step, check=True)
 
     # ── element steps ───────────────────────────────────────────────────────
     def _element_intent(self, intent, live, reveal=True):
@@ -228,8 +252,10 @@ class Explorer:
         if pick is None and op == "fill":
             # No field is named this, but a group of fields may be: a date entered as month,
             # day and year, a code with a box per digit. It is typed into as one field.
-            pick = next((c for c in candidates if c.match != "partial" and c.tier is None
-                         and any(d.role in PART_ROLES for d in _descendants(c.element))), None)
+            groups = [c for c in candidates if c.match != "partial" and c.tier is None
+                      and 0 < sum(d.role in PART_ROLES for d in _descendants(c.element)) <= 12]
+            # the group itself, not a section that happens to contain it: the deepest, a real group first
+            pick = max(groups, key=lambda c: (c.element.role in ("group", "radiogroup"), c.element.depth), default=None)
             composite = pick is not None
         if pick is None and reveal and not any(c.exact for c in candidates) and self._reveal(ground):
             obs, candidates = self._look(ground)
@@ -603,5 +629,23 @@ def _descendants(element, limit=40):
     return out
 
 
+_BLOCKERS = (("intercepts pointer events", "something else is on top of it: "),
+             ("element is not visible", "it is on the page but not visible"),
+             ("element is not enabled", "it is disabled"),
+             ("element is outside of the viewport", "it cannot be scrolled into view"),
+             ("element is not stable", "it keeps moving"))
+
+
 def _short(exc):
-    return str(exc).split("\nCall log:")[0].strip()[:400]
+    """Playwright's error, plus -- when the action timed out waiting on the element -- what
+    it was waiting for, from the call log. "Timeout exceeded" alone tells a planner nothing;
+    "a panel is on top of it" tells it to close the panel."""
+    text = str(exc)
+    head, _, log = text.partition("\nCall log:")
+    head = head.strip()[:400]
+    for marker, meaning in _BLOCKERS:
+        line = next((l.strip(" -") for l in log.splitlines() if marker in l), None)
+        if line:
+            covering = line.split(marker)[0].strip() if marker == "intercepts pointer events" else ""
+            return (head + " -- " + meaning + covering)[:500]
+    return head

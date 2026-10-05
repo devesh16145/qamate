@@ -42,6 +42,12 @@ CASES = [
  ("Item far down a lazy list", "longlist", [c("Ticket 150"), txt("Opened Ticket 150")]),
  # A blind plan (fill, save) is told "Choose a city from the list" and re-plans; this is the informed plan.
  ("Type-ahead that needs a pick", "typeahead", [f("City", "Pu"), c("Pune"), c("Save city"), txt("City saved: Pune")]),
+ ("Styled checkbox, input invisible", "styled", [{"do": "check", "target": "Samsung"}, txt("Showing: Samsung")]),
+ ("Date typed as month/day/year", "segments", [f("Join date", "10/05/2026"), c("Save date"), txt("Joined 10/05/2026")]),
+ ("Screen left aria-hidden", "hiddenapp", [f("Name", "Asha"), c("Create"), txt("Created Asha")]),
+ ("Field named by its placeholder", "placeholder", [f("Email", "asha@example.com"), f("Age", "31"), c("Submit"), txt("Submitted asha@example.com / 31")]),
+ ("Items with near-identical names", "namesakes", [c("Add to cart", within="Galaxy S20"), txt("Added Galaxy S20"), txt("Added Galaxy S20+", False)]),
+ ("Page with timer loops", "ticker", [c("Save settings"), txt("Settings stored")]),
  ("Same labels in two sections", "dup", [f("City", "Pune", within="Shipping address"), c("Save", within="Shipping address"), txt("Shipping saved: Pune")]),
 ]
 only = [a for a in sys.argv[1:] if not a.startswith('-')]
@@ -53,10 +59,11 @@ with sync_playwright() as pw:
         ctx = b.new_context(viewport={'width': 1280, 'height': 800}); page = ctx.new_page()
         popups = []; ctx.on('page', lambda p: popups.append(1))
         ex = Explorer(page, base_url=None, confirm=lambda *a: True)
-        verdict, why = 'PASS', ''
+        verdict, why, timings = 'PASS', '', []
         try:
             for intent in [{"do": "goto", "url": B + '?p=' + route}] + [normalize_step(x) for x in plan]:
                 out = ex.run_intent(intent)
+                timings.append(out)
                 if not out['ok']:
                     verdict = 'FAIL'
                     why = f"{intent['do']} {intent.get('target') or intent.get('value') or ''!r}: {out.get('reason')} - {str(out.get('detail')).splitlines()[0][:100]}"
@@ -68,7 +75,8 @@ with sync_playwright() as pw:
         except Exception as e:
             verdict, why = 'ERROR', str(e)[:160]
         if verdict == 'PASS': why = ' | '.join(str(s.get('target') or '')[:60] for s in ex.steps if s.get('target'))[:150]
-        print(f"{verdict:11s} {name:30s} {why}" + (" [a new tab opened; the engine stayed on the old one]" if len(popups) > 1 else ''))
+        seconds = sum((s.get("ms") or 0) for s in timings) / 1000
+        print(f"{verdict:11s} {name:34s} {seconds:5.1f}s  {why}" + (" [a new tab opened; the engine stayed on the old one]" if len(popups) > 1 else ''))
         if verdict != 'PASS' and '-v' in sys.argv:
             print('     planner sees:', page_summary(observe(page))['elements'][:12], '| text:', page_summary(observe(page))['text'][:8])
         ctx.close()

@@ -1,0 +1,44 @@
+{
+ "url": "https://bstackdemo.com/",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine aa5bde5) failed at step 1 (a styled checkbox: the real input is invisible), then at step 4 (Galaxy S20 vs S20+ vs S20 Ultra), then needed one re-plan for the cart panel it had not seen (price format, plain label beside the value); and a second re-plan: the open cart panel covers the product grid, so it is closed before the next product is added",
+ "steps": [
+  {
+   "do": "check",
+   "target": "Samsung"
+  },
+  {
+   "do": "expect_text",
+   "value": "7 Product(s) found."
+  },
+  {
+   "do": "expect_text",
+   "value": "iPhone 12",
+   "present": false
+  },
+  {
+   "do": "click",
+   "target": "Add to cart",
+   "within": "Galaxy S20"
+  },
+  {
+   "do": "expect_text",
+   "value": "$ 999.00",
+   "within": "SUBTOTAL"
+  },
+  {
+   "do": "click",
+   "target": "X"
+  },
+  {
+   "do": "click",
+   "target": "Add to cart",
+   "within": "Galaxy S10"
+  },
+  {
+   "do": "expect_text",
+   "value": "$ 1898.00",
+   "within": "SUBTOTAL"
+  }
+ ]
+}
