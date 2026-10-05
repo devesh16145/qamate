@@ -1,0 +1,631 @@
+{
+ "note": "Seed set for comparing chooser models: the step, the short list the engine would show, and the right answer (null = NONE). Hand-written from cases met on real sites; extend it from live traces.",
+ "cases": [
+  {
+   "id": "sort-guess",
+   "kind": "guess",
+   "step": {
+    "op": "select",
+    "target": "Sort",
+    "value": "Price (low to high)"
+   },
+   "options": [
+    "combobox \"Sort products\"",
+    "button \"Open Menu\"",
+    "generic \"Name (A to Z)\""
+   ],
+   "gold": 0,
+   "why": "seen live on SauceDemo"
+  },
+  {
+   "id": "quantity-guess",
+   "kind": "guess",
+   "step": {
+    "op": "expect_value",
+    "target": "Quantity"
+   },
+   "options": [
+    "spinbutton \"Quantity for Combination Pliers\" in row",
+    "columnheader \"Quantity\" in row",
+    "button \"Proceed to checkout\""
+   ],
+   "gold": 0,
+   "why": "seen live on the tool shop"
+  },
+  {
+   "id": "cart-guess",
+   "kind": "guess",
+   "step": {
+    "op": "click",
+    "target": "Shopping cart"
+   },
+   "options": [
+    "button \"Add to cart\" near Sauce Labs Backpack · $29.99",
+    "button \"Cart, 2 items\"",
+    "button \"Add to cart\" near Sauce Labs Bike Light · $9.99"
+   ],
+   "gold": 1
+  },
+  {
+   "id": "contacts-tab",
+   "kind": "guess",
+   "step": {
+    "op": "click",
+    "target": "Contacts tab"
+   },
+   "options": [
+    "link \"Contacts\" in navigation",
+    "tab \"1 contact\"",
+    "heading \"Contact\" (level=3)"
+   ],
+   "gold": 1,
+   "why": "seen live on Atomic CRM"
+  },
+  {
+   "id": "next-page",
+   "kind": "guess",
+   "step": {
+    "op": "click",
+    "target": "Next"
+   },
+   "options": [
+    "link \"Next steps guide\"",
+    "button \"Previous page\" (disabled)",
+    "button \"Next page\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "phone",
+   "kind": "guess",
+   "step": {
+    "op": "fill",
+    "target": "Phone",
+    "value": "9876543210"
+   },
+   "options": [
+    "textbox \"Current Address\"",
+    "textbox \"Mobile Number\" (labelled \"Mobile(10 Digits)\")",
+    "textbox \"name@example.com\" (labelled \"Email\")"
+   ],
+   "gold": 1
+  },
+  {
+   "id": "email",
+   "kind": "guess",
+   "step": {
+    "op": "fill",
+    "target": "E-mail address",
+    "value": "asha@example.com"
+   },
+   "options": [
+    "textbox \"name@example.com\" (labelled \"Email\")",
+    "textbox \"First Name\"",
+    "textbox \"Mobile Number\""
+   ],
+   "gold": 0
+  },
+  {
+   "id": "amount",
+   "kind": "guess",
+   "step": {
+    "op": "fill",
+    "target": "Amount",
+    "value": "1200"
+   },
+   "options": [
+    "textbox \"Notes\"",
+    "spinbutton \"Quantity\"",
+    "spinbutton \"Amount (INR)\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "country",
+   "kind": "guess",
+   "step": {
+    "op": "select",
+    "target": "Country",
+    "value": "India"
+   },
+   "options": [
+    "combobox \"State\"",
+    "combobox \"Country*\" (unnamed, from the text beside it)",
+    "textbox \"City\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "rows-per-page",
+   "kind": "guess",
+   "step": {
+    "op": "select",
+    "target": "Rows per page",
+    "value": "50"
+   },
+   "options": [
+    "combobox \"Order by\"",
+    "button \"Next page\"",
+    "combobox \"Rows per page:\" (unnamed, from the text beside it)"
+   ],
+   "gold": 2
+  },
+  {
+   "id": "export",
+   "kind": "guess",
+   "step": {
+    "op": "click",
+    "target": "Export"
+   },
+   "options": [
+    "button \"Import CSV\"",
+    "button \"Export CSV\"",
+    "link \"Reports\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "search-field",
+   "kind": "guess",
+   "step": {
+    "op": "fill",
+    "target": "Search",
+    "value": "cedar"
+   },
+   "options": [
+    "link \"Advanced search\"",
+    "searchbox \"Search transfers\"",
+    "button \"Search\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "confirm-password",
+   "kind": "guess",
+   "step": {
+    "op": "fill",
+    "target": "Confirm password",
+    "value": "x"
+   },
+   "options": [
+    "textbox \"Password*\"",
+    "textbox \"Confirm password*\"",
+    "textbox \"Email*\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "password",
+   "kind": "guess",
+   "step": {
+    "op": "fill",
+    "target": "Password",
+    "value": "x"
+   },
+   "options": [
+    "textbox \"Confirm password*\"",
+    "textbox \"Email*\"",
+    "textbox \"Password*\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "view-details",
+   "kind": "guess",
+   "step": {
+    "op": "click",
+    "target": "View details",
+    "within": "Sauce Labs Onesie"
+   },
+   "options": [
+    "button \"View details for Sauce Labs Backpack\"",
+    "button \"Add to cart\" near View details for Sauce Labs Onesie · $7.99",
+    "button \"View details for Sauce Labs Onesie\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "submit-send",
+   "kind": "wording",
+   "step": {
+    "op": "click",
+    "target": "Submit"
+   },
+   "options": [
+    "button \"Reset\"",
+    "link \"Privacy policy\"",
+    "button \"Send message\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "login-signin",
+   "kind": "wording",
+   "step": {
+    "op": "click",
+    "target": "Log in"
+   },
+   "options": [
+    "link \"Sign up\" in navigation",
+    "link \"Sign in\" in navigation",
+    "button \"Subscribe\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "remember-me",
+   "kind": "wording",
+   "step": {
+    "op": "check",
+    "target": "Remember me"
+   },
+   "options": [
+    "checkbox \"Subscribe to newsletter\"",
+    "checkbox \"Keep me signed in\"",
+    "button \"Sign in\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "user-menu",
+   "kind": "wording",
+   "step": {
+    "op": "click",
+    "target": "User menu"
+   },
+   "options": [
+    "button \"Notifications\" in banner",
+    "link \"Users\" in navigation",
+    "button \"Asha Probe\" in banner"
+   ],
+   "gold": 2
+  },
+  {
+   "id": "yes-ok",
+   "kind": "wording",
+   "step": {
+    "op": "click",
+    "target": "Yes"
+   },
+   "options": [
+    "button \"Cancel\" in alertdialog \"Delete record?\"",
+    "button \"OK\" in alertdialog \"Delete record?\"",
+    "button \"Help\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "success-message",
+   "kind": "wording",
+   "step": {
+    "op": "expect_visible",
+    "target": "Success message"
+   },
+   "options": [
+    "alert \"Invalid email\"",
+    "heading \"Settings\" (level=1)",
+    "status \"Settings saved\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "error-message",
+   "kind": "wording",
+   "step": {
+    "op": "expect_visible",
+    "target": "Error"
+   },
+   "options": [
+    "status \"Saved\"",
+    "alert \"Units must be greater than zero\"",
+    "button \"Save\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "search-find",
+   "kind": "wording",
+   "step": {
+    "op": "click",
+    "target": "Search"
+   },
+   "options": [
+    "searchbox \"Search transfers\"",
+    "link \"Advanced search\"",
+    "button \"Find\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "row-delete",
+   "kind": "within",
+   "step": {
+    "op": "click",
+    "target": "Delete",
+    "within": "Order #1002"
+   },
+   "options": [
+    "button \"Delete\" in row \"#1001 Pending Edit Delete\"",
+    "button \"Delete all\"",
+    "button \"Delete\" in row \"#1002 Shipped Edit Delete\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "row-edit",
+   "kind": "within",
+   "step": {
+    "op": "click",
+    "target": "Edit",
+    "within": "Bach"
+   },
+   "options": [
+    "link \"Edit\" near Smith · Admin · Disable",
+    "link \"Edit\" near Bach · Viewer · Disable",
+    "link \"Edit\" near Doe · Editor · Disable"
+   ],
+   "gold": 1
+  },
+  {
+   "id": "namesake",
+   "kind": "within",
+   "step": {
+    "op": "click",
+    "target": "Add to cart",
+    "within": "Galaxy S20"
+   },
+   "options": [
+    "generic \"Add to cart\" near delete · Galaxy S20+ · $1199.00",
+    "generic \"Add to cart\" near delete · Galaxy S20 Ultra · $1399.00",
+    "generic \"Add to cart\" near delete · Galaxy S20 · $999.00"
+   ],
+   "gold": 2,
+   "why": "seen live on the store"
+  },
+  {
+   "id": "cart-remove",
+   "kind": "within",
+   "step": {
+    "op": "click",
+    "target": "Remove",
+    "within": "Sauce Labs Backpack"
+   },
+   "options": [
+    "button \"Remove\" near Sauce Labs Onesie · $7.99",
+    "button \"Remove\" near Sauce Labs Backpack · $29.99",
+    "button \"Continue Shopping\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "row-checkbox",
+   "kind": "within",
+   "step": {
+    "op": "check",
+    "target": "Row checkbox",
+    "within": "Carol"
+   },
+   "options": [
+    "checkbox \"Select all\"",
+    "checkbox in row \"2 Bob Viewer\"",
+    "checkbox in row \"3 Carol Admin\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "settings-icon",
+   "kind": "icon",
+   "step": {
+    "op": "click",
+    "target": "Settings"
+   },
+   "options": [
+    "button \"notifications\" (unnamed, from its icon)",
+    "button \"Help\"",
+    "button \"settings\" (unnamed, from its icon)"
+   ],
+   "gold": 2
+  },
+  {
+   "id": "close-icon",
+   "kind": "icon",
+   "step": {
+    "op": "click",
+    "target": "Close"
+   },
+   "options": [
+    "button \"Close account\"",
+    "button \"close\" (unnamed, from its icon) in dialog \"Edit profile\"",
+    "link \"Closed tickets\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "menu-named",
+   "kind": "icon",
+   "step": {
+    "op": "click",
+    "target": "Open menu"
+   },
+   "options": [
+    "button \"menu\" (unnamed, from its icon) in banner",
+    "link \"Menu planner\"",
+    "button \"Open Menu\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "hindi",
+   "kind": "language",
+   "step": {
+    "op": "click",
+    "target": "नया ऑर्डर"
+   },
+   "options": [
+    "button \"रद्द करें\"",
+    "button \"नया ऑर्डर बनाएं\"",
+    "link \"ऑर्डर सूची\""
+   ],
+   "gold": 1
+  },
+  {
+   "id": "french",
+   "kind": "language",
+   "step": {
+    "op": "click",
+    "target": "Créer"
+   },
+   "options": [
+    "button \"Annuler\"",
+    "link \"Commandes\"",
+    "button \"Créer une commande\""
+   ],
+   "gold": 2
+  },
+  {
+   "id": "lazy-ticket",
+   "kind": "none",
+   "step": {
+    "op": "click",
+    "target": "Ticket 150"
+   },
+   "options": [
+    "link \"Ticket 1\"",
+    "link \"Ticket 15\"",
+    "link \"Ticket 2\""
+   ],
+   "gold": null,
+   "why": "the wrong click of 2026-10-05"
+  },
+  {
+   "id": "pliers",
+   "kind": "none",
+   "step": {
+    "op": "click",
+    "target": "Combination Pliers"
+   },
+   "options": [
+    "checkbox \"Pliers\"",
+    "link \"Pliers Compare Pliers CO₂: A B C D E $12.01\"",
+    "link \"Long Nose Pliers Compare Long Nose Pliers $14.24\""
+   ],
+   "gold": null
+  },
+  {
+   "id": "teleport",
+   "kind": "none",
+   "step": {
+    "op": "click",
+    "target": "Teleport"
+   },
+   "options": [
+    "button \"Transfer\"",
+    "link \"Transport settings\"",
+    "button \"Report\""
+   ],
+   "gold": null
+  },
+  {
+   "id": "import",
+   "kind": "none",
+   "step": {
+    "op": "click",
+    "target": "Import"
+   },
+   "options": [
+    "button \"Export CSV\"",
+    "link \"Reports\"",
+    "button \"Print\""
+   ],
+   "gold": null
+  },
+  {
+   "id": "close-nothing",
+   "kind": "none",
+   "step": {
+    "op": "click",
+    "target": "Close"
+   },
+   "options": [
+    "button \"Close account\"",
+    "link \"Closed tickets\"",
+    "button \"Clone\""
+   ],
+   "gold": null
+  },
+  {
+   "id": "in-cart-already",
+   "kind": "none",
+   "step": {
+    "op": "click",
+    "target": "Add to cart",
+    "within": "Sauce Labs Backpack"
+   },
+   "options": [
+    "button \"Remove\" near Sauce Labs Backpack · $29.99",
+    "button \"Add to cart\" near Sauce Labs Bike Light · $9.99",
+    "button \"Add to cart\" near Sauce Labs Onesie · $7.99"
+   ],
+   "gold": null,
+   "why": "the item is already in the cart: its button now says Remove"
+  },
+  {
+   "id": "wrong-kind",
+   "kind": "none",
+   "step": {
+    "op": "fill",
+    "target": "Search",
+    "value": "cedar"
+   },
+   "options": [
+    "button \"Search\"",
+    "link \"Advanced search\"",
+    "heading \"Search results\" (level=2)"
+   ],
+   "gold": null,
+   "why": "nothing here can be typed into"
+  },
+  {
+   "id": "approve-which",
+   "kind": "unclear",
+   "step": {
+    "op": "click",
+    "target": "Approve"
+   },
+   "options": [
+    "button \"Approve\" in row near REQ-1 · Laptop",
+    "button \"Approve\" in row near REQ-2 · Chair",
+    "button \"Reject\" in row near REQ-1 · Laptop"
+   ],
+   "gold": null
+  },
+  {
+   "id": "back-which",
+   "kind": "unclear",
+   "step": {
+    "op": "click",
+    "target": "Back"
+   },
+   "options": [
+    "link \"Back to transfers\"",
+    "link \"Back to top\"",
+    "button \"Previous page\""
+   ],
+   "gold": null
+  },
+  {
+   "id": "save-which",
+   "kind": "unclear",
+   "step": {
+    "op": "click",
+    "target": "Save"
+   },
+   "options": [
+    "button \"Save\" in region \"Billing address\"",
+    "button \"Save\" in region \"Shipping address\"",
+    "button \"Cancel\""
+   ],
+   "gold": null
+  }
+ ]
+}

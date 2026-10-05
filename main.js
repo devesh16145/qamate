@@ -1247,12 +1247,23 @@ ipcMain.handle('bench-run', async (event, opts) => {
   if (!fs.existsSync(VENV_PYTHON)) return { ok: false, error: `Python not found at ${VENV_PYTHON}` };
   const provider = (opts && opts.provider) || '';
   const only = (opts && opts.only) || '';
-  const fast = (opts && opts.engine) === 'fast';
-  // Fast engine: engine/qm_bench.py (ten workflows, ~10-20 min); classic: engine/agent_bench.py.
-  const args = [path.join(APP_ROOT, 'engine', fast ? 'qm_bench.py' : 'agent_bench.py')];
-  if (provider) args.push('--provider', provider);
-  if (only) args.push('--only', only);
-  if (fast && opts.warm) args.push('--warm');
+  const chooser = (opts && opts.kind) === 'chooser';
+  const fast = !chooser && (opts && opts.engine) === 'fast';
+  // A model id typed in the UI is passed as one argument (never through a shell); keep it id-shaped anyway.
+  const modelId = (v) => (typeof v === 'string' && /^[\w.:\/@-]{1,120}$/.test(v.trim())) ? v.trim() : '';
+  let args;
+  if (chooser) {
+    // Decision-model comparison: engine/qm_chooser_eval.py (fixed cases, about a minute per model).
+    args = [path.join(APP_ROOT, 'engine', 'qm_chooser_eval.py'),
+            ...((opts.models || []).map(modelId).filter(Boolean).slice(0, 12))];
+  } else {
+    // Fast engine: engine/qm_bench.py (ten workflows, ~10-20 min); classic: engine/agent_bench.py.
+    args = [path.join(APP_ROOT, 'engine', fast ? 'qm_bench.py' : 'agent_bench.py')];
+    if (provider) args.push('--provider', provider);
+    if (only) args.push('--only', only);
+    if (fast && opts.warm) args.push('--warm');
+    if (fast && modelId(opts.model)) args.push('--model', modelId(opts.model));
+  }
   benchProcess = spawn(VENV_PYTHON, args, {
     cwd: DATA_ROOT,
     env: { ...process.env, ATS_ROOT: DATA_ROOT, ATS_APP_ROOT: APP_ROOT, PYTHONPATH: APP_ROOT, ..._llmEnv(),
@@ -1280,7 +1291,7 @@ ipcMain.handle('bench-run', async (event, opts) => {
     benchProcess = null;
     benchBroadcast({ type: 'exit', code });
   });
-  benchBroadcast({ type: 'started', provider, pid, engine: fast ? 'fast' : 'classic' });
+  benchBroadcast({ type: 'started', provider, pid, engine: chooser ? 'chooser' : fast ? 'fast' : 'classic' });
   return { ok: true, pid };
 });
 
@@ -1316,8 +1327,28 @@ ipcMain.handle('bench-results', async () => {
     if (!fs.existsSync(p)) continue;
     try {
       const sc = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      out.push({ id: d, generated: sc.generated, provider: sc.provider, env: sc.env, engine: sc.engine || 'classic',
+      out.push({ id: d, generated: sc.generated, provider: sc.provider, model: sc.model, env: sc.env,
+                 engine: sc.engine || 'classic',
                  scorecard: sc.scorecard, tasks: sc.tasks, folder: path.join(benchDir, d) });
+    } catch { /* partial write — skip */ }
+  }
+  return out;
+});
+
+// Decision-model comparisons (engine/qm_chooser_eval.py), newest first.
+ipcMain.handle('chooser-results', async () => {
+  const dir = path.join(RESULTS_DIR, '_chooser_eval');
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const d of fs.readdirSync(dir).sort().reverse()) {
+    if (out.length >= 5) break;
+    const p = path.join(dir, d, 'scorecard.json');
+    if (!fs.existsSync(p)) continue;
+    try {
+      const sc = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      // The per-case rows stay on disk; the tab needs the totals only.
+      out.push({ id: d, generated: sc.generated, cases: sc.cases, folder: path.join(dir, d),
+                 models: (sc.models || []).map(({ rows, ...m }) => m) });
     } catch { /* partial write — skip */ }
   }
   return out;

@@ -2909,6 +2909,9 @@ function BenchPanel({ toast }) {
   const [engine, setEngine] = useState('fast');
   const [scope, setScope] = useState('');
   const [warm, setWarm] = useState(false);
+  const [model, setModel] = useState('');           // optional planner model id for this run only
+  const [chooserModels, setChooserModels] = useState('');
+  const [chooserRuns, setChooserRuns] = useState([]);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState([]);
   const [results, setResults] = useState([]);
@@ -2917,6 +2920,7 @@ function BenchPanel({ toast }) {
 
   const refreshResults = async () => {
     try { setResults(await window.ats.benchResults() || []); } catch (e) { /* noop */ }
+    try { setChooserRuns(await window.ats.chooserResults() || []); } catch (e) { /* noop */ }
   };
 
   useEffect(() => {
@@ -2936,10 +2940,11 @@ function BenchPanel({ toast }) {
         setLog(prev => [...prev.slice(-400), ev.line]);
       } else if (ev.type === 'started') {
         setRunning(true);
-        setLog(prev => [...prev, `— ${ev.engine === 'fast' ? 'fast-engine ' : ''}benchmark started (provider: ${ev.provider || 'config default'}, pid ${ev.pid}) —`]);
+        setLog(prev => [...prev, ev.engine === 'chooser' ? `— decision-model comparison started (pid ${ev.pid}) —`
+          : `— ${ev.engine === 'fast' ? 'fast-engine ' : ''}benchmark started (provider: ${ev.provider || 'config default'}, pid ${ev.pid}) —`]);
       } else if (ev.type === 'exit') {
         setRunning(false);
-        setLog(prev => [...prev, ev.stopped ? '— benchmark stopped —' : `— benchmark finished (exit ${ev.code}) —`]);
+        setLog(prev => [...prev, ev.stopped ? '— stopped —' : `— finished (exit ${ev.code}) —`]);
         refreshResults();
       }
     });
@@ -2951,8 +2956,13 @@ function BenchPanel({ toast }) {
   }, [log]);
 
   const start = async () => {
-    const r = await window.ats.benchRun(engine === 'fast' ? { provider, engine, only: scope, warm } : { provider, engine });
+    const r = await window.ats.benchRun(engine === 'fast' ? { provider, engine, only: scope, warm, model: model.trim() } : { provider, engine });
     if (!r || !r.ok) toast((r && r.error) || 'could not start benchmark');
+  };
+  const compareChoosers = async () => {
+    const models = chooserModels.split(/[\s,]+/).filter(Boolean);
+    const r = await window.ats.benchRun({ kind: 'chooser', models });
+    if (!r || !r.ok) toast((r && r.error) || 'could not start the comparison');
   };
   const stop = async () => { await window.ats.benchStop(); };
 
@@ -2988,6 +2998,11 @@ function BenchPanel({ toast }) {
                 style={{ fontSize: 12, padding: '4px 8px' }}>
           {providers.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
+        {engine === 'fast' && (
+          <input className="setting-input" value={model} onChange={e => setModel(e.target.value)} disabled={running} spellCheck={false}
+                 placeholder="model (optional)" style={{ fontSize: 12, padding: '4px 8px', width: 190, fontFamily: 'var(--mono)' }}
+                 title="Try another planner model with this provider's key for this run only, e.g. an OpenRouter model id. Your settings are not changed." />
+        )}
         {!running ? (
           <button className="rv-cta primary" onClick={start} disabled={!provider}>
             <I.Play size={12} /> Run benchmark
@@ -3013,6 +3028,73 @@ function BenchPanel({ toast }) {
           {log.length ? log.join('\n') : 'waiting for output…'}
         </div>
       )}
+
+      {/* Decision-model comparison */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Decision-model comparison</span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>which small model should pick between look-alike elements</span>
+          <div style={{ flex: 1 }}></div>
+          <input className="setting-input" value={chooserModels} onChange={e => setChooserModels(e.target.value)} disabled={running} spellCheck={false}
+                 placeholder="models (optional)" style={{ fontSize: 12, padding: '4px 8px', width: 300, fontFamily: 'var(--mono)' }}
+                 title={'Leave empty to compare your decision model with a shortlist on OpenRouter. Or list models, separated by spaces: role · profile:<name> · decisions:<OpenRouter model id> · chat:<OpenRouter model id>'} />
+          <button className="rv-cta" onClick={compareChoosers} disabled={running}>
+            <I.Play size={12} /> Compare
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
+          A fixed set of cases (a step, the elements it could mean, the right answer or “none of these”), each asked twice with the
+          options in opposite orders, the way the fast engine asks. A wrong pick is a wrong click in a test; “not sure” only
+          costs a re-plan. No browser is used; about a minute per model.
+        </div>
+        {chooserRuns.length > 0 && (() => {
+          const run = chooserRuns[0];
+          const ok = (run.models || []).filter(m => !m.unavailable)
+            .sort((a, b) => (a.wrong_pick - b.wrong_pick) || (b.correct - a.correct) || ((a.p50_ms || 0) - (b.p50_ms || 0)));
+          const missing = (run.models || []).filter(m => m.unavailable);
+          return (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontFamily: 'var(--mono)' }}>{run.id}</span> · {run.cases} cases
+                <button className="ic" title="Open folder" onClick={() => window.ats.openFolder(run.folder)}><I.Folder size={12} /></button>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--text-3)', fontSize: 10.5 }}>
+                    <th style={{ padding: '4px 6px' }}>Model</th>
+                    <th style={{ padding: '4px 6px' }} title="Both runs chose the right element, or “none” when nothing fits">Correct</th>
+                    <th style={{ padding: '4px 6px' }} title="Both runs agreed on a wrong element: the test would click the wrong thing">Wrong pick</th>
+                    <th style={{ padding: '4px 6px' }} title="The two runs disagreed, or the model said “none” although the element was listed: the planner is asked instead">Not sure</th>
+                    <th style={{ padding: '4px 6px' }} title="How often one run just took the first element listed">Takes first</th>
+                    <th style={{ padding: '4px 6px' }} title="Per call: median / 95th percentile">Speed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ok.map((m, i) => (
+                    <tr key={m.model} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '5px 6px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: i === 0 ? 700 : 400 }}>
+                        {m.model === 'role' ? 'your decision model' : m.model}
+                        {m.resolved_model && !m.model.endsWith(m.resolved_model) ? <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> {m.resolved_model}</span> : null}
+                      </td>
+                      <td style={{ padding: '5px 6px' }}>{m.correct_pct}% <span style={{ color: 'var(--text-3)' }}>({m.correct}/{m.cases})</span></td>
+                      <td style={{ padding: '5px 6px', fontWeight: 600, color: m.wrong_pick ? 'var(--red, #dc2626)' : 'var(--green, #16a34a)' }}>{m.wrong_pick}</td>
+                      <td style={{ padding: '5px 6px' }}>{(m.not_sure || 0) + (m.missed || 0)}{m.error ? <span style={{ color: 'var(--text-3)' }}> · {m.error} failed</span> : null}</td>
+                      <td style={{ padding: '5px 6px' }}>{m.first_option_pct != null ? `${m.first_option_pct}%` : '—'}</td>
+                      <td style={{ padding: '5px 6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{m.p50_ms != null ? `${m.p50_ms} / ${m.p95_ms} ms` : '—'}</td>
+                    </tr>
+                  ))}
+                  {missing.map(m => (
+                    <tr key={m.model} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-3)' }}>
+                      <td style={{ padding: '5px 6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{m.model}</td>
+                      <td colSpan={5} style={{ padding: '5px 6px' }}>not available: {String(m.unavailable).slice(0, 140)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+      </div>
 
       {/* Scorecard history */}
       <div>
@@ -3047,7 +3129,7 @@ function BenchPanel({ toast }) {
                   <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
                       onClick={() => setOpenRun(isOpen ? null : r.id)}>
                     <td style={{ padding: '6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{r.id}</td>
-                    <td style={{ padding: '6px' }}>{r.provider}{r.engine === 'fast' ? <span style={{ color: 'var(--text-3)' }}> · fast{r.env === 'warm' ? ' · warm' : ''}</span> : null}</td>
+                    <td style={{ padding: '6px' }}>{r.provider}{r.model ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}> {r.model}</span> : null}{r.engine === 'fast' ? <span style={{ color: 'var(--text-3)' }}> · fast{r.env === 'warm' ? ' · warm' : ''}</span> : null}</td>
                     <td style={{ padding: '6px', fontWeight: 700,
                                  color: (sc.benchmark_score || 0) >= 70 ? 'var(--green, #16a34a)' : (sc.benchmark_score || 0) >= 40 ? '#c2410c' : 'var(--red, #dc2626)' }}>
                       {sc.benchmark_score != null ? `${sc.benchmark_score}%` : '—'}

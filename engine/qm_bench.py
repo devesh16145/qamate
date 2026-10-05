@@ -22,9 +22,13 @@ Scorecards land in results/_agent_bench/<timestamp>-fast/ (listed by the Benchma
     venv/bin/python engine/qm_bench.py --provider mimo                 # all ten
     venv/bin/python engine/qm_bench.py --provider mimo --only crm      # an app, or task ids
     venv/bin/python engine/qm_bench.py --provider mimo --warm          # shared app memory
+    venv/bin/python engine/qm_bench.py --provider openrouter --model z-ai/glm-5.3-flash   # try another planner
+--model swaps the model of the chosen profile for this run only (settings are not changed),
+so planner models can be compared on the same ten workflows with one key.
 Keys come from the environment (the app passes the ones stored in the keychain).
 """
 import argparse
+import copy
 import datetime
 import json
 import os
@@ -216,9 +220,22 @@ def summarize(rows):
             "coverage_audited": False}
 
 
+def with_model(config, provider, model):
+    """(config, profile name, model id) for the run. `model` replaces the profile's model in
+    a copy of the configuration; the user's settings stay as they are."""
+    from model_profiles import resolve_profile
+    name, cfg = resolve_profile(config, provider or None, "planner")
+    if not model:
+        return config, name, cfg.get("model")
+    config = copy.deepcopy(config)
+    config["llm"]["providers"][name]["model"] = model
+    return config, name, model
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Benchmark the fast engine's test authoring.")
     ap.add_argument("--provider", help="planner profile from config.json (default: the configured default)")
+    ap.add_argument("--model", help="use this model id with that profile's endpoint and key, for this run only")
     ap.add_argument("--only", action="append", default=[], help="task ids or apps (crm, saucedemo, dispatch)")
     ap.add_argument("--warm", action="store_true", help="tasks on the same app share the app memory")
     ap.add_argument("--verify-runs", type=int, default=2)
@@ -232,13 +249,18 @@ def main(argv=None):
     from qm_map import PageMap
 
     config = json.load(open(os.path.join(args.ats_root, "config.json"), encoding="utf-8"))
+    try:
+        config, profile, model = with_model(config, args.provider, args.model)
+    except Exception as exc:
+        print(f"Cannot run: {exc}", flush=True)
+        return 2
     tasks = select_tasks(args.only)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir = os.path.join(args.ats_root, "results", "_agent_bench", f"{stamp}-fast")
     root = os.path.join(out_dir, "root")
     os.makedirs(root, exist_ok=True)
     emit = lambda line: print(line, flush=True)
-    emit(f"Fast-engine benchmark: {len(tasks)} task(s), planner {args.provider or 'default'}, "
+    emit(f"Fast-engine benchmark: {len(tasks)} task(s), planner {profile} ({model}), "
          f"{'warm' if args.warm else 'cold'} app memory, {args.verify_runs} independent run(s) each")
     rows, maps, projects = [], {}, {}
     with operations_app() as dispatch_url, sync_playwright() as pw:
@@ -254,12 +276,12 @@ def main(argv=None):
             else:
                 page_map = PageMap()
             emit(f"- {task['id']} ({name})")
-            rows.append(run_task(task, browser=browser, config=config, provider=args.provider, base_url=base_url,
+            rows.append(run_task(task, browser=browser, config=config, provider=profile, base_url=base_url,
                                  root=root, project=project, page_map=page_map, out_dir=out_dir,
                                  verify_runs=args.verify_runs, emit=emit))
             with open(os.path.join(out_dir, "scorecard.json"), "w", encoding="utf-8") as f:   # partial results survive a stop
                 json.dump({"generated": datetime.datetime.now().isoformat(timespec="seconds"),
-                           "provider": args.provider or "default", "engine": "fast",
+                           "provider": profile, "model": model, "engine": "fast",
                            "env": "warm" if args.warm else "cold", "scorecard": summarize(rows),
                            "tasks": rows}, f, indent=2, default=str)
         browser.close()

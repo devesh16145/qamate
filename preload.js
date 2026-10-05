@@ -9,10 +9,11 @@ contextBridge.exposeInMainWorld('ats', {
   onLog: (callback) => ipcRenderer.on('test-log', (_, data) => callback(data)),
   getHistory: () => ipcRenderer.invoke('get-run-history'),
   // ── Authoring benchmark (engine/agent_bench.py) ──
-  benchRun: (opts) => ipcRenderer.invoke('bench-run', opts),        // {provider, only?, engine?: 'fast'|'classic', warm?}
+  benchRun: (opts) => ipcRenderer.invoke('bench-run', opts),        // {provider, only?, engine?: 'fast'|'classic', warm?, model?} | {kind: 'chooser', models?}
   benchStop: () => ipcRenderer.invoke('bench-stop'),
   benchStatus: () => ipcRenderer.invoke('bench-status'),
   benchResults: () => ipcRenderer.invoke('bench-results'),          // [{id, provider, scorecard, tasks, folder}]
+  chooserResults: () => ipcRenderer.invoke('chooser-results'),      // [{id, cases, models: [{model, correct_pct, wrong_pick_pct, ...}], folder}]
   onBenchEvent: (cb) => {
     const h = (_e, data) => cb(data);
     ipcRenderer.on('bench-event', h);

@@ -24,11 +24,13 @@ PLAN = {"test": {"flow": "transfers", "title": "Create transfer QA Dispatch Ceda
 
 
 class Model(http.server.BaseHTTPRequestHandler):
+    asked = []                      # the model id of every request
+
     def log_message(self, *a):
         pass
 
     def do_POST(self):
-        self.rfile.read(int(self.headers["Content-Length"]))
+        self.asked.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))).get("model"))
         text = json.dumps(PLAN)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -47,13 +49,18 @@ def test_bench_authors_verifies_independently_and_scores(tmp_path, monkeypatch, 
         "fake": {"preset": "custom", "model": "fake", "api_key_env": "QM_TEST_KEY",
                  "base_url": f"http://127.0.0.1:{srv.server_port}/v1"}}}}), encoding="utf-8")
     try:
-        assert qm_bench.main(["--only", "ops-transfer", "--verify-runs", "1", "--ats-root", str(tmp_path)]) == 0
+        assert qm_bench.main(["--only", "ops-transfer", "--verify-runs", "1", "--ats-root", str(tmp_path),
+                              "--model", "other/planner"]) == 0
     finally:
         srv.shutdown()
+    # --model reached the provider and the scorecard; the saved settings are untouched.
+    assert Model.asked and set(Model.asked) == {"other/planner"}
+    assert json.loads((tmp_path / "config.json").read_text())["llm"]["providers"]["fake"]["model"] == "fake"
     card_path = next((tmp_path / "results" / "_agent_bench").glob("*-fast/scorecard.json"))
     card = json.loads(card_path.read_text())
     row = card["tasks"][0]
     assert card["engine"] == "fast" and row["task_id"] == "ops-transfer"
+    assert card["provider"] == "fake" and card["model"] == "other/planner"
     assert row["verdict"] == "reliable" and row["independent"]["runs"] == [True], row
     assert row["tokens"]["planner_input"] == 1200 and row["run_attempts"] == 1 and row["replans"] == 0
     assert card["scorecard"]["independent_reliable"] == 1 and card["scorecard"]["coverage_audited"] is False

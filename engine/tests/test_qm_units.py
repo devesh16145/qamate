@@ -627,3 +627,85 @@ def test_page_summary_keeps_controls_ahead_of_navigation_links():
     assert 'textbox "Email"' in summary["elements"] and 'button "Submit"' in summary["elements"]
     assert sum(line.startswith('link "Nav') for line in summary["elements"]) == 15
     assert summary["elements"][-1].endswith("more links not shown)")
+
+
+# ── the chooser: asked twice in opposite orders ──────────────────────────────
+import qm_decide
+
+
+def _cands(*labels):
+    return [SimpleNamespace(element=SimpleNamespace(summary=lambda text=text: text)) for text in labels]
+
+
+def _chooser(monkeypatch, answer):
+    """A fake decision model: `answer(options)` gets {id: text} in presentation order."""
+    asked = []
+    monkeypatch.setattr(qm_decide, "decision_profile", lambda config: ("dec", {"protocol": "typesafe", "model": "jev-test"}))
+
+    def fake_ask(config, name, cfg, step_text, options, page):
+        asked.append(list(options.items()))
+        choice = answer(options)
+        return {"choice": choice if choice in options else None, "answered": choice, "confidence": 0.9, "usage": {}, "ms": 5}
+    monkeypatch.setattr(qm_decide, "ask", fake_ask)
+    return asked
+
+
+STEP = {"op": "select", "target": "Sort"}
+OPTIONS = ('combobox "Sort products"', 'button "Open Menu"', 'generic "Name (A to Z)"')
+
+
+def test_the_chooser_is_asked_in_two_opposite_orders_and_must_agree(monkeypatch):
+    asked = _chooser(monkeypatch, lambda options: next(k for k, text in options.items() if "Sort products" in text))
+    result = qm_decide.choose({}, STEP, _cands(*OPTIONS))
+    assert result["index"] == 0 and result["agreed"] and result["by"] == "jev" and result["confidence"] == 0.9
+    first, second = sorted(asked, key=lambda order: order[0][0] == "none")
+    assert [text for _, text in first][:3] == list(OPTIONS) and first[-1][0] == "none"
+    assert second[0][0] == "none" and [text for _, text in second][1:] == list(reversed(OPTIONS))
+    assert {key for key, _ in first} == {key for key, _ in second}       # the same ids both times
+
+
+def test_a_model_that_just_takes_the_first_option_decides_nothing(monkeypatch):
+    _chooser(monkeypatch, lambda options: next(iter(options)))            # position bias, the documented failure
+    result = qm_decide.choose({}, STEP, _cands(*OPTIONS))
+    assert result["index"] is None and result.get("split") and not result["agreed"]
+
+
+def test_the_chooser_can_say_none_and_bad_answers_are_not_guessed_at(monkeypatch):
+    _chooser(monkeypatch, lambda options: "none")
+    result = qm_decide.choose({}, {"op": "click", "target": "Teleport"}, _cands(*OPTIONS))
+    assert result["index"] is None and result["agreed"] and not result.get("split")
+    _chooser(monkeypatch, lambda options: "the second one")
+    assert "not an option" in qm_decide.choose({}, STEP, _cands(*OPTIONS))["error"]
+
+
+def test_no_decision_model_means_the_planner_is_asked_instead():
+    assert qm_decide.choose({"llm": {"providers": {}}}, STEP, _cands(*OPTIONS)) == {"index": None, "confidence": None, "by": None}
+
+
+def test_chooser_comparison_scores_models_and_reports_unreachable_ones(monkeypatch, tmp_path, capsys):
+    import qm_chooser_eval
+    (tmp_path / "config.json").write_text(json.dumps({"llm": {"schema": 2, "providers": {}}}))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+    cases = json.load(open(qm_chooser_eval.CASES, encoding="utf-8"))["cases"]
+    gold = {qm_decide.describe(c["step"]) + "|" + "|".join(sorted(c["options"])): c for c in cases}
+
+    def fake_ask(config, name, cfg, step_text, options, page):
+        if cfg["model"] == "missing/model":
+            raise qm_decide.LLMError("HTTP 404: no such model")
+        texts = sorted(t for k, t in options.items() if k != "none")
+        case = gold[step_text + "|" + "|".join(texts)]
+        if cfg["model"] == "biased/first":                      # takes whatever element is listed first
+            choice = next(k for k in options if k != "none")
+        else:                                                   # a perfect model
+            choice = "none" if case["gold"] is None else next(k for k, t in options.items() if t == case["options"][case["gold"]])
+        return {"choice": choice, "answered": choice, "confidence": None, "usage": {}, "ms": 7}
+    monkeypatch.setattr(qm_decide, "ask", fake_ask)
+    assert qm_chooser_eval.main(["--ats-root", str(tmp_path), "chat:perfect/model", "chat:biased/first",
+                                 "decisions:missing/model"]) == 0
+    card = json.load(open(next((tmp_path / "results" / "_chooser_eval").glob("*/scorecard.json"))))
+    perfect, biased, missing = card["models"]
+    assert perfect["correct"] == len(cases) and perfect["wrong_pick"] == 0
+    # Position bias never agrees with itself across the two orders: no wrong picks, nothing decided.
+    assert biased["wrong_pick"] == 0 and biased["not_sure"] == len(cases) and biased["first_option_pct"] == 100.0
+    assert "404" in missing["unavailable"]
+    assert "Fewest wrong picks, then most correct: chat:perfect/model" in capsys.readouterr().out
