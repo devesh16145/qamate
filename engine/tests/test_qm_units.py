@@ -709,3 +709,63 @@ def test_chooser_comparison_scores_models_and_reports_unreachable_ones(monkeypat
     assert biased["wrong_pick"] == 0 and biased["not_sure"] == len(cases) and biased["first_option_pct"] == 100.0
     assert "404" in missing["unavailable"]
     assert "Fewest wrong picks, then most correct: chat:perfect/model" in capsys.readouterr().out
+
+
+def test_download_names_keep_only_what_stays_the_same():
+    from qm_runtime import download_matches, download_pattern
+    assert download_pattern("orders-2026-10-05.csv") == "orders-*.csv"
+    assert download_pattern("report_20261005_153000.pdf") == "report_*.pdf"
+    assert download_pattern("Report (3).pdf") == "Report (*).pdf"
+    assert download_pattern("export.csv") == "export.csv" and download_pattern("README") == "README"
+    assert download_matches("orders-2026-11-30.csv", "orders-*.csv")
+    assert not download_matches("invoices-2026-11-30.csv", "orders-*.csv")
+    assert not download_matches("orders-2026-11-30.csv.exe", "orders-*.csv")
+
+
+def test_drag_right_click_and_download_render_as_flow_calls():
+    a, b = 'page.get_by_text("Fix login")', 'page.get_by_role("region", name="Done")'
+    assert render({"op": "drag", "target": a, "to": b, "name": "Move it"}) == f'flow.drag({a}, {b}, "Move it")'
+    assert render({"op": "click", "target": a, "name": "File", "button": "right"}) == f'flow.click({a}, "File", button="right")'
+    assert render({"op": "click", "target": a, "name": "Export", "download": "orders-*.csv"}) == \
+        f'flow.click({a}, "Export", download="orders-*.csv")'
+    # A value typed earlier is followed into both ends of a drag.
+    step = parameterize({"op": "drag", "target": 'page.get_by_text("QA Card 7731")', "to": b, "name": "x"},
+                        [("card", "QA Card 7731")])
+    assert step["target"] == 'page.get_by_text(tc_data["card"])'
+
+
+def test_other_spellings_of_steps_are_understood():
+    from qm_planner import normalize_step
+    assert normalize_step({"do": "press", "value": "Enter"})["key"] == "Enter"
+    assert normalize_step({"do": "right_click", "target": "File"})["do"] == "rightclick"
+    assert normalize_step({"do": "double_click", "target": "Cell"})["do"] == "dblclick"
+    assert normalize_step({"do": "drag_and_drop", "target": "Card", "destination": "Done"}) == \
+        {"do": "drag", "target": "Card", "to": "Done"}
+
+
+def test_plain_content_is_a_last_resort_and_never_a_container():
+    from qm_ground import plain_pick
+    snapshot = '''- main [ref=e1]:
+  - text: Choose document
+  - heading "Roles" [level=2] [ref=e2]
+  - button "Roles" [ref=e9]
+  - table [ref=e3]:
+    - rowgroup [ref=e4]:
+      - row [ref=e5]:
+        - cell "Smith" [ref=e6]
+        - cell "Viewer" [ref=e7]
+      - row [ref=e10]:
+        - cell "Bach" [ref=e11]
+        - cell "Viewer" [ref=e12]'''
+    obs = SimpleNamespace(elements=parse(snapshot)[0])
+    step = {"op": "dblclick", "target": "Viewer", "within": "Bach"}
+    candidates = rank(step, obs)
+    assert decide(candidates, step) is None                       # no control is named this...
+    assert plain_pick(candidates, step).element.ref == "e12"      # ...but one cell is, in Bach's row
+    assert plain_pick(rank({"op": "click", "target": "Viewer"}, obs), {"op": "click", "target": "Viewer"}) is None   # two of them
+    # A real control wins without plain content being considered at all.
+    roles = {"op": "click", "target": "Roles"}
+    assert decide(rank(roles, obs), roles).element.ref == "e9"
+    # Text that sits directly in a container is not "the container": nothing to click here.
+    loose = {"op": "click", "target": "Choose document"}
+    assert plain_pick(rank(loose, obs), loose) is None

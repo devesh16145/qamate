@@ -8,9 +8,12 @@ A step ("intent") looks like
 For each intent the executor observes the page (Playwright AI snapshot, completed from
 the page for controls it leaves nameless), grounds the target -- exact name or ask, see
 qm_ground -- and acts through qm_runtime.Flow. When the target is not among the visible
-elements it scrolls lazily loaded lists and opens the menu that hides it before giving
-up. When nothing fits it stops that intent with a precise reason and the closest
-candidates, so the planner (or a person) can adjust -- it never wanders.
+elements it scrolls lazily loaded lists and opens what hides it (a menu, a collapsed
+section, another tab of the same panel); then it looks at what the accessibility tree
+leaves out -- a field hidden behind a styled label, plain text that reacts to a click --
+and accepts that only if the page visibly reacts. When nothing fits it stops that intent
+with a precise reason and the closest candidates, so the planner (or a person) can
+adjust -- it never wanders.
 
 Every executed action is recorded as a step whose replay is identical (qm_steps), with
 what was seen live as the replay's conditions: where a click led, the dialog it raised
@@ -22,16 +25,17 @@ the test files.
 Checks are audited as they are recorded: one that was already true before anything was
 done on the page cannot fail, and is reported as such.
 """
+import os
 import re
 import time
 from urllib.parse import urljoin
 
 from qm_decide import choose
-from qm_ground import _norm, decide, rank, reading_text, shown_text, words
+from qm_ground import _norm, decide, plain_pick, rank, reading_text, shown_text, words
 from qm_map import route_of
-from qm_observe import observe
-from qm_runtime import _SECRET, Flow, generic_url, relative_url
-from qm_selectors import anchored_locator, locator_for, scoped_locator
+from qm_observe import Element, observe
+from qm_runtime import _SECRET, Flow, download_pattern, generic_url, relative_url
+from qm_selectors import anchored_locator, label_locator, locator_for, locator_for_ref, scoped_locator, text_locator
 from qm_steps import execute, parameterize, usable_literals
 
 # Irreversible or outward-facing actions: confirmed before they run.
@@ -40,8 +44,12 @@ DESTRUCTIVE = re.compile(
     r"deactivate|revoke|unsubscribe|terminate|close account|cancel (?:my )?(?:account|subscription|order))\b",
     re.I)
 SECRET_FIELD = re.compile(r"\b(pass(?:word|code|phrase)?|secret|api[ _-]?key|access[ _-]?token|pin|otp|cvv|cvc)\b", re.I)
-ELEMENT_OPS = {"click", "dblclick", "hover", "fill", "select", "check", "upload",
+ELEMENT_OPS = {"click", "dblclick", "rightclick", "hover", "fill", "select", "check", "upload",
                "expect_visible", "expect_hidden", "expect_text", "expect_value", "expect_checked"}
+# What a `select` may land on when the choice is not a dropdown: a radio button, a segment
+# of a segmented control, a tab.
+CHOICE_ROLES = {"radio", "menuitemradio", "option", "tab", "button", "switch"}
+MAX_REVEAL_TABS = 6          # other tabs of a panel that are opened to look for a target
 DIALOG_OPS = {"click", "dblclick", "press", "select", "check"}
 PART_ROLES = {"spinbutton", "textbox", "searchbox"}     # what a segmented field is made of
 SCOPE_ROLES = {"row", "listitem", "article", "group", "region", "dialog", "alertdialog", "form", "link"}
@@ -50,29 +58,62 @@ MAX_CHECK_WAIT_S = 20        # how long a check may keep waiting while the page 
 SCROLL_SEARCH_S = 8          # how long to scroll lazily loaded lists looking for a target
 _VOLATILE = re.compile(r"\s\[(?:ref=[^\]]*|active|cursor=pointer)\]")
 
-# A target that exists in the page but is not shown (a menu that opens on hover or click):
-# the visible control to hover or click, or null.
+# A target that exists in the page but is not shown: the visible controls that reveal it,
+# most certain first -- the <summary> of its collapsed section, the control wired to its
+# panel (aria-controls / aria-labelledby / data-target), the other tabs of its tab set, and
+# last the trigger of a small wrapper such as a dropdown (a button followed by its menu).
 HIDDEN_TARGET_JS = r"""
 (target) => {
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const want = norm(target);
-  if (!want) return null;
-  const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-  const nodes = document.querySelectorAll('a, button, [role=menuitem], [role=option], [role=tab], [role=link], [role=button], li, label, summary');
+  if (!want) return [];
+  // checkVisibility also knows about collapsed <details> and content-visibility, where an
+  // element still reports a box.
+  const shown = (el) => el.checkVisibility ? el.checkVisibility({ visibilityProperty: true })
+                                           : el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const label = (el) => (el.getAttribute('aria-label') || el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const out = [], seen = new Set();
+  const add = (el, how) => {
+    if (!el || !shown(el)) return;
+    const text = label(el);
+    if (!text || text.length > 60 || seen.has(text)) return;
+    seen.add(text);
+    out.push({ trigger: text, how, role: el.getAttribute('role') || '' });
+  };
+  const nodes = document.querySelectorAll('a, button, input, select, textarea, [role=menuitem], [role=option], [role=tab], [role=link], [role=button], li, label, summary, legend, th');
   for (const el of nodes) {
-    if (shown(el) || norm(el.innerText || el.textContent) !== want) continue;
-    let box = el.parentElement;
-    while (box && !shown(box)) box = box.parentElement;
-    if (!box || box === document.body || box === document.documentElement) continue;
+    if (out.length >= 8) break;
+    if (shown(el)) continue;
+    const named = [el.innerText || el.textContent, el.getAttribute('aria-label'), el.getAttribute('placeholder')].some((t) => norm(t) === want);
+    if (!named) continue;
+    let hidden = el;                                   // the outermost hidden box around it
+    while (hidden.parentElement && !shown(hidden.parentElement)) hidden = hidden.parentElement;
+    const box = hidden.parentElement;
+    if (!box || box === document.documentElement) continue;
+    const closed = el.closest('details:not([open])');
+    if (closed) add(closed.querySelector('summary'), 'click');
+    for (let node = el; node && node !== box; node = node.parentElement) {
+      if (node.id) {
+        const id = CSS.escape(node.id);
+        for (const c of document.querySelectorAll(`[aria-controls~="${id}"], [data-bs-target="#${id}"], [data-target="#${id}"], a[href="#${id}"]`)) add(c, 'click');
+      }
+      for (const id of (node.getAttribute('aria-labelledby') || '').split(/\s+/)) if (id) add(document.getElementById(id), 'click');
+    }
+    if (hidden.matches('[role=tabpanel], .tab-pane')) {
+      let scope = box;
+      for (let up = 0; up < 3 && scope && !scope.querySelector('[role=tab]'); up++) scope = scope.parentElement;
+      const tabs = scope ? [...scope.querySelectorAll('[role=tab]')].filter((t) => shown(t) && t.getAttribute('aria-selected') !== 'true') : [];
+      if (tabs.length <= 6) tabs.forEach((t) => add(t, 'click'));
+    }
+    if (box === document.body) continue;
     const controls = [...box.querySelectorAll('button, a, summary, [role=button], [aria-haspopup], [aria-expanded]')]
       .filter((c) => shown(c) && !c.contains(el));
-    const trigger = controls[0] || box;
-    const label = (trigger.getAttribute('aria-label') || trigger.innerText || trigger.textContent || '').replace(/\s+/g, ' ').trim();
-    if (!label || label.length > 60) continue;
-    return { trigger: label, expandable: trigger.tagName === 'SUMMARY' || trigger.hasAttribute('aria-haspopup') ||
-                                         trigger.getAttribute('aria-expanded') === 'false' };
+    const opener = controls.find((c) => c.tagName === 'SUMMARY' || c.hasAttribute('aria-haspopup') || c.getAttribute('aria-expanded') === 'false');
+    if (opener) add(opener, 'click');
+    else if (controls.length && controls.length <= 3) add(controls[0], 'hover');     // a small wrapper: its trigger, hovered first
+    else if (!controls.length) add(box, 'hover');
   }
-  return null;
+  return out;
 }
 """
 
@@ -105,6 +146,7 @@ class Explorer:
         self._dialog_choice = None
         self._destructive_ok = False
         self._blocked_dialog = None
+        self._reveal_note = None   # why opening things did not settle where a target is
 
     @property
     def page(self):
@@ -151,6 +193,8 @@ class Explorer:
                                         "name": intent.get("name") or f"Press {intent['key']}"})
             elif op in ("expect_url", "expect_page_text"):
                 outcome = self._check_page(intent, live)
+            elif op == "drag":
+                outcome = self._drag_intent(intent, live)
             elif op in ELEMENT_OPS or op == "press":
                 outcome = self._element_intent(intent, live)
             else:
@@ -241,12 +285,15 @@ class Explorer:
         return self._record(step, check=True)
 
     # ── element steps ───────────────────────────────────────────────────────
-    def _element_intent(self, intent, live, reveal=True):
-        op = intent["do"]
+    def _element_intent(self, intent, live, reveal=True, ask=True):
+        do = intent["do"]
+        op = "click" if do == "rightclick" else do
         target = live.get("target") or ""
         ground = {"op": op, "target": target, "within": live.get("within"),
                   "role": intent.get("role"), "name_hint": live.get("name"), "value": live.get("value")}
-        obs, candidates = self._look(ground)
+        # For a `select`, a radio button or segment named like the value ends the wait for a dropdown.
+        obs, candidates = self._look(ground, also=(lambda seen: self._choice_in_group(intent, live, seen) is not None)
+                                     if op == "select" else None)
         pick, confidence = decide(candidates, ground), None
         composite = False
         if pick is None and op == "fill":
@@ -257,24 +304,33 @@ class Explorer:
             # the group itself, not a section that happens to contain it: the deepest, a real group first
             pick = max(groups, key=lambda c: (c.element.role in ("group", "radiogroup"), c.element.depth), default=None)
             composite = pick is not None
+        if pick is None and op == "select":
+            choice = self._choice_in_group(intent, live, obs)
+            if choice is not None:
+                return self._element_intent(*choice, reveal=False, ask=False)
+        if reveal:                         # (the clicks that open things run through here too, with reveal=False)
+            self._reveal_note = None
         if pick is None and reveal and not any(c.exact for c in candidates) and self._reveal(ground):
             obs, candidates = self._look(ground)
             pick = decide(candidates, ground)
         how = "match" if pick is None or pick.match == "exact" else pick.match   # decorated | synonym
-        if pick is None and candidates:
+        found = self._beyond_the_tree(op, ground, candidates, obs) if pick is None else None
+        if pick is None and found is None and ask and candidates:
             choice = choose(self.config, ground, candidates[:8], page_title=obs.title,
                             page_path=relative_url(obs.url), emit=self.emit)
             if choice.get("index") is not None and (choice.get("confidence") is None or choice["confidence"] >= 0.6):
                 pick, how, confidence = candidates[choice["index"]], choice["by"], choice.get("confidence")
             elif choice.get("error"):
                 self.emit({"event": "qm_decision_error", "error": choice["error"]})
-        if pick is None:
+        if pick is None and found is None:
             real = [c for c in candidates if c.exact]
-            return {"ok": False, "reason": "ambiguous" if real else "not_found",
-                    "detail": (f"{len(real)} elements are named {target!r}; say which one with \"within\""
-                               if real else f"nothing on the page is named {target!r}"),
+            detail = (f"{len(real)} elements are named {target!r}; say which one with \"within\""
+                      if real else f"nothing on the page is named {target!r}")
+            if self._reveal_note:
+                detail += "; " + self._reveal_note
+            return {"ok": False, "reason": "ambiguous" if real else "not_found", "detail": detail,
                     "candidates": [c.element.summary() for c in candidates[:5]]}
-        element = pick.element
+        element = found["element"] if found else pick.element
         within = intent.get("within")
         raw_target = intent.get("target") or ""
         label = intent.get("label") or (f"{raw_target} ({within})" if raw_target and within else raw_target) or element.label
@@ -286,20 +342,17 @@ class Explorer:
                         "detail": f"'{element.label}' looks irreversible; confirm before running it",
                         "element": element.summary()}
             self._destructive_ok = True
-        loc = locator_for(self.page, element)
-        if not loc["unique"] and pick.group and pick.group != element.ref:
-            # Text inside a clickable card/button that can't be addressed on its own: use the
-            # card/button itself (it is what receives the click anyway).
-            container = obs.by_ref(pick.group)
-            if container is not None:
-                loc = locator_for(self.page, container)
-        if loc["positional"] or not loc["unique"]:
-            # A repeated control: find its item by what the item says, not by its position.
-            anchors = [live.get("within")] + [part for part in (element.context or "").split(" · ")]
-            loc = scoped_locator(self.page, element, anchors) or loc
+        if found:
+            loc, how = found["loc"], found["how"]
+        else:
+            loc = self._locator(pick, obs, live.get("within"))
         if not loc["unique"]:
             return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {element.summary()}"}
         step = {"op": "type" if composite else op, "target": loc["python"], "name": label}
+        if do == "rightclick":
+            step["button"] = "right"
+        if op == "click" and intent.get("download"):
+            step["download"] = True             # the step waits for the file; its name is filled in once seen
         data = None
         if op in ("fill", "select", "expect_value", "expect_text"):
             step["value"] = live.get("value", "")
@@ -313,6 +366,11 @@ class Explorer:
                 if "{secret:" in stored:
                     step["secret"] = True
                 data = (key, stored)
+        if op == "upload" and live.get("value"):
+            path = os.path.abspath(os.path.expanduser(str(live["value"])))
+            if not os.path.isfile(path):
+                return {"ok": False, "reason": "action_failed", "detail": f"there is no file at {path!r} to upload"}
+            step["value"] = path
         if op == "expect_text" and intent.get("present") is False:
             step["present"] = False
         if op in ("check", "expect_checked"):
@@ -336,6 +394,13 @@ class Explorer:
                 return self._element_intent({**intent, "dialog": "accept", "safe": True}, live, reveal=False)
             return {"ok": False, "reason": "needs_confirmation",
                     "detail": f"the app asks {message!r}; confirm before answering yes", "element": element.summary()}
+        if outcome["ok"] and how == "text" and op in ("click", "dblclick") and not self._took_effect(step, before):
+            # Plain text was clicked on the strength of its wording alone. Nothing happened,
+            # so it is not a control: the step is not part of the test.
+            self.steps.pop()
+            return {"ok": False, "reason": "no_effect",
+                    "detail": f"{target!r} is plain text on this page and clicking it changed nothing; it is not a control",
+                    "candidates": [c.element.summary() for c in candidates[:5]]}
         if outcome["ok"] and self.page_map is not None and self.page.url != before:
             self.page_map.went(before, element.label, self.page.url)   # the real label, not the planner's wording
         if outcome["ok"] and loc["positional"]:
@@ -344,17 +409,146 @@ class Explorer:
                         "positional": loc["positional"]})
         return outcome
 
-    def _look(self, ground, patience_ms=1500):
+    def _locator(self, pick, obs, within):
+        """The stable locator for a grounded element: its own; else the card or button it
+        stands for; else its item found by what the item says rather than by position."""
+        element = pick.element
+        loc = locator_for(self.page, element)
+        if not loc["unique"] and pick.group and pick.group != element.ref:
+            # Text inside a clickable card/button that can't be addressed on its own: use the
+            # card/button itself (it is what receives the click anyway).
+            container = obs.by_ref(pick.group)
+            if container is not None:
+                loc = locator_for(self.page, container)
+        if loc["positional"] or not loc["unique"]:
+            # A repeated control: find its item by what the item says, not by its position.
+            anchors = [within] + [part for part in (element.context or "").split(" · ")]
+            loc = scoped_locator(self.page, element, anchors) or loc
+        return loc
+
+    def _choice_in_group(self, intent, live, obs):
+        """`select` where the choice is not a dropdown -- radio buttons, a segmented control,
+        a set of tabs: the value names the control and the target says which group it is in.
+        Returns the (intent, live) of that click or tick, or None when no control is named
+        exactly like the value inside something named like the target."""
+        value, group = str(live.get("value") or ""), live.get("target") or ""
+        if not value or not group:
+            return None
+        for op in ("check", "click"):
+            ground = {"op": op, "target": value, "within": group}
+            candidates = [c for c in rank(ground, obs) if c.element.role in CHOICE_ROLES
+                          # the options of a native <select> are chosen through it, never clicked
+                          and not (c.element.role == "option" and getattr(c.element.parent, "role", "") == "combobox")]
+            pick = decide(candidates, ground)
+            if pick is not None and pick.match != "synonym":
+                name = intent.get("label") or f"{intent.get('target')}: {intent.get('value')}"
+                return ({"do": op, "target": intent.get("value"), "within": intent.get("target"), "label": name},
+                        {"do": op, "target": value, "within": group})
+        return None
+
+    def _beyond_the_tree(self, op, ground, candidates, obs):
+        """No control in the accessibility tree is named like the target. Before asking
+        anyone, look at what the tree leaves out or plays down:
+          * the real checkbox, radio button or file field an app hides behind a styled label;
+          * the page's only file field, whatever the upload control is called;
+          * plain content named exactly like the target -- a table cell, a list entry, a
+            caption, a `<summary>` -- which apps do make react to the mouse. (A click on it is
+            kept only if the page visibly reacts; see _element_intent.)
+        Returns {"element", "loc", "how"} or None."""
+        target = ground["target"]
+        if not target:
+            return None
+        kinds = {"check": ("checkbox", "radio"), "expect_checked": ("checkbox", "radio"), "upload": ("file",)}.get(op)
+        if kinds and not ground.get("within"):
+            loc = label_locator(self.page, target, kinds)
+            if loc:
+                role = "button" if loc["kind"] == "file" else loc["kind"]
+                return {"element": Element(ref="", role=role, name=target, selector=loc["selector"]),
+                        "loc": loc, "how": "label"}
+        if op in ("click", "dblclick", "upload"):
+            pick = plain_pick(candidates, ground)
+            if pick is not None:
+                loc = self._locator(pick, obs, ground.get("within"))
+                if loc["unique"]:
+                    return {"element": pick.element, "loc": loc, "how": "text"}
+            elif not ground.get("within"):
+                loc = text_locator(self.page, target)
+                if loc:
+                    return {"element": Element(ref="", role="text", name=target, selector=loc["selector"]),
+                            "loc": loc, "how": "text"}
+        if op == "upload":
+            try:
+                only = self.page.locator('input[type="file"]').count() == 1
+            except Exception:
+                only = False
+            if only:
+                loc = locator_for_ref(self.page, "", via='input[type="file"]')
+                if loc["unique"]:
+                    return {"element": Element(ref="", role="button", name=target, selector=loc["selector"]),
+                            "loc": loc, "how": "only file field"}
+        return None
+
+    def _took_effect(self, step, before_url):
+        return bool(step.get("expect_url") or step.get("dialog") or step.get("new_tab") or step.get("download")
+                    or self.page.url != before_url or self.flow.reacted())
+
+    # ── drag and drop ───────────────────────────────────────────────────────
+    def _drag_intent(self, intent, live):
+        """{"do": "drag", "target": what, "to": where}. Both ends are found by name like any
+        target; the place to drop may be plain content (a column, a list, its heading). When a
+        drop on a heading changes nothing, the box around the heading is tried: the heading
+        names the column but is often not part of its drop area."""
+        obs = observe(self.page)
+        ends = []
+        for key in ("target", "to"):
+            text = live.get(key) or ""
+            ground = {"op": "drag", "target": text, "within": live.get("within") if key == "target" else None}
+            candidates = rank(ground, obs)
+            if key == "to":
+                # A column named by its region and again by the heading inside it: the outer
+                # one is the place to drop.
+                named = [c for c in candidates if c.match in ("exact", "decorated")]
+                inner = {id(c) for c in named for o in named if o is not c and _inside(c.element, o.element)}
+                candidates = [c for c in candidates if id(c) not in inner]
+            pick = decide(candidates, ground)
+            loc = None
+            if pick is not None:
+                loc = self._locator(pick, obs, ground["within"])
+            elif text and not any(c.exact for c in candidates):
+                loc = text_locator(self.page, text)
+            if loc is None or not loc["unique"]:
+                real = [c for c in candidates if c.exact]
+                what = "what to drag" if key == "target" else "where to drop it"
+                return {"ok": False, "reason": "ambiguous" if len(real) > 1 else "not_found",
+                        "detail": (f"{len(real)} things are named {text!r} ({what}); say which one"
+                                   if len(real) > 1 else f"nothing on the page is named {text!r} ({what})"),
+                        "candidates": [c.element.summary() for c in candidates[:5]]}
+            ends.append(loc)
+        name = intent.get("label") or f"Drag {intent.get('target')} to {intent.get('to')}"
+        state = self._state(obs)
+        for up in range(3):
+            step = {"op": "drag", "target": ends[0]["python"], "name": name,
+                    "to": ends[1]["python"] + (f'.locator("xpath={"/".join([".."] * up)}")' if up else "")}
+            outcome = self._record(step, state=state, obs=obs)
+            if not outcome["ok"] or self.flow.reacted():
+                return outcome
+            self.steps.pop()                # dropped there, nothing moved
+        return {"ok": False, "reason": "no_effect",
+                "detail": f"dragging {live.get('target')!r} to {live.get('to')!r} changed nothing on the page"}
+
+    def _look(self, ground, patience_ms=1500, also=None):
         """Observe and rank. While nothing fits well AND the page is still changing (a route
         rendering, a list loading), look again briefly -- that is far cheaper than asking the
-        planner. A page that has gone quiet without the target fails at once."""
+        planner. A page that has gone quiet without the target fails at once. `also(obs)`
+        says the page already offers another sure way to do the step."""
         deadline = time.monotonic() + patience_ms / 1000
         while True:
             obs = observe(self.page)
             if self.page_map is not None:
                 self.page_map.see(obs)
             candidates = rank(ground, obs)
-            if (candidates and candidates[0].exact) or time.monotonic() >= deadline or not self._settling():
+            if (candidates and candidates[0].exact) or time.monotonic() >= deadline or not self._settling() \
+                    or (also is not None and also(obs)):
                 return obs, candidates
             self.page.wait_for_timeout(200)
 
@@ -368,8 +562,10 @@ class Explorer:
 
     def _reveal(self, ground):
         """The target is not among the visible elements. Before giving up: scroll lazily
-        loaded lists until it appears, then look for it hidden in the page -- a menu that
-        opens on hover or click -- and open that (recorded as its own step)."""
+        loaded lists until it appears; then, if it is in the page but hidden, open what
+        hides it -- a collapsed section, the tab or button wired to its panel, a menu shown
+        on hover or click; and if it is not in the page at all, look under the other tabs of
+        the page's tab set. What opened it is recorded as its own step."""
         if ground["op"] == "expect_hidden":
             return False
         deadline = time.monotonic() + SCROLL_SEARCH_S
@@ -380,20 +576,61 @@ class Explorer:
             if candidates and candidates[0].exact:
                 return True
         try:
-            hidden = self.page.evaluate(HIDDEN_TARGET_JS, ground["target"])
+            triggers = self.page.evaluate(HIDDEN_TARGET_JS, ground["target"]) or []
         except Exception:
-            hidden = None
-        if not hidden or DESTRUCTIVE.search(hidden["trigger"]):
+            triggers = []
+        for hidden in triggers[:6]:
+            if DESTRUCTIVE.search(hidden["trigger"]):
+                continue
+            for op in (["click"] if hidden["how"] == "click" else ["hover", "click"]):
+                if self._open(op, hidden["trigger"], hidden.get("role")) is not True:
+                    break
+                if self._shows(ground):
+                    return True
+                self.steps.pop()        # it didn't show the target: not part of the test
+        return self._reveal_under_tabs(ground)
+
+    def _open(self, op, label, role=None):
+        """Hover or click a control that may reveal a target. True when done (recorded as a
+        step); never asks a model."""
+        intent = {"do": op, "target": label, "label": f"Open {label}"}
+        if role in ("tab", "button", "link", "menuitem"):
+            intent["role"] = role
+        opened = self._element_intent(intent, {"do": op, "target": label, "name": label if "role" in intent else None},
+                                      reveal=False, ask=False)
+        return opened["ok"]
+
+    def _shows(self, ground):
+        candidates = rank(ground, observe(self.page))
+        return bool(candidates and candidates[0].exact)
+
+    def _reveal_under_tabs(self, ground):
+        """The target is nowhere in the page, and the page has tabs: apps often build a tab's
+        content only when it is opened. Each other tab is opened in turn; the target must be
+        under exactly one of them (under several, which one is meant is a question for the
+        planner). The tab that was open is restored when the search fails."""
+        obs = observe(self.page)
+        tabs = [e for e in obs.elements if e.role == "tab" and e.label and not e.attrs.get("aria-hidden")]
+        others = [t for t in tabs if not t.attrs.get("selected") and not DESTRUCTIVE.search(t.label)]
+        current = next((t for t in tabs if t.attrs.get("selected")), None)
+        if not others or len(others) > MAX_REVEAL_TABS or len({_norm(t.label) for t in tabs}) != len(tabs):
             return False
-        for op in (["click"] if hidden["expandable"] else ["hover", "click"]):
-            opened = self._element_intent({"do": op, "target": hidden["trigger"], "label": f"Open {hidden['trigger']}"},
-                                          {"do": op, "target": hidden["trigger"]}, reveal=False)
-            if not opened["ok"]:
-                return False
-            candidates = rank(ground, observe(self.page))
-            if candidates and candidates[0].exact:
+        hits = []
+        for tab in others:
+            if self._open("click", tab.label, "tab") is not True:
+                break
+            self.steps.pop()
+            if self._shows(ground):
+                hits.append(tab.label)
+        if len(hits) == 1:
+            if self._open("click", hits[0], "tab") is True and self._shows(ground):
                 return True
-            self.steps.pop()        # it didn't show the target: not part of the test
+            self.steps.pop()
+        elif len(hits) > 1:
+            self._reveal_note = (f"it appears under more than one tab ({', '.join(hits)}): "
+                                 "click the tab you mean first")
+        if current is not None and self._open("click", current.label, "tab") is True:
+            self.steps.pop()            # back where the page was; not part of the test
         return False
 
     def _custom_select(self, intent, live, step, element, how, confidence, loc):
@@ -472,7 +709,7 @@ class Explorer:
         """True when this exact action has already been tried twice on a page that looked
         exactly like this -- i.e. it changes nothing. Repeating an action that does change
         the page (Next page, Add row, a second Save after fixing a field) is fine."""
-        signature = (step["op"], step.get("target"), str(step.get("value")))
+        signature = (step["op"], step.get("target"), str(step.get("value")), step.get("to"))
         last = self._history.get(signature)
         if state is None or last is None or last["state"] != state:
             self._history[signature] = {"state": state, "stale": 0}
@@ -542,7 +779,7 @@ class Explorer:
             self.start_url = before
         if not check:
             self._remember(obs)
-        seen_dialogs = len(self.flow.dialogs)
+        seen_dialogs, seen_downloads = len(self.flow.dialogs), len(self.flow.downloads)
         self.flow.opened.clear()
         saved = self.flow.timeout_ms
         if check:
@@ -577,6 +814,11 @@ class Explorer:
         if self.flow.opened and step["op"] == "click":     # the click opened a new tab: carry on there
             self.flow.follow(self.flow.opened[-1])
             step["new_tab"] = True
+        if step["op"] == "click":
+            failure = self._note_download(step, seen_downloads, quiet=self.page.url == before and not dialogs
+                                          and not step.get("new_tab"))
+            if failure:
+                return {"ok": False, "reason": "action_failed", "detail": failure, "step": step}
         if step["op"] in ("click", "dblclick", "press") and self.page.url != before:
             step["expect_url"] = generic_url(relative_url(self.page.url))   # /companies/:id/show
         outcome = {"ok": True, "step": step, "url": self.page.url}
@@ -589,6 +831,35 @@ class Explorer:
         parameterize(step, self._literals())
         self.steps.append(step)
         return outcome
+
+    def _note_download(self, step, seen, quiet):
+        """A click that saved a file: the test then expects the file too (its name, with the
+        parts that change per run left open). The file may start a moment after the click,
+        so a click the page did not react to at all is given a little time. Returns an error
+        text when the download failed."""
+        if step.get("download") is True:                  # the plan said so: the step itself waited for it
+            name = self.flow.last_download
+        else:
+            if quiet and len(self.flow.downloads) == seen and not self.flow.reacted():
+                deadline = time.monotonic() + 1.5
+                while len(self.flow.downloads) == seen and (time.monotonic() < deadline or
+                                                           (self.flow.working() and time.monotonic() < deadline + 5)):
+                    self.page.wait_for_timeout(100)
+            saved = self.flow.downloads[seen:]
+            if not saved:
+                return None
+            try:
+                failure = saved[-1].failure()
+            except Exception as exc:
+                failure = str(exc)
+            if failure:
+                return f"the file download failed: {failure}"
+            name = saved[-1].suggested_filename
+        if name:
+            step["download"] = download_pattern(name)
+            self.notes.append(f"'{step.get('name')}' downloads a file ({name}); the test expects a file named "
+                              f"{step['download']}")
+        return None
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _url_value(self, url):
@@ -618,6 +889,15 @@ class Explorer:
         if intent.get("destructive") is True:
             return True
         return bool(DESTRUCTIVE.search(f"{element.label} {intent.get('target', '')}"))
+
+
+def _inside(element, other):
+    node = element.parent
+    while node is not None:
+        if node is other:
+            return True
+        node = node.parent
+    return False
 
 
 def _descendants(element, limit=40):

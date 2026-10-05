@@ -19,6 +19,7 @@ planner. A wrong click that replays green is worse than a question, so nothing f
 is ever accepted here. (The earlier weighted scorer accepted substring matches and
 clicked "Ticket 1" for "Ticket 150"; see engine/probes.)
 """
+import dataclasses
 import functools
 import re
 import unicodedata
@@ -202,7 +203,7 @@ _TIERS = {   # roles that can take the action, best fit first
     "fill": [{"textbox", "searchbox"}, {"combobox", "spinbutton"}, {"slider"}],
     "select": [{"combobox", "listbox"}, {"button"}],
     "check": [CHECK_ROLES],
-    "upload": [{"button", "textbox"}],
+    "upload": [{"button", "link"}, {"textbox"}],
     "expect_value": [VALUE_ROLES],
     "expect_checked": [CHECK_ROLES],
     "click": [{"button", "link", "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "option", "treeitem",
@@ -236,9 +237,32 @@ def fit(op, element, container=None):
     for index, roles in enumerate(tiers):
         if actor.role in roles:
             return index
-    if op in ("click", "dblclick") and actor.interactive:
+    if op in ("click", "dblclick", "upload") and actor.interactive:
         return len(tiers)                  # a clickable <div>
     return None
+
+
+# Containers: clicking "the navigation" or "the form" means nothing -- only what is in them.
+STRUCTURAL = {"main", "banner", "contentinfo", "navigation", "form", "search", "region", "complementary",
+              "dialog", "alertdialog", "table", "grid", "treegrid", "rowgroup", "list", "menu", "menubar",
+              "tablist", "tabpanel", "toolbar", "group", "radiogroup", "listbox", "tree", "feed", "document",
+              "application", "iframe"}
+
+
+def plain(element):
+    """A piece of plain content -- a line of text, a table cell, a list entry, a caption --
+    that is not known to be a control. Apps do react to clicks on such things (a cell that
+    opens for editing, a `<summary>`, a file in a list), so one named exactly like the
+    target is worth a try when no control is; see plain_pick."""
+    return not element.interactive and not element.children and element.role not in STRUCTURAL
+
+
+def plain_pick(candidates, step):
+    """The one piece of plain content named exactly as the step says (its `within` honoured
+    like for any control), or None. Never a synonym: only the words on the page."""
+    pool = [dataclasses.replace(c, tier=0) for c in candidates
+            if c.tier is None and c.match in ("exact", "decorated") and plain(c.element)]
+    return decide(pool, step) if pool else None
 
 
 def shown_text(element, limit=40):

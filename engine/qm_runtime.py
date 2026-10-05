@@ -19,6 +19,10 @@ No `networkidle`, no fixed sleeps.
 What real apps need is handled here once, for the live run and the test alike:
   * browser dialogs (alert / confirm / prompt): `dialog="accept"` or `"dismiss"` on the step;
   * links that open a new tab: `new_tab=True` follows it, `close_tab()` returns;
+  * file downloads: `download="orders-*.csv"` on the click waits for the file and checks its name;
+  * uploads through any trigger: the file field itself, or the button, label or drop area
+    that opens the file chooser;
+  * drag and drop with real mouse movement (works for HTML5 and pointer-event libraries);
   * targets in lazily loaded lists: the list is scrolled until the target exists;
   * text checks see the whole page -- every frame and web component -- and text the
     page showed since the last action even if it has gone again (toasts);
@@ -52,10 +56,16 @@ QUIET_PROBE = r"""
   if (window.__qmProbe) return;
   // pending: request id -> start time. Requests open longer than 1.5 s are treated as
   // background (analytics beacons, long-polling, streams) and stop counting as "busy".
-  const probe = window.__qmProbe = { pending: new Map(), seq: 0, last: performance.now(), flash: [] };
+  // `wall` is when the page last reacted to anything, on the wall clock so that it can be
+  // compared across frames (each frame has its own performance.now()).
+  const probe = window.__qmProbe = { pending: new Map(), seq: 0, last: performance.now(), flash: [], wall: Date.now() };
+  // A field that changed (ticked, typed in, chosen) is a reaction too, though it mutates nothing.
+  const acted = () => { probe.wall = Date.now(); };
+  document.addEventListener('change', acted, true);
+  document.addEventListener('input', acted, true);
   probe.busy = () => { const now = performance.now(); let n = 0;
     probe.pending.forEach((t) => { if (now - t < 1500) n++; }); return n; };
-  const bump = () => { probe.last = performance.now(); };
+  const bump = () => { probe.last = performance.now(); probe.wall = Date.now(); };
   // Scripts and stylesheets being loaded (route chunks, preloads) are pending work too.
   const track = (node) => {
     const loads = (node.tagName === 'SCRIPT' && node.src) ||
@@ -88,7 +98,7 @@ QUIET_PROBE = r"""
       if (text && text.length <= 300) { probe.flash.push(text); if (probe.flash.length > 80) probe.flash.shift(); }
     } catch (e) {}
   };
-  const watch = () => new MutationObserver((records) => {
+  const observer = new MutationObserver((records) => {
     const now = performance.now();
     let real = false, noted = 0;
     for (const r of records) {
@@ -100,8 +110,29 @@ QUIET_PROBE = r"""
       }
     }
     if (real) bump();
-  }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  });
+  const everything = { subtree: true, childList: true, attributes: true, characterData: true };
+  const watch = () => observer.observe(document, everything);
   try { watch(); } catch (e) { document.addEventListener('DOMContentLoaded', watch, { once: true }); }
+  // Web components keep their content in shadow roots, which an observer on the document
+  // does not see: each root is observed as it is created, and the ones already there now.
+  const attach = Element.prototype.attachShadow;
+  if (attach) {
+    Element.prototype.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      try { observer.observe(root, everything); bump(); } catch (e) {}
+      return root;
+    };
+  }
+  const adopt = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (!el.shadowRoot) continue;
+      try { observer.observe(el.shadowRoot, everything); } catch (e) {}
+      adopt(el.shadowRoot);
+    }
+  };
+  try { adopt(document); } catch (e) {}
+  document.addEventListener('DOMContentLoaded', () => { try { adopt(document); } catch (e) {} }, { once: true });
   // Work started by a loop is background, not a reaction to the test's action: a timer that
   // re-arms itself (ad refresh, polling, a clock), anything an interval starts. `depth` says
   // how deep in a chain of timers the running code is: 0 outside timers, 1 in a timer set by
@@ -252,6 +283,23 @@ _SECRET = re.compile(r"\{secret:([A-Za-z0-9_.-]+)\}")
 SECRETS_FILE = "secrets.local.json"
 
 
+def download_pattern(name):
+    """'orders-2026-10-05.csv' -> 'orders-*.csv': the parts of a file name that change from
+    run to run (dates, counters, ids -- anything with a digit) become one wildcard."""
+    stem, dot, ext = (name or "").rpartition(".")
+    if not dot or len(ext) > 8:
+        stem, ext = name or "", ""
+    parts = re.split(r"([-_ .()\[\]]+)", stem)
+    pattern = "".join("*" if re.search(r"\d", part) else part for part in parts)
+    pattern = re.sub(r"\*(?:[-_ .]+\*)+", "*", pattern)
+    return pattern + (("." + ext) if ext else "")
+
+
+def download_matches(name, pattern):
+    regex = ".*".join(re.escape(part) for part in str(pattern).split("*"))
+    return re.fullmatch(regex, name or "", re.I) is not None
+
+
 def new_run_token():
     """A short value unique to one run, for data that must not collide with earlier runs."""
     n, digits = int(time.time()) % (36 ** 4), "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -333,6 +381,8 @@ class Flow:
         self.data = {}
         self.last = {}
         self.dialogs = []                      # every dialog seen: {type, message, action}
+        self.downloads = []                    # every download started by a page this Flow drives
+        self.last_download = None              # file name of the download the last step waited for
         self.dialog_decider = None             # authoring only: (type, message) -> "accept" | "dismiss"
         self._dialog_policy = self._dialog_text = None
         self._pages = [page]                   # tab stack; self.page is the top
@@ -354,6 +404,7 @@ class Flow:
         if not getattr(page, "_qm_dialog_hook", False):
             page._qm_dialog_hook = True
             page.on("dialog", lambda dialog: page._qm_flow._on_dialog(dialog))
+            page.on("download", lambda download: page._qm_flow.downloads.append(download))
 
     def _on_dialog(self, dialog):
         policy = self._dialog_policy
@@ -448,25 +499,53 @@ class Flow:
         self.last = {"name": name, "ms": round((time.monotonic() - started) * 1000), "url": self.page.url}
 
     @contextlib.contextmanager
-    def _action(self, name, dialog=None, dialog_text=None, new_tab=False):
+    def _action(self, name, dialog=None, dialog_text=None, new_tab=False, download=None):
         """One acting step: the dialog policy is armed before it, text shown from now on is
-        remembered for later checks, and a tab it opens is followed when `new_tab`."""
+        remembered for later checks, a tab it opens is followed when `new_tab`, and with
+        `download` the file it saves is waited for and its name checked."""
         self._sync_page()
         self._dialog_policy, self._dialog_text = dialog, dialog_text
+        self._acted_at = time.time() * 1000 - 2
         try:
             self.page.evaluate("() => { const p = window.__qmProbe; if (p) { p.flash = []; p.mark = performance.now(); } }")
         except Exception:
             pass
         try:
             with self._step(name):
-                if new_tab:
-                    with self.page.context.expect_page(timeout=self.timeout_ms) as opened:
-                        yield
-                    self.follow(opened.value)
-                else:
+                with contextlib.ExitStack() as waits:
+                    opened = waits.enter_context(self.page.context.expect_page(timeout=self.timeout_ms)) if new_tab else None
+                    saved = (waits.enter_context(self.page.expect_download(timeout=max(self.timeout_ms, 30000)))
+                             if download else None)
                     yield
+                if saved is not None:
+                    self._check_download(saved.value, download)
+                if opened is not None:
+                    self.follow(opened.value)
         finally:
             self._dialog_policy = self._dialog_text = None
+
+    def _check_download(self, download, expected):
+        """The file arrived whole and is named as expected ('*' stands for the parts of a
+        name that change from run to run)."""
+        name = download.suggested_filename
+        failure = download.failure()           # waits until the file has been received
+        if failure:
+            raise StepError(f"the download of {name!r} failed: {failure}")
+        if isinstance(expected, str) and not download_matches(name, expected):
+            raise StepError(f"the downloaded file is named {name!r}, not {expected!r}")
+        self.last_download = name
+
+    def reacted(self):
+        """Did the page react to the last action -- anything in it or in one of its frames
+        changed, a request went out, a field took a new value, or it moved to another document?"""
+        since = getattr(self, "_acted_at", 0)
+        for frame in self.page.frames:
+            try:
+                if frame.evaluate("(since) => { const p = window.__qmProbe; return !p || p.wall >= since; }", since):
+                    return True
+            except Exception:
+                return True           # a frame in the middle of loading: something is happening
+        return False
 
     def settle(self):
         """Wait until the DOM is quiet and no fetch/XHR is pending (capped). Returns
@@ -565,9 +644,11 @@ class Flow:
 
     # ── actions ─────────────────────────────────────────────────────────────
     def click(self, target, name=None, *, expect_url=None, expect_visible=None, expect_hidden=None,
-              dialog=None, dialog_text=None, new_tab=False):
-        with self._action(name or "Click", dialog, dialog_text, new_tab):
-            self._find(target).click(timeout=self.timeout_ms)
+              dialog=None, dialog_text=None, new_tab=False, button=None, download=None):
+        """Click. `button="right"` opens a context menu; `download` (a file name, '*' for the
+        parts that vary, or True) also waits for the file the click saves."""
+        with self._action(name or "Click", dialog, dialog_text, new_tab, download):
+            self._find(target).click(timeout=self.timeout_ms, **({"button": button} if button else {}))
             if not new_tab:
                 self._effects(expect_url, expect_visible, expect_hidden)
             self.settle()
@@ -587,6 +668,34 @@ class Flow:
             self._effects(expect_visible=expect_visible)
             self.settle()
 
+    def drag(self, source, target, name=None):
+        """Drag `source` and drop it on `target`, moving the mouse the way a person does:
+        press, move in small steps, release. HTML5 drag-and-drop and libraries that follow
+        pointer events both need the intermediate movement, not just a press and a release."""
+        with self._action(name or "Drag"):
+            src, dst = self._find(source), self._find(target)
+            src.scroll_into_view_if_needed(timeout=self.timeout_ms)
+            box = src.bounding_box(timeout=self.timeout_ms)
+            if not box:
+                raise StepError("what should be dragged is not visible")
+            mouse = self.page.mouse
+            x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            mouse.move(x, y)
+            mouse.down()
+            try:
+                mouse.move(x + 6, y + 6, steps=3)              # past the "is this a drag?" threshold
+                dst.scroll_into_view_if_needed(timeout=self.timeout_ms)
+                to = dst.bounding_box(timeout=self.timeout_ms)
+                if not to:
+                    raise StepError("where it should be dropped is not visible")
+                tx, ty = to["x"] + to["width"] / 2, to["y"] + to["height"] / 2
+                mouse.move(tx, ty, steps=12)
+                mouse.move(tx + 1, ty + 1)                     # one more event over the target (dragover)
+                self.page.wait_for_timeout(60)
+            finally:
+                mouse.up()
+            self.settle()
+
     def fill(self, target, value, name=None):
         """Replace the field's value. If the app doesn't accept a programmatic fill
         (some masked or controlled inputs), type it for real instead. Either way the
@@ -594,7 +703,14 @@ class Flow:
         value = "" if value is None else str(value)
         with self._action(name or "Fill"):
             loc = self._find(target)
-            loc.fill(value, timeout=self.timeout_ms)
+            try:
+                loc.fill(value, timeout=self.timeout_ms)
+            except Exception as exc:
+                if "not an <input>" not in str(exc) or loc.get_attribute("role", timeout=1000) != "slider":
+                    raise
+                self._set_slider(loc, value)       # a slider drawn without an <input>: moved with the keyboard
+                self.settle()
+                return
             if not self._shows(loc, value):
                 loc.click(timeout=self.timeout_ms)
                 loc.press("ControlOrMeta+a")
@@ -625,6 +741,31 @@ class Flow:
                 raise StepError(f"the field shows {' '.join(shown.split())[:80]!r} after typing the value")
             self.settle()
 
+    def _set_slider(self, loc, value):
+        """Move an ARIA slider to `value` with the arrow keys, reading it back after each press."""
+        try:
+            want = float(value)
+        except ValueError:
+            raise StepError(f"a slider takes a number, not {value!r}")
+
+        def read():
+            raw = loc.get_attribute("aria-valuenow", timeout=1000)
+            return float(raw) if raw not in (None, "") else None
+        loc.focus(timeout=self.timeout_ms)
+        now = read()
+        for _ in range(500):
+            if now is None or now == want:
+                break
+            loc.press("ArrowRight" if now < want else "ArrowLeft")
+            after = read()
+            if after is None or after == now or (after - want) * (now - want) < 0:
+                now = after                        # stuck at an end, or stepped over the value
+                break
+            now = after
+        if now != want:
+            raise StepError(f"the slider shows {now:g} and cannot be set to exactly {want:g}"
+                            if now is not None else "the slider does not say what value it has")
+
     @classmethod
     def _shows(cls, loc, value):
         """True when the field displays `value` -- allowing input masks that only add
@@ -646,10 +787,24 @@ class Flow:
         """Choose an option in a native <select> by its value or visible label."""
         with self._action(name or f"Select {option}", dialog):
             loc = self._find(target)
-            try:
-                loc.select_option(value=str(option), timeout=self.timeout_ms)
+            try:      # a list that takes several choices: add this one to what is already chosen
+                chosen = loc.evaluate(
+                    """(el, want) => { if (el.tagName !== 'SELECT' || !el.multiple) return null;
+                         const all = [...el.options];
+                         const hit = all.find((o) => o.value === want) || all.find((o) => (o.label || o.text).trim() === want);
+                         return hit ? [...new Set([...el.selectedOptions].map((o) => o.value).concat(hit.value))] : []; }""",
+                    str(option), timeout=2000)
             except Exception:
-                loc.select_option(label=str(option), timeout=self.timeout_ms)
+                chosen = None
+            if chosen is not None:
+                if not chosen:
+                    raise StepError(f"the list has no option {option!r}")
+                loc.select_option(value=chosen, timeout=self.timeout_ms)
+            else:
+                try:
+                    loc.select_option(value=str(option), timeout=self.timeout_ms)
+                except Exception:
+                    loc.select_option(label=str(option), timeout=self.timeout_ms)
             self.settle()
 
     def check(self, target, checked=True, name=None, *, dialog=None):
@@ -699,8 +854,27 @@ class Flow:
             self.settle()
 
     def upload(self, target, files, name=None):
+        """Give a file to the app. The target is the file field itself, something that
+        contains it (a label, a drop area), or the control that opens the file chooser --
+        then it is clicked and the chooser is answered with the file."""
         with self._action(name or "Upload file"):
-            self._find(target).set_input_files(files, timeout=self.timeout_ms)
+            loc = self._find(target)
+            kind = loc.evaluate("el => el.tagName === 'INPUT' && el.type === 'file' ? 'field' :"
+                                " (el.querySelector && el.querySelector('input[type=file]') ? 'holds' : 'opens')",
+                                timeout=self.timeout_ms)
+            if kind == "field":
+                loc.set_input_files(files, timeout=self.timeout_ms)
+            elif kind == "holds":
+                loc.locator("input[type=file]").first.set_input_files(files, timeout=self.timeout_ms)
+            else:
+                try:
+                    with self.page.expect_file_chooser(timeout=min(self.timeout_ms, 5000)) as chooser:
+                        loc.click(timeout=self.timeout_ms)
+                except Exception as exc:
+                    if "Timeout" in str(exc) and "filechooser" in str(exc).replace(" ", "").lower():
+                        raise StepError("clicking it did not open a file chooser")
+                    raise
+                chooser.value.set_files(files, timeout=self.timeout_ms)
             self.settle()
 
     # ── checks (web-first: they retry until true or timeout) ─────────────────
@@ -729,8 +903,22 @@ class Flow:
                 check.to_contain_text(text, timeout=self._ms(timeout))
 
     def expect_value(self, target, value, name=None, *, timeout=None):
+        """The field holds `value`. An editable box that is not an <input> (a rich-text
+        editor) is read by its text, a slider drawn without one by its stated value."""
         with self._step(name or f"Value is '{value}'"):
-            expect(self._find(target)).to_have_value(str(value), timeout=self._ms(timeout))
+            loc = self._find(target)
+            try:
+                kind = loc.evaluate("el => 'value' in el && !el.isContentEditable ? 'value' :"
+                                    " el.isContentEditable ? 'text' : el.hasAttribute('aria-valuenow') ? 'aria' : 'value'",
+                                    timeout=2000)
+            except Exception:
+                kind = "value"
+            if kind == "text":
+                expect(loc).to_have_text(str(value), timeout=self._ms(timeout))
+            elif kind == "aria":
+                expect(loc).to_have_attribute("aria-valuenow", str(value), timeout=self._ms(timeout))
+            else:
+                expect(loc).to_have_value(str(value), timeout=self._ms(timeout))
 
     def expect_checked(self, target, checked=True, name=None, *, timeout=None):
         with self._step(name or ("Is checked" if checked else "Is not checked")):

@@ -118,6 +118,12 @@ _NAMED_BY_CONTENT = {"button", "link", "tab", "menuitem", "menuitemcheckbox", "m
 _SCOPE_ROLES = ("row", "dialog", "alertdialog", "listitem", "form", "article", "region", "group", "navigation")
 
 
+def handle(element):
+    """The selector that reaches a parsed element right now: its snapshot ref, or -- for
+    the few elements the snapshot does not list -- where it is in the page."""
+    return getattr(element, "selector", "") or f"aria-ref={element.ref}"
+
+
 def _same_element(page, target, selector):
     """`selector` matches exactly one element, and it is `target`."""
     try:
@@ -150,8 +156,9 @@ def _role_candidates(page, role, name, regions):
     return out
 
 
-def locator_for_ref(page, ref, role=None, name=None, regions=None):
-    """Best stable locator for snapshot element `ref`.
+def locator_for_ref(page, ref, role=None, name=None, regions=None, via=None, hints=()):
+    """Best stable locator for snapshot element `ref` (or the element `via` selects).
+    `hints` are selectors to prefer when one of them is exactly this element.
 
     Preference: a test id (most stable) > role + accessible name > the same scoped to its
     row/dialog/... > Playwright's own best-practice locator. Each candidate must match
@@ -159,10 +166,10 @@ def locator_for_ref(page, ref, role=None, name=None, regions=None):
     `positional` means only an index (nth) could tell it apart, which breaks if the list
     order changes.
     """
-    target = page.locator(f"aria-ref={ref}")
+    target = page.locator(via or f"aria-ref={ref}")
     normalized = selector_of(target.normalize())
     test_id = normalized.startswith("internal:testid=") or bool(re.match(r'^\[data-[\w-]+=', normalized))
-    candidates = [normalized] if test_id else []
+    candidates = ([normalized] if test_id else []) + list(hints)
     if role and name:
         candidates += _role_candidates(page, role, name, regions)
     candidates.append(normalized)
@@ -185,7 +192,52 @@ def locator_for(page, element):
     name = element.name or (element.fallback if getattr(element, "label_source", "") == "name" else None)
     if not name and element.role in _NAMED_BY_CONTENT and element.label and element.label != element.fallback:
         name = element.label      # its own text is its name; every candidate is verified against the element anyway
-    return locator_for_ref(page, element.ref, element.role, name or None, element.regions)
+    if getattr(element, "selector", "") and not element.name:
+        name = None                   # reached by its place in the page: it has no role or name to go by
+    return locator_for_ref(page, element.ref, element.role, name or None, element.regions, via=handle(element),
+                           hints=getattr(element, "hints", ()))
+
+
+def text_locator(page, text):
+    """A locator for plain text the page shows -- a caption, a label, a line in a list --
+    when exactly one visible element shows exactly this text. Same shape as locator_for_ref;
+    None when the text is not there or is there more than once."""
+    try:
+        found = page.get_by_text(text, exact=True)
+        if found.count() == 1 and found.is_visible():
+            selector = selector_of(found)
+        elif found.filter(visible=True).count() == 1:
+            selector = selector_of(found.filter(visible=True))
+        else:
+            return None
+    except Exception:
+        return None
+    expr = to_python(selector)
+    if not python_matches(page, expr, selector):
+        expr = f"page.locator({_q(selector)})"
+    return {"selector": selector, "python": expr, "unique": True, "positional": False}
+
+
+def label_locator(page, text, kinds):
+    """A field found through its <label> (or aria-label) although the accessibility tree does
+    not list it -- the real checkbox, radio button or file field an app hides behind a styled
+    label. `kinds` are the input types wanted ('checkbox', 'radio', 'file', 'text'). None
+    unless exactly one such field carries this label."""
+    try:
+        found = page.get_by_label(text, exact=True)
+        if found.count() != 1:
+            return None
+        kind = found.evaluate("el => el.tagName === 'INPUT' ? (/^(checkbox|radio|file)$/.test(el.type) ? el.type : 'text') :"
+                              " /^(TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable ? 'text' : ''", timeout=1000)
+    except Exception:
+        return None
+    if kind not in kinds:
+        return None
+    selector = selector_of(found)
+    expr = to_python(selector)
+    if not python_matches(page, expr, selector):
+        expr = f"page.locator({_q(selector)})"
+    return {"selector": selector, "python": expr, "unique": True, "positional": False, "kind": kind}
 
 
 _ITEM_ROLES = ("row", "listitem", "article", "group", "region", "dialog", "form")
@@ -197,7 +249,7 @@ def scoped_locator(page, element, anchors):
         page.get_by_role("row").filter(has_text="Bach").get_by_role("link", name="Edit")
     `anchors` are texts that identify the item, most specific first. Returns the same shape
     as locator_for_ref, or None when no anchored locator pins down exactly this element."""
-    target = page.locator(f"aria-ref={element.ref}")
+    target = page.locator(handle(element))
     roles = list(dict.fromkeys(r for r, _ in reversed(element.regions) if r in _ITEM_ROLES))
     name = element.name or (element.fallback if getattr(element, "label_source", "") == "name" else "")
     for hidden in ({}, {"include_hidden": True}):
@@ -223,7 +275,7 @@ def scoped_locator(page, element, anchors):
 def anchored_locator(page, element, text):
     """page.get_by_role(<role>).filter(has_text=<text>) when that is exactly this element --
     a row, card or section found by what it says. None otherwise."""
-    target = page.locator(f"aria-ref={element.ref}")
+    target = page.locator(handle(element))
     for hidden in ({}, {"include_hidden": True}):
         try:
             selector = selector_of(page.get_by_role(element.role, **hidden).filter(has_text=text))

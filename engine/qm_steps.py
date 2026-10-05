@@ -16,8 +16,13 @@ expects. A test then follows its data (and its per-run `{unique}` values) instea
 repeating literals that only held for the authoring run.
 """
 import json
+import os
 import re
 from dataclasses import dataclass
+
+# Names a generated test module defines; the same values are used while authoring.
+DEFAULT_NAMES = {"TEST_UPLOAD_IMAGE": os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                   "tests", "fixtures", "test_upload.png")}
 
 
 @dataclass(frozen=True)
@@ -38,7 +43,8 @@ class Code:
     name: str
 
 
-ACTIONS = {"goto", "click", "dblclick", "hover", "fill", "type", "select", "check", "press", "upload", "close_tab"}
+ACTIONS = {"goto", "click", "dblclick", "hover", "drag", "fill", "type", "select", "check", "press", "upload",
+           "close_tab"}
 CHECKS = {"expect_url", "expect_visible", "expect_hidden", "expect_text", "expect_value",
           "expect_checked", "expect_page_text", "expect_count"}
 OPS = ACTIONS | CHECKS
@@ -88,7 +94,11 @@ def call_spec(step):
     if op == "close_tab":
         return "close_tab", [name], {}
     if op == "click":
-        return op, [target, name], {**_effects(step), **_dialog(step), **({"new_tab": True} if step.get("new_tab") else {})}
+        return op, [target, name], {**_effects(step), **_dialog(step), **({"new_tab": True} if step.get("new_tab") else {}),
+                                    **({"button": step["button"]} if step.get("button") else {}),
+                                    **({"download": step["download"]} if step.get("download") else {})}
+    if op == "drag":
+        return "drag", [target, Expr(step["to"]), name], {}
     if op == "dblclick":
         return op, [target, name], {**_effects(step), **_dialog(step)}
     if op == "hover":
@@ -159,7 +169,7 @@ def execute(flow, step, data=None, names=None):
     """Perform the step through `flow` exactly as the generated test line would."""
     method, args, kwargs = call_spec(step)
     page = flow.page
-    data, names = data or {}, names or {}
+    data, names = data or {}, names or DEFAULT_NAMES
     call_args = [_execute_arg(a, page, data, names) for a in args]
     call_kwargs = {k: _execute_arg(v, page, data, names) for k, v in kwargs.items()}
     return getattr(flow, method)(*call_args, **call_kwargs)
@@ -207,6 +217,8 @@ def parameterize(step, literals):
                 return match.group(0)
             return _data_expr(text, literals) or match.group(0)
         step["target"] = _STRING.sub(swap, step["target"])
+        if step.get("to"):                       # where a drag is dropped
+            step["to"] = _STRING.sub(swap, step["to"])
     if step["op"] in ("expect_text", "expect_page_text", "expect_value") and not step.get("data_key") \
             and isinstance(step.get("value"), str):
         whole = next((k for k, v in literals if v == step["value"]), None)

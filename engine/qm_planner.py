@@ -27,11 +27,14 @@ Reply with ONLY a JSON object, keys in this order:
 Each STEP is one of:
   {"do": "goto", "url": "<path or URL>"}            only the app's start URL or a link you can see
   {"do": "click", "target": "<label>", "within": "<item name, only if the label repeats>"}
+  {"do": "dblclick", "target": "<label>"}           also "rightclick" (opens a context menu)
   {"do": "fill", "target": "<field label>", "value": "<text>"}
-  {"do": "select", "target": "<dropdown label>", "value": "<option text>"}
+  {"do": "select", "target": "<dropdown or option-group label>", "value": "<option text>"}
   {"do": "check", "target": "<checkbox label>", "checked": true}
   {"do": "press", "key": "Enter", "target": "<field label, optional>"}
   {"do": "hover", "target": "<label>"}              only when something appears on hover
+  {"do": "drag", "target": "<what to drag>", "to": "<where to drop it: a column, a list, an item>"}
+  {"do": "upload", "target": "<file field, or the button that opens the file chooser>"}
   {"do": "close_tab"}                               return from a tab that a click opened
   {"do": "expect_text", "value": "<text>", "within": "<row, card or section it belongs to>"}
   {"do": "expect_text", "value": "<text that must be visible>"}          anywhere on the page
@@ -66,6 +69,9 @@ Rules:
   it to values the task says must be exact, or to things the test only reads.
 - A browser pop-up (confirm/alert) raised by a step is answered OK automatically; add
   "dialog": "dismiss" to the step to answer Cancel, or "dialog_text": "<text>" for a prompt.
+- A click that saves a file (Export, Download): add "download": true to it; the test then
+  also checks that the file arrives. An upload sends a small sample image unless the task
+  names a file: then add "value": "<its path>".
 - If you get a "problem" (a step that could not run), change your approach -- don't repeat
   the same step. The problem lists the closest matching elements.
 - If the task cannot be done, reply {"steps": [], "done": true, "blocked": "<why>"}.
@@ -291,6 +297,15 @@ def normalize_step(step):
     step = dict(step)
     if step["do"] == "expect_text" and not step.get("target"):
         step["do"] = "expect_page_text"
+    if step["do"] == "press" and not step.get("key"):
+        step["key"] = step.pop("value", None) or "Enter"       # models also write the key as "value"
+    if step["do"] in ("right_click", "context_click", "contextmenu"):
+        step["do"] = "rightclick"
+    if step["do"] in ("double_click", "doubleclick"):
+        step["do"] = "dblclick"
+    if step["do"] in ("drag_and_drop", "drag_to", "dragdrop") or (step["do"] == "drag" and not step.get("to")):
+        step["do"] = "drag"
+        step.setdefault("to", step.pop("destination", None) or step.pop("value", None) or "")
     return step
 
 

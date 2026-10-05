@@ -268,3 +268,93 @@ def test_a_link_that_opens_a_new_tab_is_followed_and_closed(page, patterns, brow
     assert source.count("    page = flow.page") == 2             # after the click and after close_tab
     assert replay(browser, ex.steps, ex.data)["ok"]
     ex.cleanup()
+
+
+# ── what real apps need beyond clicks and fields (2026-10-05, second round) ─────────────
+def test_a_download_becomes_part_of_the_test(page, patterns, browser):
+    ex = Explorer(page)
+    result = ex.run([{"do": "goto", "url": patterns + "download"}, {"do": "click", "target": "Export CSV"}])
+    assert result["ok"], result["stopped"]
+    step = ex.steps[-1]
+    # The dated file name is kept as a pattern, so tomorrow's run still matches.
+    assert step["download"] == "orders-*.csv" and 'download="orders-*.csv"' in render(step)
+    assert any("downloads a file" in note for note in ex.notes)
+    assert replay(browser, ex.steps, ex.data)["ok"]
+    other = [dict(s) for s in ex.steps]
+    other[-1]["download"] = "invoices-*.csv"                 # the check can fail: another file is not accepted
+    failed = replay(browser, other, ex.data)
+    assert not failed["ok"] and "invoices-*.csv" in failed["failed_step"]["error"]
+    # Said by the plan instead of noticed: the same recorded step.
+    ex2 = Explorer(page)
+    ex2.run_intent({"do": "goto", "url": patterns + "download"})
+    assert ex2.run_intent({"do": "click", "target": "Export CSV", "download": True})["ok"]
+    assert ex2.steps[-1]["download"] == "orders-*.csv"
+
+
+def test_plain_text_is_clicked_only_if_the_page_reacts(page, patterns, browser):
+    ex = Explorer(page)
+    ex.run_intent({"do": "goto", "url": patterns + "deadtext"})
+    dead = ex.run_intent({"do": "click", "target": "Reports"})          # a heading: nothing happens
+    assert not dead["ok"] and dead["reason"] == "no_effect" and len(ex.steps) == 1
+    live = ex.run_intent({"do": "click", "target": "Quarterly summary"})   # looks the same, but the app listens
+    assert live["ok"] and live["how"] == "text", live
+    assert ex.run_intent({"do": "expect_page_text", "value": "Opened the quarterly summary"})["ok"]
+    assert replay(browser, ex.steps, ex.data)["ok"]
+
+
+def test_a_target_under_another_tab_is_opened_and_under_two_tabs_is_a_question(page, patterns, browser):
+    ex = Explorer(page)
+    ex.run_intent({"do": "goto", "url": patterns + "lazytabs"})
+    found = ex.run_intent({"do": "fill", "target": "Tax ID", "value": "GST-22"})
+    assert found["ok"], found
+    assert [s["name"] for s in ex.steps[1:]] == ["Open Billing", "Tax ID"]      # only the tab that had it is in the test
+    assert replay(browser, ex.steps, ex.data)["ok"]
+    ex = Explorer(page)
+    ex.run_intent({"do": "goto", "url": patterns + "lazytabs"})
+    unsure = ex.run_intent({"do": "fill", "target": "Notes", "value": "x"})
+    assert not unsure["ok"] and "more than one tab (Billing, Shipping)" in unsure["detail"]
+    assert len(ex.steps) == 1 and page.get_by_role("tab", name="General").get_attribute("aria-selected") == "true"
+
+
+def test_drag_right_click_and_upload_are_single_recorded_steps(page, patterns, browser):
+    ex = Explorer(page)
+    assert ex.run([{"do": "goto", "url": patterns + "dragdrop"},
+                   {"do": "drag", "target": "Fix login", "to": "Done"},
+                   {"do": "expect_page_text", "value": "Fix login", "within": "Done"}])["ok"]
+    assert render(ex.steps[1]) == ('flow.drag(page.get_by_text("Fix login"), page.get_by_role("region", name="Done"), '
+                                   '"Drag Fix login to Done")')
+    assert replay(browser, ex.steps, ex.data)["ok"]
+    nowhere = ex.run_intent({"do": "drag", "target": "Write docs", "to": "Archive"})
+    assert not nowhere["ok"] and "where to drop it" in nowhere["detail"]
+
+    ex = Explorer(page)
+    assert ex.run([{"do": "goto", "url": patterns + "contextmenu"},
+                   {"do": "rightclick", "target": "report.pdf"}, {"do": "click", "target": "Archive"},
+                   {"do": "expect_page_text", "value": "Archived report.pdf"}])["ok"]
+    assert 'button="right"' in render(ex.steps[1]) and replay(browser, ex.steps, ex.data)["ok"]
+
+    ex = Explorer(page)
+    assert ex.run([{"do": "goto", "url": patterns + "uploadbtn"}, {"do": "upload", "target": "Attach file"},
+                   {"do": "expect_page_text", "value": "Attached test_upload.png"}])["ok"]
+    assert render(ex.steps[1]) == 'flow.upload(page.get_by_role("button", name="Attach file"), TEST_UPLOAD_IMAGE, "Attach file")'
+    assert replay(browser, ex.steps, ex.data)["ok"]
+    missing = ex.run_intent({"do": "upload", "target": "Attach file", "value": "/no/such/file.csv"})
+    assert not missing["ok"] and "no file" in missing["detail"]
+
+
+def test_editors_the_accessibility_tree_hides_are_fields(page, patterns, browser):
+    from qm_observe import observe
+    ex = Explorer(page)
+    assert ex.run([{"do": "goto", "url": patterns + "editable"}, {"do": "fill", "target": "Comment", "value": "Ship it"},
+                   {"do": "expect_value", "target": "Comment", "value": "Ship it"},
+                   {"do": "click", "target": "Post"}, {"do": "expect_page_text", "value": "Posted: Ship it"}])["ok"]
+    assert ex.steps[1]["target"] == """page.locator('[data-placeholder="Write a comment..."]')"""   # not a position
+    editor = next(e for e in observe(page).elements if e.selector)
+    assert editor.role == "textbox" and editor.label == "Write a comment..." and editor.aliases == ["Comment"]
+    assert replay(browser, ex.steps, ex.data)["ok"]
+    ex = Explorer(page)
+    assert ex.run([{"do": "goto", "url": patterns + "frameeditor"},
+                   {"do": "fill", "target": "Description", "value": "Printer is offline"},
+                   {"do": "click", "target": "Save ticket"},
+                   {"do": "expect_page_text", "value": "Saved: Printer is offline"}])["ok"]
+    assert replay(browser, ex.steps, ex.data)["ok"]

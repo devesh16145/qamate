@@ -14,6 +14,10 @@ a name. `enrich()` asks the page about exactly those elements -- visible text, t
 tooltip, icon, test id, the text next to a field -- so they can be planned and matched
 like any other control. The label's source is kept, so a guess is never passed off as
 the control's real name.
+
+Two kinds of field never reach the accessibility tree as fields at all, and are added here:
+rich-text editors built on a bare `contenteditable` box (no role), and editors that live in
+their own frame (the frame's whole body is the text box).
 """
 import json
 import re
@@ -64,6 +68,8 @@ class Element:
     props: dict = field(default_factory=dict)      # /placeholder and other snapshot properties
     region_refs: list = field(default_factory=list)   # ref of each entry in `regions` (None when it has none)
     aliases: list = field(default_factory=list)       # what else a user would call it: the visible label beside a field
+    selector: str = ""                                # how to reach it when the snapshot gave it no ref (see _add_editables)
+    hints: list = field(default_factory=list)         # selectors that may identify it in a test, most stable first
 
     @property
     def label(self):
@@ -301,11 +307,11 @@ class Observation:
 
 
 # ── completing labels from the page ───────────────────────────────────────────
-DESCRIBE_JS = r"""el => {
+DESCRIBE_JS = r"""(el, asField) => {
   const clean = (s) => (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim();
   const attr = (node, n) => clean(node.getAttribute && node.getAttribute(n));
   const tag = el.tagName.toLowerCase();
-  const isField = /^(input|select|textarea)$/.test(tag) || el.isContentEditable ||
+  const isField = !!asField || /^(input|select|textarea)$/.test(tag) || el.isContentEditable ||
                   /^(textbox|combobox|listbox|spinbutton|slider|checkbox|radio|switch|searchbox)$/.test(attr(el, 'role'));
   const own = (node) => clean(node.nodeType === 3 ? node.textContent : (node.innerText || node.textContent || ''));
   const sibling = (dir) => {            // text right before / after the control, up to the next control or line break
@@ -326,6 +332,19 @@ DESCRIBE_JS = r"""el => {
     const kind = (el.type || attr(el, 'role') || '').toLowerCase();
     const after = /^(checkbox|radio|switch)$/.test(kind);
     let text = after ? (sibling(1) || sibling(-1)) : (sibling(-1) || sibling(1));
+    const cell = el.closest('td, [role=gridcell], [role=cell]'), table = el.closest('table, [role=grid], [role=table]');
+    const header = () => {             // a field in a table: its column header
+      if (!cell || !table) return '';
+      if (cell.tagName === 'TD') {
+        const head = table.querySelectorAll('thead th, tr:first-child th')[cell.cellIndex];
+        return head ? own(head) : '';
+      }
+      const index = [...cell.parentElement.children].indexOf(cell);
+      const head = table.querySelectorAll('[role=columnheader]')[index];
+      return head ? own(head) : '';
+    };
+    // Alone in its cell, a field is what its column says -- not the text of the cell before it.
+    if (!text && cell && cell.querySelectorAll('input, select, textarea').length === 1) text = header();
     let node = el;
     for (let up = 0; !text && up < 3 && node.parentElement; up++) {
       const parent = node.parentElement;
@@ -338,14 +357,19 @@ DESCRIBE_JS = r"""el => {
           own(prev) && own(prev).length <= 60) { text = own(prev); break; }
       node = parent;
     }
-    if (!text) {                        // a field in a table: its column header
-      const cell = el.closest('td'), table = el.closest('table');
-      if (cell && table) {
-        const head = table.querySelectorAll('thead th, tr:first-child th')[cell.cellIndex];
-        if (head) text = own(head);
-      }
-    }
+    if (!text) text = header();
     return text.length <= 60 ? text : '';
+  };
+  // A rich-text editor stands in for a <textarea> the page keeps hidden just before it:
+  // that textarea's label is the editor's label.
+  const replaced = () => {
+    let node = el;
+    for (let up = 0; up < 8 && node && node !== document.body; up++) {
+      const prev = node.previousElementSibling;
+      if (prev && prev.tagName === 'TEXTAREA' && prev.labels && prev.labels.length) return clean([...prev.labels].map(own).join(' '));
+      node = node.parentElement;
+    }
+    return '';
   };
   const icon = () => {
     const nodes = [el, ...el.querySelectorAll('i, span, svg, use, img, [class*="icon"], [data-icon], [data-lucide]')].slice(0, 14);
@@ -381,11 +405,11 @@ DESCRIBE_JS = r"""el => {
     hidden: (box.width <= 1 && box.height <= 1) || style.visibility === 'hidden' || style.display === 'none',
     text: own(el).slice(0, 100),
     value: tag === 'input' && /^(button|submit|reset)$/.test(el.type) ? clean(el.value) : '',
-    title: attr(el, 'title'), placeholder: attr(el, 'placeholder'),
+    title: attr(el, 'title'), placeholder: attr(el, 'placeholder') || attr(el, 'data-placeholder') || attr(el, 'aria-placeholder'),
     tooltip: attr(el, 'data-tooltip') || attr(el, 'data-original-title') || attr(el, 'data-bs-original-title') ||
              attr(el, 'data-bs-title') || attr(el, 'data-tip') || attr(el, 'data-title') || attr(el, 'mattooltip') || attr(el, 'aria-description'),
     alt: firstImg ? clean(firstImg.alt) : '', svg_title: svgTitle ? clean(svgTitle.textContent) : '',
-    icon: icon(), nearby: isField ? around() : '',
+    icon: icon(), nearby: isField ? ((asField && replaced()) || around()) : '',
     testid: attr(el, 'data-testid') || attr(el, 'data-test') || attr(el, 'data-test-id') || attr(el, 'data-qa') || attr(el, 'data-cy'),
     id: el.id || '', name: attr(el, 'name'),
   };
@@ -543,6 +567,97 @@ def enrich(page, elements, limit=80, budget_ms=500):
     return elements
 
 
+# Editable boxes with no role: the accessibility tree shows them as plain content, or (when
+# empty) not at all. For each: a path from the document root (valid right now) and selectors
+# a test could use for it -- an id or naming attribute, the editor's class -- most stable first.
+EDITABLE_PATHS_JS = r"""
+() => {
+  const out = [];
+  const state = /^(is|has|ng|js)-|blank|empty|focus|active|hover|select|disabled|valid|dirty|touched|pristine|open|show|hidden|visible/i;
+  const hints = (el) => {
+    const list = [], tag = el.tagName.toLowerCase();
+    if (el.id && !/\d{3,}|[:.]/.test(el.id)) list.push('#' + CSS.escape(el.id));
+    for (const name of ['data-testid', 'data-test', 'data-qa', 'data-cy', 'aria-label', 'data-placeholder', 'placeholder', 'name']) {
+      const value = el.getAttribute(name);
+      if (value) list.push('[' + name + '=' + JSON.stringify(value) + ']');
+    }
+    for (const cls of el.classList)
+      if (/^[A-Za-z][A-Za-z-]*[A-Za-z]$/.test(cls) && cls.length <= 30 && !state.test(cls)) list.push(tag + '.' + CSS.escape(cls) + '[contenteditable]');
+    list.push('[contenteditable]:not([contenteditable="false"])');
+    return list;
+  };
+  const path = (el) => {
+    const parts = [];
+    for (let node = el; node && node.parentElement; node = node.parentElement)
+      parts.unshift(node.tagName.toLowerCase() + ':nth-child(' + ([...node.parentElement.children].indexOf(node) + 1) + ')');
+    return 'html > ' + parts.join(' > ');
+  };
+  for (const el of document.querySelectorAll('[contenteditable]:not([contenteditable="false"])')) {
+    if (out.length >= 6) break;
+    if (el.tagName === 'BODY' || (el.parentElement && el.parentElement.isContentEditable)) continue;
+    const role = el.getAttribute('role');
+    if (role && role !== 'presentation' && role !== 'none') continue;      // the tree already shows it as that
+    const box = el.getBoundingClientRect();
+    if (box.width < 3 || box.height < 3) continue;
+    if (el.checkVisibility ? !el.checkVisibility({ visibilityProperty: true }) : getComputedStyle(el).visibility === 'hidden') continue;
+    out.push({ path: path(el), hints: hints(el) });
+  }
+  return out;
+}
+"""
+
+
+def _alias(el, text):
+    text = (text or "").strip()
+    known = {" ".join(words(t)) for t in (el.label, el.inline, *el.aliases)}
+    if text and words(text) and " ".join(words(text)) not in known:
+        el.aliases.append(text[:80])
+
+
+def _add_editables(page, elements):
+    """Rich-text editors built on a bare contenteditable box (no role) become text boxes,
+    named by their placeholder or the label beside them and reached by their place in the page."""
+    try:
+        found = page.evaluate(EDITABLE_PATHS_JS)
+    except Exception:
+        return
+    for number, box in enumerate(found or [], 1):
+        try:
+            info = page.locator(box["path"]).evaluate(DESCRIBE_JS, True, timeout=500)
+        except Exception:
+            continue
+        label, source = pick_label(info)
+        el = Element(ref=f"x{number}", role="textbox", selector=box["path"], hints=list(box.get("hints") or []),
+                     inline=(info.get("text") or "")[:100], fallback=label, label_source=source if label else "")
+        _alias(el, info.get("nearby"))
+        elements.append(el)
+
+
+def _add_frame_editors(page, elements):
+    """An editor that lives in its own frame (the frame's body is the editable area) is a
+    text box, called what the page calls it: the label of the field it stands in for, the
+    text beside the frame, the frame's title."""
+    cache = _label_cache(page)
+    for frame in [e for e in elements if e.role == "iframe" and e.children][:6]:
+        root, key = frame.children[0], "frame:" + frame.ref
+        if key not in cache:
+            try:
+                editable = bool(page.locator(f"aria-ref={root.ref}").evaluate(
+                    "el => !!(el.isContentEditable || (el.ownerDocument && el.ownerDocument.designMode === 'on'))", timeout=500))
+                info = page.locator(f"aria-ref={frame.ref}").evaluate(DESCRIBE_JS, True, timeout=500) if editable else {}
+            except Exception:
+                continue
+            cache[key] = [info.get("nearby"), info.get("named"), info.get("title")] if editable else None
+        names = cache[key]
+        if names is None:
+            continue
+        root.role = "textbox"
+        if not root.name and not root.fallback:
+            root.fallback, root.label_source = next(((n, "nearby") for n in names if n and words(n)), ("", ""))
+        for name in names:
+            _alias(root, name)
+
+
 def observe(page, timeout_ms=5000):
     """Snapshot the page (all frames), parse it and complete missing labels from the page."""
     started = time.monotonic()
@@ -550,6 +665,8 @@ def observe(page, timeout_ms=5000):
     elements, page_text = parse_tree(text)
     _add_content(elements)
     enrich(page, elements)
+    _add_frame_editors(page, elements)
+    _add_editables(page, elements)
     _add_context(elements)
     try:
         title = page.title()

@@ -60,9 +60,9 @@ def _intent_text(intent):
     intent = public_intent(intent)
     op = intent.get("do")
     bits = [op.replace("_", " ")]
-    for key in ("target", "url", "key", "value"):
+    for key in ("target", "to", "url", "key", "value"):
         if intent.get(key) not in (None, ""):
-            bits.append(f'"{intent[key]}"' if key != "url" else intent[key])
+            bits.append(intent[key] if key == "url" else f'to "{intent[key]}"' if key == "to" else f'"{intent[key]}"')
     if intent.get("within"):
         bits.append(f'(in "{intent["within"]}")')
     if intent.get("present") is False:

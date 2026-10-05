@@ -26,7 +26,7 @@ from qm_runtime import Flow
 TEST_UPLOAD_IMAGE = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures", "test_upload.png")
 '''
 
-_STEP_TYPES = {"goto": "navigate", "click": "click", "dblclick": "dblclick", "hover": "hover",
+_STEP_TYPES = {"goto": "navigate", "click": "click", "dblclick": "dblclick", "hover": "hover", "drag": "drag",
                "fill": "fill", "type": "fill", "select": "select", "check": "check", "press": "press", "upload": "upload",
                "close_tab": "navigate"}
 
