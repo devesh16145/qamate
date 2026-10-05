@@ -102,15 +102,24 @@ QUIET_PROBE = r"""
     if (real) bump();
   }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
   try { watch(); } catch (e) { document.addEventListener('DOMContentLoaded', watch, { once: true }); }
+  // Work started by a loop is background, not a reaction to the test's action: a timer that
+  // re-arms itself (ad refresh, polling, a clock), anything an interval starts. `depth` says
+  // how deep in a chain of timers the running code is: 0 outside timers, 1 in a timer set by
+  // ordinary code, 2 in a timer set by that timer, ... Only depths 0-1 start counted work, so
+  // "click -> debounce -> save" is waited for and "tick -> tick -> tick" is not.
+  probe.depth = 0;
+  const loop = () => probe.depth >= 2;
   const origFetch = window.fetch;
   if (origFetch) {
     window.fetch = function (...args) {
+      if (loop()) return origFetch.apply(this, args);
       const id = ++probe.seq; probe.pending.set(id, performance.now()); bump();
       return origFetch.apply(this, args).finally(() => { probe.pending.delete(id); bump(); });
     };
   }
   const send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...args) {
+    if (loop()) return send.apply(this, args);
     const id = ++probe.seq; probe.pending.set(id, performance.now()); bump();
     this.addEventListener('loadend', () => { probe.pending.delete(id); bump(); }, { once: true });
     return send.apply(this, args);
@@ -120,14 +129,23 @@ QUIET_PROBE = r"""
   // check that isn't true yet keeps waiting while one is running (a report being built).
   const timers = probe.timers = new Set(), slow = probe.slow = new Set();
   const setT = probe.rawSetTimeout = window.setTimeout, clearT = window.clearTimeout;
+  const within = (depth, fn, args) => { const outer = probe.depth; probe.depth = depth;
+    try { return fn(...args); } finally { probe.depth = outer; } };
   window.setTimeout = function (fn, delay, ...rest) {
-    const ms = Number(delay) || 0;
-    if (ms <= 0 || ms > 60000 || typeof fn !== 'function') return setT.call(this, fn, delay, ...rest);
+    if (typeof fn !== 'function') return setT.call(this, fn, delay, ...rest);
+    const ms = Number(delay) || 0, depth = probe.depth + 1;
+    const counted = ms > 0 && ms <= 60000 && depth <= 2;
     const set = ms <= 1500 ? timers : slow;
-    const id = setT.call(this, (...a) => { set.delete(id); bump(); return fn(...a); }, delay, ...rest);
-    set.add(id); return id;
+    const id = setT.call(this, (...a) => { if (counted) { set.delete(id); bump(); } return within(depth, fn, a); }, delay, ...rest);
+    if (counted) set.add(id);
+    return id;
   };
   window.clearTimeout = function (id) { timers.delete(id); slow.delete(id); return clearT.call(this, id); };
+  const setI = window.setInterval;
+  window.setInterval = function (fn, delay, ...rest) {
+    if (typeof fn !== 'function') return setI.call(this, fn, delay, ...rest);
+    return setI.call(this, (...a) => within(3, fn, a), delay, ...rest);      // whatever an interval starts is a loop
+  };
   // Still working on something that takes a while? (a request in flight for up to a minute,
   // or a slow timer) -- a check that isn't true yet keeps waiting while this holds.
   probe.working = () => { const now = performance.now(); let n = slow.size + timers.size;

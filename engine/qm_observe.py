@@ -63,6 +63,7 @@ class Element:
     label_source: str = ""                         # where `fallback` came from: text, title, icon, nearby, id
     props: dict = field(default_factory=dict)      # /placeholder and other snapshot properties
     region_refs: list = field(default_factory=list)   # ref of each entry in `regions` (None when it has none)
+    aliases: list = field(default_factory=list)       # what else a user would call it: the visible label beside a field
 
     @property
     def label(self):
@@ -94,6 +95,8 @@ class Element:
         bits = [f'{self.role} "{self.label}"' if self.label else self.role]
         state = [k if v is True else f"{k}={v}" for k, v in self.attrs.items()
                  if k not in ("ref", "cursor", "active")]
+        if self.aliases:
+            state.append("labelled " + ", ".join(f'"{a}"' for a in self.aliases[:2]))
         if not self.name and self.label and self.label == self.fallback and self.label_source in ("icon", "nearby", "id"):   # a guess, say so
             state.append({"icon": "unnamed, from its icon", "nearby": "unnamed, from the text beside it",
                           "id": "unnamed, from its id"}[self.label_source])
@@ -434,21 +437,59 @@ NAMED_CONTAINERS = {"group", "radiogroup", "region", "form", "dialog", "alertdia
                     "tabpanel", "toolbar", "menu", "listbox", "tablist", "navigation"}
 
 
-def enrich(page, elements, limit=60, budget_ms=400):
-    """Name the controls the snapshot left nameless (see module docstring)."""
-    needy = [e for e in elements if not e.name and not e.attrs.get("aria-hidden")
-             and ((e.interactive and not words(e.label)) or e.role in NAMED_CONTAINERS)]
+FIELD_ROLES = {"textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio", "switch", "listbox"}
+_MAIN_REF = re.compile(r"^e\d+$")
+
+
+def _label_cache(page):
+    """Per-document cache of what the page said about a field (ref -> info). A ref names one
+    element for the life of its document, and what stands beside a named field does not
+    change, so it is asked once. Refs inside frames are not cached (a frame can reload)."""
+    try:
+        doc = page.evaluate("() => (window.__qmDoc = window.__qmDoc || String(Math.random()))")
+    except Exception:
+        return {}
+    cache = getattr(page, "_qm_labels", None)
+    if not cache or cache.get("doc") != doc:
+        cache = {"doc": doc, "info": {}}
+        try:
+            page._qm_labels = cache
+        except Exception:
+            pass
+    return cache["info"]
+
+
+def enrich(page, elements, limit=80, budget_ms=500):
+    """Complete what the snapshot says about controls from the page itself:
+      * a control it left nameless gets a label (its real accessible name first, see module
+        docstring);
+      * a field named by its placeholder or title also gets the visible label beside it as
+        an alias ("name@example.com" is the Email field);
+      * a named container's recovered name becomes part of its contents' context."""
+    nameless = [e for e in elements if not e.name and not e.attrs.get("aria-hidden")
+                and ((e.interactive and not words(e.label)) or e.role in NAMED_CONTAINERS)]
     # real controls first, then clickable wrappers, then containers
-    needy.sort(key=lambda e: (e.role in NAMED_CONTAINERS, e.role not in INTERACTIVE_ROLES))
+    nameless.sort(key=lambda e: (e.role in NAMED_CONTAINERS, e.role not in INTERACTIVE_ROLES))
+    named_fields = [e for e in elements if e.name and e.role in FIELD_ROLES and not e.attrs.get("aria-hidden")]
+    cache = _label_cache(page)
     started = time.monotonic()
-    for el in needy[:limit]:
+
+    def describe(el, cached):
+        if cached and el.ref in cache:
+            return cache[el.ref]
         if (time.monotonic() - started) * 1000 > budget_ms:
-            break
+            return None
         try:
             info = page.locator(f"aria-ref={el.ref}").evaluate(DESCRIBE_JS, timeout=500)
         except Exception:
-            continue
-        if info.get("hidden"):              # a visually hidden twin of a custom widget is not a control
+            return None
+        if cached and _MAIN_REF.match(el.ref):
+            cache[el.ref] = info
+        return info
+
+    for el in nameless[:limit]:
+        info = describe(el, cached=False)       # its text may change while it stays nameless: always fresh
+        if not info or info.get("hidden"):      # a visually hidden twin of a custom widget is not a control
             continue
         if el.role in NAMED_CONTAINERS and not el.interactive:
             label, source = (info.get("named") or "", "name")
@@ -457,6 +498,16 @@ def enrich(page, elements, limit=60, budget_ms=400):
         if label and el.role in VALUE_ROLES and el.inline and label != el.inline and label.endswith(el.inline):
             label = label[: -len(el.inline)].strip()     # "Department Marketing": name + current value
         el.fallback, el.label_source = label, (source if label else "")
+    for el in named_fields[:limit]:
+        info = describe(el, cached=True)
+        if not info or info.get("hidden"):
+            continue
+        known = {" ".join(words(el.label)), " ".join(words(el.inline))}
+        for text in (info.get("nearby"), info.get("named")):
+            text = (text or "").strip()
+            if text and words(text) and " ".join(words(text)) not in known:
+                el.aliases.append(text[:80])
+                known.add(" ".join(words(text)))
     # A container's recovered name is part of where its contents are.
     renamed = {e.ref: e for e in elements if e.role in REGION_ROLES and e.fallback and not e.name}
     if renamed:

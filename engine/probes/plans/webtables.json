@@ -1,0 +1,84 @@
+{
+ "url": "https://demoqa.com/webtables",
+ "seen": true,
+ "note": "first attempt 2026-10-05 (engine 0942c60) failed at step 4: the Email field is named by its placeholder (name@example.com) and labelled Email only by the text beside it; every step also took 3 s because ad scripts keep re-arming short timers",
+ "steps": [
+  {
+   "do": "click",
+   "target": "Add"
+  },
+  {
+   "do": "fill",
+   "target": "First Name",
+   "value": "Asha"
+  },
+  {
+   "do": "fill",
+   "target": "Last Name",
+   "value": "Probe {unique}"
+  },
+  {
+   "do": "fill",
+   "target": "Email",
+   "value": "asha.probe@example.com"
+  },
+  {
+   "do": "fill",
+   "target": "Age",
+   "value": "31"
+  },
+  {
+   "do": "fill",
+   "target": "Salary",
+   "value": "52000"
+  },
+  {
+   "do": "fill",
+   "target": "Department",
+   "value": "QA"
+  },
+  {
+   "do": "click",
+   "target": "Submit"
+  },
+  {
+   "do": "expect_text",
+   "value": "QA",
+   "within": "Probe {unique}"
+  },
+  {
+   "do": "fill",
+   "target": "Type to search",
+   "value": "Probe {unique}"
+  },
+  {
+   "do": "expect_text",
+   "value": "Cierra",
+   "present": false
+  },
+  {
+   "do": "expect_text",
+   "value": "asha.probe@example.com",
+   "within": "Probe {unique}"
+  },
+  {
+   "do": "click",
+   "target": "Edit",
+   "within": "Probe {unique}"
+  },
+  {
+   "do": "fill",
+   "target": "Salary",
+   "value": "61000"
+  },
+  {
+   "do": "click",
+   "target": "Submit"
+  },
+  {
+   "do": "expect_text",
+   "value": "61000",
+   "within": "Probe {unique}"
+  }
+ ]
+}

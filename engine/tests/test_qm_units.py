@@ -539,3 +539,21 @@ def test_typing_into_a_segmented_field_is_one_step():
     step = {"op": "type", "target": 'page.get_by_role("group", name="Join date")', "name": "Join date",
             "value": "10/05/2026", "data_key": "join_date"}
     assert render(step) == 'flow.type(page.get_by_role("group", name="Join date"), tc_data["join_date"], "Join date")'
+
+
+def test_a_field_is_also_known_by_the_visible_label_beside_it():
+    """Probe 2026-10-05 (demoqa): the input's accessible name is its placeholder
+    "name@example.com"; the page labels it "Email" with plain text beside it."""
+    elements, _ = parse('''- dialog [ref=d]:
+  - generic [ref=l1]: Email
+  - textbox "name@example.com" [ref=mail]
+  - generic [ref=l2]: Age
+  - textbox "Age" [ref=age]
+''')
+    by = {e.ref: e for e in elements}
+    by["mail"].aliases.append("Email")
+    obs = SimpleNamespace(elements=elements)
+    pick = decide(rank({"op": "fill", "target": "Email"}, obs))
+    assert pick.element.ref == "mail" and pick.match == "decorated"       # a real match, one notch below a name
+    assert decide(rank({"op": "fill", "target": "name@example.com"}, obs)).match == "exact"
+    assert 'labelled "Email"' in by["mail"].summary()

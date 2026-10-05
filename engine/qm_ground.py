@@ -327,6 +327,14 @@ def rank(step, observation, limit=10):
                 other = match_kind(target, el.name, actor.role)
                 if MATCH_RANK.get(other[0], -1) > MATCH_RANK.get(kind, -1):
                     kind, relevance = other
+            for alias in getattr(el, "aliases", ()):
+                # The visible label beside a field named by its placeholder: a real match, one
+                # notch below the control's own name.
+                other = match_kind(target, alias, actor.role)
+                if other[0] in ("exact", "decorated"):
+                    other = ("decorated", 0.97)
+                if MATCH_RANK.get(other[0], -1) > MATCH_RANK.get(kind, -1):
+                    kind, relevance = other
         if kind is None:
             continue
         tier = fit(op, el, container)
