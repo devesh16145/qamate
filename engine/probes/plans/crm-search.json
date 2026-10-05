@@ -1,0 +1,37 @@
+{
+ "url": "https://marmelab.com/atomic-crm-demo/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "Companies"
+  },
+  {
+   "do": "fill",
+   "target": "Search",
+   "value": "QAMATE-NOMATCH-9f58c327"
+  },
+  {
+   "do": "expect_value",
+   "target": "Search",
+   "value": "QAMATE-NOMATCH-9f58c327"
+  },
+  {
+   "do": "expect_text",
+   "value": "No companies found"
+  },
+  {
+   "do": "click",
+   "target": "Clear search"
+  },
+  {
+   "do": "expect_text",
+   "value": "No companies found",
+   "present": false
+  },
+  {
+   "do": "expect_visible",
+   "target": "New Company"
+  }
+ ]
+}

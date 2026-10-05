@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><title>Ops console</title>
+<style>.menu ul{display:none}.menu:hover ul{display:block}.toast{background:#dfd;padding:4px}</style>
+<h1>Ops console</h1><main id="m"></main>
+<script>
+const P = new URLSearchParams(location.search).get('p') || 'home', m = document.getElementById('m');
+const out = (t) => { let o = document.getElementById('out'); if (!o) { o = document.createElement('p'); o.id = 'out'; m.append(o); } o.textContent = t; };
+const pages = {
+  confirm: () => { m.innerHTML = '<button id="a">Archive report</button>'; a.onclick = () => out(confirm('Archive this report?') ? 'Report archived' : 'Archive cancelled'); },
+  newtab: () => { m.innerHTML = '<a target="_blank" href="?p=report">Open report</a>'; },
+  report: () => { m.innerHTML = '<h2>Quarterly report</h2><p>Revenue up 12%</p>'; },
+  iframe: () => { m.innerHTML = '<h2>Embedded approval</h2><iframe title="Approval" width="400" height="120" srcdoc="<button onclick=&quot;document.getElementById(\'o\').textContent=\'Request approved\'&quot;>Approve request</button><p id=o>Waiting</p>"></iframe>'; },
+  shadow: () => { class W extends HTMLElement { connectedCallback() { const r = this.attachShadow({mode: 'open'}); r.innerHTML = '<button>Refresh data</button><p>Stale data</p>'; r.querySelector('button').onclick = () => r.querySelector('p').textContent = 'Data refreshed'; } } customElements.define('ops-widget', W); m.innerHTML = '<ops-widget></ops-widget>'; },
+  slow: () => { m.innerHTML = '<button id="g">Generate report</button>'; g.onclick = () => { out('Generating…'); setTimeout(() => out('Report ready'), 6500); }; },
+  checkboxes: () => { m.innerHTML = '<h2>Alerts</h2><input type="checkbox"> Email alerts<br><input type="checkbox"> SMS alerts<br><button id="s">Save alerts</button>'; s.onclick = () => out('Saved: ' + [...m.querySelectorAll('input')].map(i => i.checked).join(',')); },
+  select: () => { m.innerHTML = '<h3>Priority</h3><select id="s"><option>Low</option><option>Medium</option><option>High</option></select>'; s.onchange = () => out('Priority set to ' + s.value); },
+  icons: () => { m.innerHTML = '<table><tr><td>Invoice 1041</td><td><button class="btn-icon icon-pencil" data-testid="edit-1041"><svg width="14" height="14"><rect width="14" height="14"/></svg></button><button class="btn-icon icon-download" data-testid="download-1041"><svg width="14" height="14"><circle cx="7" cy="7" r="6"/></svg></button></td></tr></table>'; m.querySelector('.icon-pencil').onclick = () => out('Editing invoice 1041'); },
+  rows: () => { m.innerHTML = '<table><thead><tr><th>Name</th><th>Role</th><th></th></tr></thead><tbody>' + ['Smith|Admin', 'Bach|Viewer', 'Doe|Editor'].map(r => { const [n, role] = r.split('|'); return `<tr><td>${n}</td><td>${role}</td><td><a href="#" data-n="${n}">Edit</a> <a href="#" data-d="${n}">Disable</a></td></tr>`; }).join('') + '</tbody></table>'; m.onclick = (e) => { if (e.target.dataset.n) { e.preventDefault(); out('Editing ' + e.target.dataset.n); } }; },
+  date: () => { m.innerHTML = '<label>Due date <input type="date" id="d"></label><button id="s">Set date</button>'; s.onclick = () => out('Due ' + d.value); },
+  hover: () => { m.innerHTML = '<div class="menu"><button>Account</button><ul><li><a href="?p=report">Sign-in history</a></li></ul></div>'; },
+  toastfast: () => { m.innerHTML = '<button id="s">Save settings</button>'; s.onclick = () => { const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = 'Settings saved'; m.append(t); setTimeout(() => t.remove(), 1200); }; },
+  toast: () => { m.innerHTML = '<button id="s">Save settings</button>'; s.onclick = () => { const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = 'Settings saved'; m.append(t); setTimeout(() => t.remove(), 3500); }; },
+  hindi: () => { m.innerHTML = '<label>ग्राहक का नाम <input id="n"></label><button id="s">नया ऑर्डर बनाएं</button><button>रद्द करें</button>'; s.onclick = () => out('ऑर्डर बन गया: ' + n.value); },
+  french: () => { m.innerHTML = '<label>Nom du client <input id="n"></label><button id="s">Créer une commande</button><button>Annuler</button>'; s.onclick = () => out('Commande créée: ' + n.value); },
+  rich: () => { m.innerHTML = '<div contenteditable="true" role="textbox" aria-label="Comment" style="border:1px solid #999;min-height:40px"></div><button id="s">Post comment</button>'; s.onclick = () => out('Posted: ' + m.querySelector('[contenteditable]').innerText); },
+  longlist: () => { m.innerHTML = '<div id="l" style="height:300px;overflow:auto"></div>'; let n = 0; const more = () => { for (let i = 0; i < 25 && n < 200; i++) { n++; const a = document.createElement('a'); a.href = '#'; a.textContent = 'Ticket ' + n; a.style.display = 'block'; a.style.height = '24px'; a.onclick = (e) => { e.preventDefault(); out('Opened ' + a.textContent); }; l.append(a); } }; more(); l.onscroll = () => { if (l.scrollTop + l.clientHeight >= l.scrollHeight - 10) more(); }; },
+  typeahead: () => { m.innerHTML = '<label>City <input id="c" autocomplete="off"></label><ul id="sg"></ul><button id="s">Save city</button>'; let chosen = ''; c.oninput = () => { chosen = ''; sg.innerHTML = ['Pune', 'Puri', 'Patna'].filter(x => c.value && x.toLowerCase().startsWith(c.value.toLowerCase())).map(x => `<li role="option">${x}</li>`).join(''); }; sg.onclick = (e) => { chosen = e.target.textContent; c.value = chosen; sg.innerHTML = ''; }; s.onclick = () => out(chosen ? 'City saved: ' + chosen : 'Choose a city from the list'); },
+  dup: () => { m.innerHTML = '<section aria-label="Billing address"><label>City <input></label><button>Save</button></section><section aria-label="Shipping address"><label>City <input></label><button>Save</button></section>'; m.querySelectorAll('button').forEach((b, i) => b.onclick = () => out((i ? 'Shipping' : 'Billing') + ' saved: ' + m.querySelectorAll('input')[i].value)); },
+};
+(pages[P] || (() => { m.innerHTML = Object.keys(pages).map(k => `<a href="?p=${k}">${k}</a>`).join(' '); }))();
+</script>

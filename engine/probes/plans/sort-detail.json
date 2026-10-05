@@ -1,0 +1,70 @@
+{
+ "url": "https://www.saucedemo.com/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Username",
+   "value": "standard_user"
+  },
+  {
+   "do": "fill",
+   "target": "Password",
+   "value": "secret_sauce"
+  },
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "select",
+   "target": "Sort",
+   "value": "Name (Z to A)"
+  },
+  {
+   "do": "expect_value",
+   "target": "Sort",
+   "value": "za"
+  },
+  {
+   "do": "click",
+   "target": "Test.allTheThings() T-Shirt (Red)"
+  },
+  {
+   "do": "expect_text",
+   "value": "Test.allTheThings() T-Shirt (Red)"
+  },
+  {
+   "do": "expect_text",
+   "value": "$15.99"
+  },
+  {
+   "do": "expect_text",
+   "value": "Super-soft and comfy ringspun combed cotton"
+  },
+  {
+   "do": "click",
+   "target": "Back to products"
+  },
+  {
+   "do": "expect_url",
+   "url": "/inventory.html"
+  },
+  {
+   "do": "expect_text",
+   "value": "Products"
+  },
+  {
+   "do": "click",
+   "target": "Sauce Labs Bike Light"
+  },
+  {
+   "do": "expect_text",
+   "value": "Sauce Labs Bike Light"
+  },
+  {
+   "do": "expect_text",
+   "value": "$9.99"
+  }
+ ]
+}

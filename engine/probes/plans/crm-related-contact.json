@@ -1,0 +1,131 @@
+{
+ "url": "https://marmelab.com/atomic-crm-demo/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "Companies"
+  },
+  {
+   "do": "click",
+   "target": "New Company"
+  },
+  {
+   "do": "fill",
+   "target": "Company name",
+   "value": "QAMATE Relationship 9f58c327"
+  },
+  {
+   "do": "fill",
+   "target": "Website",
+   "value": "https://example.com"
+  },
+  {
+   "do": "fill",
+   "target": "City",
+   "value": "Qamate Test City"
+  },
+  {
+   "do": "fill",
+   "target": "Description",
+   "value": "Qamate original description"
+  },
+  {
+   "do": "select",
+   "target": "Sector",
+   "value": "Industrials"
+  },
+  {
+   "do": "click",
+   "target": "Create Company"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "QAMATE Relationship 9f58c327"
+  },
+  {
+   "do": "click",
+   "target": "Contacts"
+  },
+  {
+   "do": "click",
+   "target": "New Contact"
+  },
+  {
+   "do": "fill",
+   "target": "First name",
+   "value": "Qamate"
+  },
+  {
+   "do": "fill",
+   "target": "Last name",
+   "value": "RelationTest"
+  },
+  {
+   "do": "fill",
+   "target": "Email",
+   "value": "qamate.relation@example.com"
+  },
+  {
+   "do": "fill",
+   "target": "Title",
+   "value": "QA Engineer"
+  },
+  {
+   "do": "select",
+   "target": "Company",
+   "value": "QAMATE Relationship 9f58c327"
+  },
+  {
+   "do": "expect_value",
+   "target": "First name",
+   "value": "Qamate"
+  },
+  {
+   "do": "expect_value",
+   "target": "Email",
+   "value": "qamate.relation@example.com"
+  },
+  {
+   "do": "expect_text",
+   "target": "Company",
+   "value": "QAMATE Relationship 9f58c327"
+  },
+  {
+   "do": "click",
+   "target": "Save"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate RelationTest"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "QA Engineer"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "qamate.relation@example.com"
+  },
+  {
+   "do": "click",
+   "target": "QAMATE Relationship 9f58c327"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "QAMATE Relationship 9f58c327"
+  },
+  {
+   "do": "click",
+   "target": "Contacts tab"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate RelationTest"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "QA Engineer"
+  }
+ ]
+}

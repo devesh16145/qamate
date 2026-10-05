@@ -1,0 +1,83 @@
+{
+ "url": "https://www.saucedemo.com/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Username",
+   "value": "standard_user"
+  },
+  {
+   "do": "fill",
+   "target": "Password",
+   "value": "secret_sauce"
+  },
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "click",
+   "target": "Sauce Labs Backpack"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Sauce Labs Backpack"
+  },
+  {
+   "do": "click",
+   "target": "Add to cart"
+  },
+  {
+   "do": "click",
+   "target": "Back to products"
+  },
+  {
+   "do": "click",
+   "target": "Add to cart",
+   "within": "Sauce Labs Onesie"
+  },
+  {
+   "do": "click",
+   "target": "Cart"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Sauce Labs Backpack"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Sauce Labs Onesie"
+  },
+  {
+   "do": "click",
+   "target": "Remove",
+   "within": "Sauce Labs Backpack"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Sauce Labs Backpack",
+   "present": false
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Sauce Labs Onesie"
+  },
+  {
+   "do": "click",
+   "target": "Continue Shopping"
+  },
+  {
+   "do": "click",
+   "target": "Cart"
+  },
+  {
+   "do": "expect_url",
+   "url": "/cart.html"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Sauce Labs Onesie"
+  }
+ ]
+}

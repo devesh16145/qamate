@@ -1,0 +1,47 @@
+{
+ "url": "https://www.saucedemo.com/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Username",
+   "value": "standard_user"
+  },
+  {
+   "do": "fill",
+   "target": "Password",
+   "value": "secret_sauce"
+  },
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "select",
+   "target": "Sort",
+   "value": "Price (low to high)"
+  },
+  {
+   "do": "expect_value",
+   "target": "Sort",
+   "value": "lohi"
+  },
+  {
+   "do": "click",
+   "target": "Add to cart",
+   "within": "Sauce Labs Onesie"
+  },
+  {
+   "do": "click",
+   "target": "Cart"
+  },
+  {
+   "do": "expect_text",
+   "value": "Sauce Labs Onesie"
+  },
+  {
+   "do": "expect_url",
+   "url": "/cart.html"
+  }
+ ]
+}

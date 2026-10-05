@@ -1,0 +1,125 @@
+{
+ "url": "fixture:operations.html",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "New transfer"
+  },
+  {
+   "do": "click",
+   "target": "Save transfer"
+  },
+  {
+   "do": "expect_text",
+   "value": "Transfer name is required"
+  },
+  {
+   "do": "fill",
+   "target": "Transfer name",
+   "value": "QA Validation Pine"
+  },
+  {
+   "do": "select",
+   "target": "Region",
+   "value": "South"
+  },
+  {
+   "do": "select",
+   "target": "Destination",
+   "value": "Kochi"
+  },
+  {
+   "do": "fill",
+   "target": "Units",
+   "value": "0"
+  },
+  {
+   "do": "fill",
+   "target": "Notes",
+   "value": "Pine validation"
+  },
+  {
+   "do": "click",
+   "target": "Save transfer"
+  },
+  {
+   "do": "expect_text",
+   "value": "Units must be greater than zero"
+  },
+  {
+   "do": "expect_value",
+   "target": "Transfer name",
+   "value": "QA Validation Pine"
+  },
+  {
+   "do": "fill",
+   "target": "Units",
+   "value": "7"
+  },
+  {
+   "do": "expect_value",
+   "target": "Transfer name",
+   "value": "QA Validation Pine"
+  },
+  {
+   "do": "expect_value",
+   "target": "Destination",
+   "value": "Kochi"
+  },
+  {
+   "do": "expect_value",
+   "target": "Units",
+   "value": "7"
+  },
+  {
+   "do": "click",
+   "target": "Save transfer"
+  },
+  {
+   "do": "expect_text",
+   "value": "QA Validation Pine"
+  },
+  {
+   "do": "expect_text",
+   "value": "Destination: Kochi"
+  },
+  {
+   "do": "expect_text",
+   "value": "Units: 7"
+  },
+  {
+   "do": "expect_text",
+   "value": "Pine validation"
+  },
+  {
+   "do": "expect_text",
+   "value": "Status: Scheduled"
+  },
+  {
+   "do": "expect_text",
+   "value": "Units must be greater than zero",
+   "present": false
+  },
+  {
+   "do": "click",
+   "target": "Back to transfers"
+  },
+  {
+   "do": "click",
+   "target": "QA Validation Pine"
+  },
+  {
+   "do": "expect_text",
+   "value": "Destination: Kochi"
+  },
+  {
+   "do": "expect_text",
+   "value": "Units: 7"
+  },
+  {
+   "do": "expect_text",
+   "value": "Status: Scheduled"
+  }
+ ]
+}

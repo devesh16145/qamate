@@ -1,0 +1,125 @@
+{
+ "url": "fixture:operations.html",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "New transfer"
+  },
+  {
+   "do": "fill",
+   "target": "Transfer name",
+   "value": "QA Dispatch Cedar"
+  },
+  {
+   "do": "select",
+   "target": "Region",
+   "value": "North"
+  },
+  {
+   "do": "select",
+   "target": "Destination",
+   "value": "Jaipur"
+  },
+  {
+   "do": "fill",
+   "target": "Units",
+   "value": "12"
+  },
+  {
+   "do": "fill",
+   "target": "Notes",
+   "value": "Cedar delivery"
+  },
+  {
+   "do": "click",
+   "target": "Choose service"
+  },
+  {
+   "do": "click",
+   "target": "Express"
+  },
+  {
+   "do": "expect_value",
+   "target": "Transfer name",
+   "value": "QA Dispatch Cedar"
+  },
+  {
+   "do": "expect_value",
+   "target": "Destination",
+   "value": "Jaipur"
+  },
+  {
+   "do": "expect_value",
+   "target": "Units",
+   "value": "12"
+  },
+  {
+   "do": "expect_value",
+   "target": "Notes",
+   "value": "Cedar delivery"
+  },
+  {
+   "do": "click",
+   "target": "Save transfer"
+  },
+  {
+   "do": "expect_text",
+   "value": "QA Dispatch Cedar"
+  },
+  {
+   "do": "expect_text",
+   "value": "Destination: Jaipur"
+  },
+  {
+   "do": "expect_text",
+   "value": "Units: 12"
+  },
+  {
+   "do": "expect_text",
+   "value": "Service: Express"
+  },
+  {
+   "do": "expect_text",
+   "value": "Cedar delivery"
+  },
+  {
+   "do": "expect_text",
+   "value": "Status: Scheduled"
+  },
+  {
+   "do": "click",
+   "target": "Back to transfers"
+  },
+  {
+   "do": "fill",
+   "target": "Search transfers",
+   "value": "QA Dispatch Cedar"
+  },
+  {
+   "do": "expect_value",
+   "target": "Search transfers",
+   "value": "QA Dispatch Cedar"
+  },
+  {
+   "do": "click",
+   "target": "QA Dispatch Cedar"
+  },
+  {
+   "do": "expect_text",
+   "value": "Destination: Jaipur"
+  },
+  {
+   "do": "expect_text",
+   "value": "Units: 12"
+  },
+  {
+   "do": "expect_text",
+   "value": "Service: Express"
+  },
+  {
+   "do": "expect_text",
+   "value": "Status: Scheduled"
+  }
+ ]
+}

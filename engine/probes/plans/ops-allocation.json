@@ -1,0 +1,118 @@
+{
+ "url": "fixture:operations.html",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "Inventory"
+  },
+  {
+   "do": "click",
+   "target": "Next page"
+  },
+  {
+   "do": "click",
+   "target": "Next page"
+  },
+  {
+   "do": "click",
+   "target": "Next page"
+  },
+  {
+   "do": "expect_text",
+   "value": "Page 4 of 4"
+  },
+  {
+   "do": "expect_text",
+   "value": "Batch 024"
+  },
+  {
+   "do": "click",
+   "target": "Batch 024"
+  },
+  {
+   "do": "expect_text",
+   "value": "Fertilizer"
+  },
+  {
+   "do": "expect_text",
+   "value": "Warehouse South"
+  },
+  {
+   "do": "expect_text",
+   "value": "Available units: 24"
+  },
+  {
+   "do": "expect_text",
+   "value": "No allocation"
+  },
+  {
+   "do": "click",
+   "target": "Allocate stock"
+  },
+  {
+   "do": "select",
+   "target": "Customer",
+   "value": "CityGrow"
+  },
+  {
+   "do": "select",
+   "target": "Tier",
+   "value": "Priority"
+  },
+  {
+   "do": "fill",
+   "target": "Quantity",
+   "value": "3"
+  },
+  {
+   "do": "expect_value",
+   "target": "Customer",
+   "value": "CityGrow"
+  },
+  {
+   "do": "expect_value",
+   "target": "Tier",
+   "value": "Priority"
+  },
+  {
+   "do": "expect_value",
+   "target": "Quantity",
+   "value": "3"
+  },
+  {
+   "do": "click",
+   "target": "Confirm allocation"
+  },
+  {
+   "do": "expect_text",
+   "value": "Batch 024"
+  },
+  {
+   "do": "expect_text",
+   "value": "Allocated 3 to CityGrow (Priority)"
+  },
+  {
+   "do": "expect_text",
+   "value": "No allocation",
+   "present": false
+  },
+  {
+   "do": "click",
+   "target": "Back to inventory"
+  },
+  {
+   "do": "click",
+   "target": "Batch 024"
+  },
+  {
+   "do": "expect_text",
+   "value": "Allocated 3 to CityGrow (Priority)"
+  },
+  {
+   "do": "expect_text",
+   "value": "No allocation",
+   "present": false
+  }
+ ]
+}

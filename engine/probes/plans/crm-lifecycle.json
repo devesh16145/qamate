@@ -1,0 +1,150 @@
+{
+ "url": "https://marmelab.com/atomic-crm-demo/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "Companies"
+  },
+  {
+   "do": "click",
+   "target": "New Company"
+  },
+  {
+   "do": "fill",
+   "target": "Company name",
+   "value": "QAMATE Lifecycle 9f58c327"
+  },
+  {
+   "do": "fill",
+   "target": "Website",
+   "value": "https://example.com"
+  },
+  {
+   "do": "fill",
+   "target": "City",
+   "value": "Qamate Test City"
+  },
+  {
+   "do": "fill",
+   "target": "Description",
+   "value": "Qamate original description"
+  },
+  {
+   "do": "select",
+   "target": "Sector",
+   "value": "Industrials"
+  },
+  {
+   "do": "select",
+   "target": "Size",
+   "value": "10-49 employees"
+  },
+  {
+   "do": "expect_value",
+   "target": "Company name",
+   "value": "QAMATE Lifecycle 9f58c327"
+  },
+  {
+   "do": "expect_value",
+   "target": "Website",
+   "value": "https://example.com"
+  },
+  {
+   "do": "expect_value",
+   "target": "City",
+   "value": "Qamate Test City"
+  },
+  {
+   "do": "expect_value",
+   "target": "Description",
+   "value": "Qamate original description"
+  },
+  {
+   "do": "click",
+   "target": "Create Company"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "QAMATE Lifecycle 9f58c327"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate Test City"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate original description"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Industrials"
+  },
+  {
+   "do": "click",
+   "target": "Edit company"
+  },
+  {
+   "do": "fill",
+   "target": "City",
+   "value": "Qamate Revised City"
+  },
+  {
+   "do": "fill",
+   "target": "Description",
+   "value": "Qamate revised description"
+  },
+  {
+   "do": "click",
+   "target": "Save"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate Revised City"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate revised description"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate Test City",
+   "present": false
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate original description",
+   "present": false
+  },
+  {
+   "do": "click",
+   "target": "Companies"
+  },
+  {
+   "do": "fill",
+   "target": "Search",
+   "value": "QAMATE Lifecycle 9f58c327"
+  },
+  {
+   "do": "expect_value",
+   "target": "Search",
+   "value": "QAMATE Lifecycle 9f58c327"
+  },
+  {
+   "do": "click",
+   "target": "QAMATE Lifecycle 9f58c327"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate Revised City"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Qamate revised description"
+  },
+  {
+   "do": "expect_page_text",
+   "value": "Industrials"
+  }
+ ]
+}

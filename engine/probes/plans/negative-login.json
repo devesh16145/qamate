@@ -1,0 +1,44 @@
+{
+ "url": "https://www.saucedemo.com/",
+ "seen": true,
+ "steps": [
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "expect_text",
+   "value": "Username is required"
+  },
+  {
+   "do": "fill",
+   "target": "Username",
+   "value": "standard_user"
+  },
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "expect_text",
+   "value": "Password is required"
+  },
+  {
+   "do": "fill",
+   "target": "Password",
+   "value": "secret_sauce"
+  },
+  {
+   "do": "click",
+   "target": "Login"
+  },
+  {
+   "do": "expect_url",
+   "url": "/inventory.html"
+  },
+  {
+   "do": "expect_text",
+   "value": "Products"
+  }
+ ]
+}

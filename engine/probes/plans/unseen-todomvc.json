@@ -1,0 +1,89 @@
+{
+ "url": "https://demo.playwright.dev/todomvc/",
+ "seen": false,
+ "note": "first attempt 2026-10-05: three items, then mark one done and filter",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "What needs to be done?",
+   "value": "Buy milk"
+  },
+  {
+   "do": "press",
+   "key": "Enter",
+   "target": "What needs to be done?"
+  },
+  {
+   "do": "fill",
+   "target": "What needs to be done?",
+   "value": "Write report"
+  },
+  {
+   "do": "press",
+   "key": "Enter",
+   "target": "What needs to be done?"
+  },
+  {
+   "do": "fill",
+   "target": "What needs to be done?",
+   "value": "Call Asha"
+  },
+  {
+   "do": "press",
+   "key": "Enter",
+   "target": "What needs to be done?"
+  },
+  {
+   "do": "check",
+   "target": "Toggle Todo",
+   "within": "Write report"
+  },
+  {
+   "do": "expect_text",
+   "value": "1 item left"
+  },
+  {
+   "do": "click",
+   "target": "Active"
+  },
+  {
+   "do": "expect_text",
+   "value": "Buy milk"
+  },
+  {
+   "do": "expect_text",
+   "value": "Write report",
+   "present": false
+  },
+  {
+   "do": "click",
+   "target": "Completed"
+  },
+  {
+   "do": "expect_text",
+   "value": "Write report"
+  },
+  {
+   "do": "expect_text",
+   "value": "Buy milk",
+   "present": false
+  },
+  {
+   "do": "click",
+   "target": "Clear completed"
+  },
+  {
+   "do": "click",
+   "target": "All"
+  },
+  {
+   "do": "expect_text",
+   "value": "Write report",
+   "present": false
+  },
+  {
+   "do": "expect_text",
+   "value": "Buy milk"
+  }
+ ]
+}

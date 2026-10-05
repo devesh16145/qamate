@@ -341,3 +341,21 @@ Not yet measured: the live planner on these ten workflows (time, tokens, re-plan
 run Benchmark → Engine: Fast. The streaming and app-memory gains depend on live planner behaviour.
 Optional next steps after that measurement: re-plans without thinking (MiMo/DeepSeek declare an
 off switch; keep it opt-in until measured), and cached step sequences (login) per project.
+
+### 2026-10-05 — generalisation review: the engine is not ready for unknown apps
+
+Frozen at `aaffea5`, no models (hand-written plans; planner quality is NOT measured here).
+Full results and how to reproduce: [engine/probes/README.md](../engine/probes/README.md).
+
+| Probe | Result |
+|---|---|
+| Ten benchmark flows, perfect plans | 6/10 pass; 3 blocked by the loop guard (third identical action on one URL), 1 by the role-word rule |
+| Unseen apps, first attempt (TodoMVC demo; Practice Software Testing tool shop) | 0/2; the tool shop has three independent blockers |
+| 19 common web patterns | 6 pass, 12 fail, 1 needs a re-plan; one failure is a confident wrong click |
+| App with server-side data | create-tests cannot be saved (unique names / duplicate matches) or add a record per run |
+| Exploration of unseen admin templates | AdminLTE 60 pages; CoreUI 3 pages |
+| Live MiMo runs (2, same CRM task) | ~30 s each, planner 28 s of it; one saved; planner wrote a `done` step (one wasted call), copied the prompt's example flow name `orders`, and one check ("Industrials" after search) cannot fail |
+
+Two of the rules that broke unseen apps were added the day before to make the CRM pass. Consumed
+(no longer unseen): demo.playwright.dev/todomvc, practicesoftwaretesting.com, adminlte.io demo,
+coreui.io demo. the-internet.herokuapp.com timed out under Playwright and produced no result.

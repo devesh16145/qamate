@@ -1,0 +1,46 @@
+{
+ "url": "https://practicesoftwaretesting.com/",
+ "seen": false,
+ "note": "first attempt 2026-10-05: search, open product, quantity 2, add to cart, check cart",
+ "steps": [
+  {
+   "do": "fill",
+   "target": "Search",
+   "value": "Pliers"
+  },
+  {
+   "do": "click",
+   "target": "Search"
+  },
+  {
+   "do": "click",
+   "target": "Combination Pliers"
+  },
+  {
+   "do": "expect_text",
+   "value": "Combination Pliers"
+  },
+  {
+   "do": "fill",
+   "target": "Quantity",
+   "value": "2"
+  },
+  {
+   "do": "click",
+   "target": "Add to cart"
+  },
+  {
+   "do": "click",
+   "target": "Cart"
+  },
+  {
+   "do": "expect_text",
+   "value": "Combination Pliers"
+  },
+  {
+   "do": "expect_value",
+   "target": "Quantity",
+   "value": "2"
+  }
+ ]
+}
