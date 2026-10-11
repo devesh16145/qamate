@@ -137,6 +137,7 @@ class FastAgent:
                     "ask": "Which site should I explore? Include its address, for example: "
                            "Explore https://marmelab.com/atomic-crm-demo/ and list its pages and forms."}
         problem, meta, plan_items, stop_reason = None, {"flow": "agent", "title": ""}, [], None
+        failed_checks = {}           # a check the page failed, and how often: the same one twice is the app's answer
         for round_no in range(self.max_rounds):
             if time.monotonic() - started > self.max_seconds:
                 stop_reason = f"stopped after {self.max_seconds} s"
@@ -170,7 +171,16 @@ class FastAgent:
                 if not outcome["ok"]:
                     problem = {"step": public_intent(intent), **_brief(outcome)}
                     stream.cancel()   # the rest was planned for a page that turned out different
+                    if outcome.get("reason") == "check_failed":
+                        key = _same_check(intent)
+                        failed_checks[key] = failed_checks.get(key, 0) + 1
+                        if failed_checks[key] >= 2:
+                            # The planner asked the same question twice and the page said no twice:
+                            # that is a finding about the app, not a plan to keep correcting.
+                            stop_reason = f"the page fails the same check twice: {_intent_text(intent)}"
                     break
+            if stop_reason:
+                break
             try:
                 plan = stream.result()
             except LLMError as exc:
@@ -395,6 +405,12 @@ def draft_bug(store, finding):
     with open(store, "w", encoding="utf-8") as f:
         json.dump(items, f, indent=2, ensure_ascii=False)
     return item["id"]
+
+
+def _same_check(intent):
+    """What makes two checks the same question: the kind, what, and where."""
+    return (intent.get("do"), str(intent.get("target") or ""), str(intent.get("value") or intent.get("url") or ""),
+            str(intent.get("within") or ""), bool(intent.get("present", True)))
 
 
 def _brief(outcome):

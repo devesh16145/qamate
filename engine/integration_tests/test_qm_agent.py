@@ -259,3 +259,21 @@ def test_a_check_the_app_fails_becomes_a_bug_draft_with_reproduction(monkeypatch
     text = summary_text(result)
     assert "**Possible bug:**" in text and "Saved as a draft in Bugs & stories" in text
     page.close()
+
+
+def test_the_same_failed_check_twice_ends_the_task_with_the_finding(monkeypatch, browser, server, tmp_path):
+    """A planner that keeps asserting what the page does not show would burn every round:
+    after the second identical failure the task ends, and the finding is written up."""
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    same = {"steps": [{"do": "expect_text", "value": "Status: Delivered"}], "test": {"flow": "transfers"}}
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path,
+                                    [{"steps": [{"do": "click", "target": "New transfer"},
+                                                {"do": "fill", "target": "Transfer name", "value": "Batch 3"},
+                                                {"do": "click", "target": "Save transfer"},
+                                                {"do": "expect_text", "value": "Status: Delivered"}],
+                                      "test": {"flow": "transfers"}}] + [same] * 6, log_dir=str(tmp_path / "logs"))
+    result = agent.run_task("Create transfer Batch 3 and check it is delivered")
+    assert len(scripted.calls) == 2 and "fails the same check twice" in result["stop_reason"]
+    assert result["finding"]["expected"] == "'Status: Delivered' is shown" and result["saved"] is None
+    page.close()
