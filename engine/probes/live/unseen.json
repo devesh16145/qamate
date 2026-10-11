@@ -1,0 +1,131 @@
+{
+ "note": "Plain requests, as a user would type them, on apps the fast engine was never tuned to with the live planner. Run through Benchmark -> Task set: unseen (engine/qm_bench.py --tasks). No logins, no account creation, no messages to anyone; carts and demo records only.",
+ "tasks": [
+  {
+   "id": "bank-deposit",
+   "app": "xyz-bank",
+   "url": "https://www.globalsqa.com/angularJs-protractor/BankingProject/#/login",
+   "prompt": "Log in as customer Harry Potter (choose the name, no password), deposit 500 and check the message Deposit Successful and that the balance shows 500. Then withdraw 200 and check Transaction successful and balance 300. Log out at the end."
+  },
+  {
+   "id": "bank-manager-customer",
+   "app": "xyz-bank",
+   "url": "https://www.globalsqa.com/angularJs-protractor/BankingProject/#/login",
+   "prompt": "Open Bank Manager Login, add a customer with first name Qamate, last name Probe {unique} and post code 560001, accept the pop-up, then open Customers, search for Probe {unique} and check the customer is listed with post code 560001."
+  },
+  {
+   "id": "store-search-cart",
+   "app": "opencart",
+   "url": "https://ecommerce-playground.lambdatest.io/",
+   "prompt": "Search for iPhone, open the first iPhone result, add it to the cart, go to the cart page and check the iPhone is listed with quantity 1. Change the quantity to 2, update, and check the cart shows quantity 2."
+  },
+  {
+   "id": "store-category-sort",
+   "app": "opencart",
+   "url": "https://ecommerce-playground.lambdatest.io/",
+   "prompt": "Open the Desktops category from the Top Trending Categories section, sort the products by Price (Low > High), check the sort dropdown shows that choice, then switch to List view and check the products are shown as a list."
+  },
+  {
+   "id": "store-wishlist-drawer",
+   "app": "opencart",
+   "url": "https://ecommerce-playground.lambdatest.io/",
+   "prompt": "Open the cart drawer from the header (the cart icon), check it says the cart is empty, close it, then search for MacBook and check the results page heading mentions MacBook."
+  },
+  {
+   "id": "antd-form",
+   "app": "antd",
+   "url": "https://ant.design/~demos/form-demo-validate-other",
+   "prompt": "In this form choose China in Select, choose Red and Green in the multiple select, set InputNumber to 7, switch the Switch on, choose radio item 3, tick checkbox E, upload a file with Click to upload, and check each of those values is shown before clicking Submit."
+  },
+  {
+   "id": "antd-reset",
+   "app": "antd",
+   "url": "https://ant.design/~demos/form-demo-validate-other",
+   "prompt": "Set InputNumber to 9 and turn the Switch on, then click reset and check InputNumber is back to its original value 3 and the Switch is off."
+  },
+  {
+   "id": "ngmat-select",
+   "app": "angular-material",
+   "url": "https://material.angular.dev/components/select/examples",
+   "prompt": "In the 'Select in a form' example choose Pizza as Favorite food and Saab as Favorite car and check 'Selected food: pizza-1' is shown. In the 'Select with multiple selection' example choose Mushroom and Onion as Toppings and check the field shows Mushroom, Onion."
+  },
+  {
+   "id": "ngmat-datepicker",
+   "app": "angular-material",
+   "url": "https://material.angular.dev/components/datepicker/examples",
+   "prompt": "In the 'Basic date range picker' example type 10/05/2026 as the start date and 10/12/2026 as the end date, then open its calendar and pick October 20 to October 24, 2026, and check the start and end fields show 10/20/2026 and 10/24/2026."
+  },
+  {
+   "id": "ngmat-autocomplete",
+   "app": "angular-material",
+   "url": "https://material.angular.dev/components/autocomplete/examples",
+   "prompt": "In the 'Simple autocomplete' example type 'Th' in the Number field and choose Three from the suggestions, then check the field holds Three."
+  },
+  {
+   "id": "ngmat-stepper",
+   "app": "angular-material",
+   "url": "https://material.angular.dev/components/stepper/examples",
+   "prompt": "In the 'Stepper with required steps' example fill the name field with Qamate, click Next, fill the address field with Pune, click Next, and check the last step says you are now done."
+  },
+  {
+   "id": "quill-editor",
+   "app": "quill",
+   "url": "https://quilljs.com/playground/snow",
+   "prompt": "Type 'Hello from a test' into the editor in the preview, make it bold with the toolbar, and check the editor shows the text."
+  },
+  {
+   "id": "jqueryui-droppable",
+   "app": "jquery-ui",
+   "url": "https://jqueryui.com/droppable/",
+   "prompt": "Drag the 'Drag me to my target' box onto 'Drop here' and check it then says Dropped!."
+  },
+  {
+   "id": "jqueryui-sortable",
+   "app": "jquery-ui",
+   "url": "https://jqueryui.com/sortable/",
+   "prompt": "In the sortable list, drag Item 1 below Item 3 and check Item 1 is no longer the first item."
+  },
+  {
+   "id": "todomvc",
+   "app": "todomvc",
+   "url": "https://demo.playwright.dev/todomvc",
+   "prompt": "Add the todos 'buy milk {unique}' and 'walk the dog {unique}', complete the first one, check the footer shows 1 item left, filter by Completed and check only 'buy milk {unique}' is listed, then clear completed and check it is gone."
+  },
+  {
+   "id": "webtables",
+   "app": "demoqa",
+   "url": "https://demoqa.com/webtables",
+   "prompt": "Add a record with first name Asha, last name Probe {unique}, email asha.probe@example.com, age 31, salary 52000, department QA; check the new row shows QA; search for Probe {unique} and check only that row is listed; edit it to salary 61000 and check the row shows 61000."
+  },
+  {
+   "id": "demoqa-practice-form",
+   "app": "demoqa",
+   "url": "https://demoqa.com/automation-practice-form",
+   "prompt": "Fill the practice form: first name Asha, last name Probe, email asha@example.com, gender Female, mobile 9876543210, subject Maths, hobby Reading, current address 12 Lake Road; submit and check the confirmation shows 'Thanks for submitting the form' with the name Asha Probe and the mobile number."
+  },
+  {
+   "id": "demoqa-alerts",
+   "app": "demoqa",
+   "url": "https://demoqa.com/alerts",
+   "prompt": "Click the button that shows an alert after 5 seconds and accept it; click the confirm button, choose OK, and check the page says You selected Ok; click the prompt button, enter Qamate and check the page shows You entered Qamate."
+  },
+  {
+   "id": "expandtesting-inputs",
+   "app": "expandtesting",
+   "url": "https://practice.expandtesting.com/inputs",
+   "prompt": "Enter 42 in the number field, 'Qamate' in the text field, 'secret-word' in the password field, 2026-10-11 in the date field, click Display Inputs and check the outputs show 42, Qamate and 2026-10-11."
+  },
+  {
+   "id": "expandtesting-dropdown",
+   "app": "expandtesting",
+   "url": "https://practice.expandtesting.com/dropdown",
+   "prompt": "Choose Option 2 in the dropdown and check it is selected; choose Blue as the colour and check it; choose a country Canada and check the country dropdown shows Canada."
+  },
+  {
+   "id": "books-shadow",
+   "app": "books-pwa",
+   "url": "https://books-pwakit.appspot.com/",
+   "prompt": "Search for 'playwright' in the search box and check the results list has at least one book whose title contains Playwright; open the first result and check its details page shows a title and a description."
+  }
+ ]
+}

@@ -2901,7 +2901,7 @@ const BENCH_VERDICT_COLOR = {
 const BENCH_SCOPES = [
   { id: '', label: 'All 10 tasks' }, { id: 'crm', label: 'Atomic CRM (3)' },
   { id: 'saucedemo', label: 'SauceDemo (4)' }, { id: 'dispatch', label: 'Dispatch Desk (3)' },
-];
+];   // other task sets (engine/probes/live/*.json) are listed after these, as 'set:<name>'
 
 function BenchPanel({ toast }) {
   const [providers, setProviders] = useState([]);
@@ -2912,6 +2912,7 @@ function BenchPanel({ toast }) {
   const [model, setModel] = useState('');           // optional planner model id for this run only
   const [chooserModels, setChooserModels] = useState('');
   const [chooserRuns, setChooserRuns] = useState([]);
+  const [taskSets, setTaskSets] = useState([]);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState([]);
   const [results, setResults] = useState([]);
@@ -2932,6 +2933,7 @@ function BenchPanel({ toast }) {
         if (provs.length) setProvider(provs[0]);
         const st = await window.ats.benchStatus();
         setRunning(!!(st && st.running));
+        setTaskSets(await window.ats.benchTaskSets() || []);
       } catch (e) { /* noop */ }
       refreshResults();
     })();
@@ -2956,7 +2958,8 @@ function BenchPanel({ toast }) {
   }, [log]);
 
   const start = async () => {
-    const r = await window.ats.benchRun(engine === 'fast' ? { provider, engine, only: scope, warm, model: model.trim() } : { provider, engine });
+    const set = scope.startsWith('set:') ? scope.slice(4) : '';
+    const r = await window.ats.benchRun(engine === 'fast' ? { provider, engine, only: set ? '' : scope, warm, model: model.trim(), tasks: set } : { provider, engine });
     if (!r || !r.ok) toast((r && r.error) || 'could not start benchmark');
   };
   const compareChoosers = async () => {
@@ -2986,6 +2989,7 @@ function BenchPanel({ toast }) {
             <select value={scope} onChange={e => setScope(e.target.value)} disabled={running}
                     style={{ fontSize: 12, padding: '4px 8px' }} title="Which tasks to run">
               {BENCH_SCOPES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              {taskSets.map(name => <option key={'set:' + name} value={'set:' + name}>Task set: {name}</option>)}
             </select>
             <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}
                    title="Tasks on the same app share what earlier tasks learned about its pages">
@@ -3129,7 +3133,7 @@ function BenchPanel({ toast }) {
                   <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
                       onClick={() => setOpenRun(isOpen ? null : r.id)}>
                     <td style={{ padding: '6px', fontFamily: 'var(--mono)', fontSize: 11 }}>{r.id}</td>
-                    <td style={{ padding: '6px' }}>{r.provider}{r.model ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}> {r.model}</span> : null}{r.engine === 'fast' ? <span style={{ color: 'var(--text-3)' }}> · fast{r.env === 'warm' ? ' · warm' : ''}</span> : null}</td>
+                    <td style={{ padding: '6px' }}>{r.provider}{r.model ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}> {r.model}</span> : null}{r.engine === 'fast' ? <span style={{ color: 'var(--text-3)' }}> · fast{r.env === 'warm' ? ' · warm' : ''}{r.taskSet && r.taskSet !== 'workflows' ? ' · ' + r.taskSet : ''}</span> : null}</td>
                     <td style={{ padding: '6px', fontWeight: 700,
                                  color: (sc.benchmark_score || 0) >= 70 ? 'var(--green, #16a34a)' : (sc.benchmark_score || 0) >= 40 ? '#c2410c' : 'var(--red, #dc2626)' }}>
                       {sc.benchmark_score != null ? `${sc.benchmark_score}%` : '—'}

@@ -1262,6 +1262,10 @@ ipcMain.handle('bench-run', async (event, opts) => {
     if (provider) args.push('--provider', provider);
     if (only) args.push('--only', only);
     if (fast && opts.warm) args.push('--warm');
+    // A task set other than the ten workflows: a file name from engine/probes/live only.
+    const taskSet = fast && typeof opts.tasks === 'string' && /^[\w-]{1,60}$/.test(opts.tasks) ? opts.tasks : '';
+    if (taskSet && fs.existsSync(path.join(APP_ROOT, 'engine', 'probes', 'live', `${taskSet}.json`)))
+      args.push('--tasks', path.join(APP_ROOT, 'engine', 'probes', 'live', `${taskSet}.json`));
     if (fast && modelId(opts.model)) args.push('--model', modelId(opts.model));
   }
   benchProcess = spawn(VENV_PYTHON, args, {
@@ -1312,6 +1316,11 @@ ipcMain.handle('bench-stop', async () => {
   return { ok: true };
 });
 
+ipcMain.handle('bench-task-sets', async () => {
+  const dir = path.join(APP_ROOT, 'engine', 'probes', 'live');
+  try { return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => f.slice(0, -5)); } catch { return []; }
+});
+
 ipcMain.handle('bench-status', async () => ({ running: !!benchProcess, pid: benchProcess ? benchProcess.pid : null }));
 
 ipcMain.handle('bench-results', async () => {
@@ -1328,7 +1337,7 @@ ipcMain.handle('bench-results', async () => {
     try {
       const sc = JSON.parse(fs.readFileSync(p, 'utf-8'));
       out.push({ id: d, generated: sc.generated, provider: sc.provider, model: sc.model, env: sc.env,
-                 engine: sc.engine || 'classic',
+                 engine: sc.engine || 'classic', taskSet: sc.task_set || '',
                  scorecard: sc.scorecard, tasks: sc.tasks, folder: path.join(benchDir, d) });
     } catch { /* partial write — skip */ }
   }

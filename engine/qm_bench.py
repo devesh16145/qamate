@@ -23,6 +23,7 @@ Scorecards land in results/_agent_bench/<timestamp>-fast/ (listed by the Benchma
     venv/bin/python engine/qm_bench.py --provider mimo --only crm      # an app, or task ids
     venv/bin/python engine/qm_bench.py --provider mimo --warm          # shared app memory
     venv/bin/python engine/qm_bench.py --provider openrouter --model z-ai/glm-5.3-flash   # try another planner
+    venv/bin/python engine/qm_bench.py --provider mimo --tasks engine/probes/live/unseen.json   # other apps, plain requests
 --model swaps the model of the chosen profile for this run only (settings are not changed),
 so planner models can be compared on the same ten workflows with one key.
 Keys come from the environment (the app passes the ones stored in the keychain).
@@ -117,11 +118,22 @@ TASKS = [
 APPS = {"crm": ("Atomic CRM demo", CRM), "saucedemo": ("SauceDemo", SAUCE), "dispatch": ("Dispatch Desk", None)}
 
 
-def select_tasks(only):
+def select_tasks(only, tasks=None):
+    tasks = list(TASKS if tasks is None else tasks)
     if not only:
-        return list(TASKS)
+        return tasks
     wanted = {w.strip() for part in only for w in part.split(",") if w.strip()}
-    return [t for t in TASKS if t["id"] in wanted or t["app"] in wanted]
+    return [t for t in tasks if t["id"] in wanted or t["app"] in wanted]
+
+
+def load_tasks(path):
+    """A task file: {"tasks": [{"id", "app", "url", "prompt", "destructive_ok"?}, ...]}. Each app
+    named gets a project of its own; the url is where its tasks start."""
+    with open(path, encoding="utf-8") as f:
+        tasks = json.load(f)["tasks"]
+    for task in tasks:
+        APPS.setdefault(task["app"], (task["app"], task["url"]))
+    return tasks
 
 
 def verify_independently(root, project_id, test_path, tc_id, runs, out_dir):
@@ -237,6 +249,7 @@ def main(argv=None):
     ap.add_argument("--provider", help="planner profile from config.json (default: the configured default)")
     ap.add_argument("--model", help="use this model id with that profile's endpoint and key, for this run only")
     ap.add_argument("--only", action="append", default=[], help="task ids or apps (crm, saucedemo, dispatch)")
+    ap.add_argument("--tasks", help="a JSON task file instead of the ten workflows (see engine/probes/live/)")
     ap.add_argument("--warm", action="store_true", help="tasks on the same app share the app memory")
     ap.add_argument("--verify-runs", type=int, default=2)
     ap.add_argument("--headed", action="store_true")
@@ -254,20 +267,21 @@ def main(argv=None):
     except Exception as exc:
         print(f"Cannot run: {exc}", flush=True)
         return 2
-    tasks = select_tasks(args.only)
+    tasks = select_tasks(args.only, load_tasks(args.tasks) if args.tasks else None)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_dir = os.path.join(args.ats_root, "results", "_agent_bench", f"{stamp}-fast")
+    task_set = os.path.splitext(os.path.basename(args.tasks))[0] if args.tasks else "workflows"
+    out_dir = os.path.join(args.ats_root, "results", "_agent_bench", f"{stamp}-fast" + ("" if not args.tasks else "-" + task_set))
     root = os.path.join(out_dir, "root")
     os.makedirs(root, exist_ok=True)
     emit = lambda line: print(line, flush=True)
-    emit(f"Fast-engine benchmark: {len(tasks)} task(s), planner {profile} ({model}), "
+    emit(f"Fast-engine benchmark ({task_set}): {len(tasks)} task(s), planner {profile} ({model}), "
          f"{'warm' if args.warm else 'cold'} app memory, {args.verify_runs} independent run(s) each")
     rows, maps, projects = [], {}, {}
     with operations_app() as dispatch_url, sync_playwright() as pw:
         browser = pw.chromium.launch(headless=not args.headed)
         for task in tasks:
             name, base_url = APPS[task["app"]]
-            base_url = base_url or dispatch_url
+            base_url = task.get("url") or base_url or dispatch_url
             if task["app"] not in projects:
                 projects[task["app"]] = project_store.create_project(root, name, base_url)
             project = projects[task["app"]]
@@ -281,7 +295,7 @@ def main(argv=None):
                                  verify_runs=args.verify_runs, emit=emit))
             with open(os.path.join(out_dir, "scorecard.json"), "w", encoding="utf-8") as f:   # partial results survive a stop
                 json.dump({"generated": datetime.datetime.now().isoformat(timespec="seconds"),
-                           "provider": profile, "model": model, "engine": "fast",
+                           "provider": profile, "model": model, "engine": "fast", "task_set": task_set,
                            "env": "warm" if args.warm else "cold", "scorecard": summarize(rows),
                            "tasks": rows}, f, indent=2, default=str)
         browser.close()
