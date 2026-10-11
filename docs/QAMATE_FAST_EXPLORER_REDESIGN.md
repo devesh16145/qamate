@@ -408,3 +408,28 @@ explicit steps, no fixed sleeps unless asked for.
 **Still open.** Live benchmark with MiMo; chooser and planner model comparisons; apps behind
 SSO/MFA beyond a captured session; canvas apps; nested frames more than one deep for role-less
 editors; download contents; the MUI date field still records a text locator.
+
+### 2026-10-11 — eyes, a bug report, and the first numbers with real models
+
+**Liquid d1 as the decision model.** New `liquid` preset (TypeSafe's request shape and
+`/systemone` path; the situation sent as text; images through Liquid's own API, text only through
+OpenRouter). When the decision model can see, the chooser takes a screenshot, outlines each
+candidate on screen with a numbered red box, asks about the picture and the words together, and
+on a split answer asks again with the candidates' part of the window enlarged. 13 real ambiguous
+decisions were recorded with their pictures and the engine's verified choice as the answer
+(`engine/probes/record_chooser_cases.py`). Results of the comparison, run through the app with
+its own keys: see the probe README. d1 is now the default decision model.
+
+**A found bug is written up.** A task that ends on a check the page fails (not on a step the plan
+got wrong) produces a finding: steps to reproduce in words and as test lines, expected, actual,
+a screenshot at the failure, console errors and failed requests the app reported. It is drafted
+into the app's Bug & story list with the screenshot attached.
+
+**Task sets.** `qm_bench.py --tasks` runs any JSON task set with the live planner;
+`engine/probes/live/unseen.json` holds 21 plain requests on apps the engine was never tuned to
+(bank demo, online store, Ant Design, Angular Material, editors, drag-and-drop, demoqa, and more).
+Both this and the ten workflows are run from the Benchmark tab; results in the probe README.
+
+**Fixed along the way.** After the app scan, the task's own Flow decides the page's dialogs again
+(the scan's Flow had taken over). An expected URL without a query string matches the page with one.
+

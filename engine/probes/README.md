@@ -55,6 +55,30 @@ reliability bug (a request slower than 1.5 s was treated as background; a form s
 received the next step's typing in its old copy — `slowswap` in patterns.html reproduces it).
 Expect a new app to need 0–3 engine fixes still; do not claim otherwise.
 
+## Chooser models, measured 2026-10-11
+
+`engine/qm_chooser_eval.py` on 56 cases: 43 written by hand (`chooser_cases.json`) and 13 recorded
+from real pages with the candidates marked on a screenshot (`chooser_cases_vision.json`, made by
+`record_chooser_cases.py`). Each case is asked twice in opposite orders with an explicit "none";
+only agreement counts. Run from the app with its keys (Benchmark → Compare).
+
+| Model | Correct | Wrong picks | Not sure | Median |
+|---|---|---|---|---|
+| Liquid d1, with the pictures | 75.0% | 1 | 13 | 0.70 s |
+| Liquid d1, words only | 73.2% | 0 | 15 | 0.67 s |
+| Liquid d1 via OpenRouter (words) | 71.4% | 1 | 15 | 0.65 s |
+| TypeSafe Jev 1.13 via OpenRouter (two runs) | 67.9% / 71.4% | 1 / 2 | 17 / 14 | 0.53 s |
+| Cloudflare clef-flash | 82.1% | 4 | 6 | 0.71 s |
+| Qwen 3.8 27B (chat) | 66.1% | 0 | 19 | 0.78 s |
+| GPT-6 Luna / Claude Haiku 4.5 / Gemini 3.5 Flash Lite (chat) | 60.7–66.1% | 1–2 | 16–20 | 1.0–1.2 s |
+
+Two runs of the same model differ by about two cases, so differences of one or two are noise.
+A wrong pick is a wrong click in a test; "not sure" costs a re-plan. d1 became the default
+decision model on this evidence; clef-flash is more decisive and four times wrong, which rules
+it out. Pictures helped on look-alike items (the namesake cards) and cost one confident mistake
+(two "Save" buttons in sibling sections). Perplexity's decider is not served on OpenRouter;
+Mistral Small was rate-limited.
+
 **What these probes do not measure:** the live planner (labels it invents, steps it forgets, how
 often it re-plans), the chooser model, cost and time with real models, anything behind a login the
 probes may not use, canvas-drawn apps, and file contents of downloads. The live numbers come from

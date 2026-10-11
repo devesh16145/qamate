@@ -429,12 +429,14 @@ def generic_url(rel):
 
 def url_pattern(expected):
     """Regex matching `expected` (a relative URL or a full URL) on any origin; an `:id`
-    segment matches any one segment."""
+    segment matches any one segment. An expected URL without a query string also matches
+    the page with one (a list page that records its filter as ?filter=...)."""
     rel = relative_url(expected) if "://" in expected else expected
     if not rel.startswith(("/", "#", "?")):
         rel = "/" + rel
     body = r"[^/?#]+".join(re.escape(piece) for piece in _ID_TOKEN.split(rel))
-    return re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+" + body + r"$")
+    tail = r"$" if "?" in rel else r"/?(?:\?[^#]*)?$"
+    return re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+" + body + tail)
 
 
 class Flow:

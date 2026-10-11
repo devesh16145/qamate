@@ -296,6 +296,11 @@ def test_urls_reached_by_a_click_match_any_record_id():
     assert pattern.match("https://crm.test/app/#/companies/812/show")
     assert not pattern.match("https://crm.test/app/#/companies/812/edit")
     assert not url_pattern("/a/:identity").match("https://x.test/a/123")               # only whole segments
+    # A list page that keeps its filter in the query string is still that page.
+    assert url_pattern("/app/#/companies").match("https://x.test/app/#/companies?filter=%7B%22q%22%3A%22QA%22%7D")
+    assert url_pattern("/app/#/companies").match("https://x.test/app/#/companies/")
+    assert not url_pattern("/app/#/companies").match("https://x.test/app/#/companies/12")
+    assert not url_pattern("/list?page=2").match("https://x.test/list?page=3")        # a query that is expected must match
 
 
 def test_planner_token_totals_survive_being_drained_between_turns():
