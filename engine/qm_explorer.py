@@ -308,6 +308,15 @@ class Explorer:
                 outcome = self._record(step, check=True, element=field.element)
                 if outcome["ok"]:
                     return outcome
+                # Some widgets show the chosen value beside the control rather than in it (Ant
+                # Design's Select): the page as a whole is checked, and the test says so.
+                step = {"op": "expect_page_text", "value": value, "present": True,
+                        "name": intent.get("name") or f"Page shows '{intent['value']}' (for {intent['within']})"}
+                outcome = self._record(step, check=True)
+                if outcome["ok"]:
+                    self.notes.append(f"'{value}' was checked on the whole page: the field '{within}' shows its "
+                                      f"value outside the control itself")
+                return outcome
         deadline = time.monotonic() + 1.5
         while True:
             obs = observe(self.page)
@@ -954,7 +963,10 @@ class Explorer:
         """True when this exact action has already been tried twice on a page that looked
         exactly like this -- i.e. it changes nothing. Repeating an action that does change
         the page (Next page, Add row, a second Save after fixing a field) is fine."""
-        signature = (step["op"], step.get("target"), str(step.get("value")), step.get("to"))
+        if step["op"] in ("fill", "type", "select", "check", "upload"):
+            return False            # setting a value already set changes nothing and harms nothing
+        signature = (step["op"], step.get("target"), str(step.get("value")), step.get("to"),
+                     step.get("dialog"), step.get("dialog_text"))     # answering a prompt differently is another try
         last = self._history.get(signature)
         if state is None or last is None or last["state"] != state:
             self._history[signature] = {"state": state, "stale": 0}
