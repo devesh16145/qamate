@@ -266,16 +266,24 @@ def test_the_same_failed_check_twice_ends_the_task_with_the_finding(monkeypatch,
     after the second identical failure the task ends, and the finding is written up."""
     page = browser.new_page()
     page.goto(server + "operations.html#/transfers")
-    same = {"steps": [{"do": "expect_text", "value": "Status: Delivered"}], "test": {"flow": "transfers"}}
-    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path,
-                                    [{"steps": [{"do": "click", "target": "New transfer"},
-                                                {"do": "fill", "target": "Transfer name", "value": "Batch 3"},
-                                                {"do": "click", "target": "Save transfer"},
-                                                {"do": "expect_text", "value": "Status: Delivered"}],
-                                      "test": {"flow": "transfers"}}] + [same] * 6, log_dir=str(tmp_path / "logs"))
+    first = {"steps": [{"do": "click", "target": "New transfer"},
+                       {"do": "fill", "target": "Transfer name", "value": "Batch 3"},
+                       {"do": "click", "target": "Save transfer"},
+                       {"do": "expect_text", "value": "Status: Delivered"}], "test": {"flow": "transfers"}}
+    # The plan acts again (opens the record) and asks the same question: the app's answer.
+    acted = {"steps": [{"do": "click", "target": "Transfers"}, {"do": "expect_text", "value": "Status: Delivered"}]}
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [first] + [acted] * 6,
+                                    log_dir=str(tmp_path / "logs"))
     result = agent.run_task("Create transfer Batch 3 and check it is delivered")
     assert len(scripted.calls) == 2 and "fails the same check twice" in result["stop_reason"]
     assert result["finding"]["expected"] == "'Status: Delivered' is shown" and result["saved"] is None
+    # The plan only repeats the question without acting: the planner's loop, not a finding.
+    page.goto(server + "operations.html#/transfers")
+    same = {"steps": [{"do": "expect_text", "value": "Status: Delivered"}]}
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [first] + [same] * 6,
+                                    log_dir=str(tmp_path / "logs"))
+    result = agent.run_task("Create transfer Batch 3 and check it is delivered")
+    assert len(scripted.calls) == 2 and "without acting" in result["stop_reason"] and not result.get("finding")
     page.close()
 
 

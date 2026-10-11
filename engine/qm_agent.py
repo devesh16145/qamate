@@ -139,6 +139,7 @@ class FastAgent:
                            "Explore https://marmelab.com/atomic-crm-demo/ and list its pages and forms."}
         problem, meta, plan_items, stop_reason = None, {"flow": "agent", "title": ""}, [], None
         failed_checks = {}           # a check the page failed, and how often: the same one twice is the app's answer
+        acted_since = {}             # ...if the plan acted on the page in between; repeated as is, it is the planner's loop
         for round_no in range(self.max_rounds):
             if time.monotonic() - started > self.max_seconds:
                 stop_reason = f"stopped after {self.max_seconds} s"
@@ -175,6 +176,10 @@ class FastAgent:
                            "summary": json.dumps(_brief(outcome), ensure_ascii=False)[:1500]})
                 item["status"] = "done" if outcome["ok"] else "failed"
                 self._emit_plan(plan_items, stream)
+                if outcome["ok"] and intent.get("do") not in ("expect_text", "expect_page_text", "expect_value",
+                                                              "expect_visible", "expect_hidden", "expect_url", "expect_checked"):
+                    for key in failed_checks:
+                        acted_since[key] = True
                 if not outcome["ok"]:
                     problem = {"step": public_intent(intent), **_brief(outcome)}
                     stream.cancel()   # the rest was planned for a page that turned out different
@@ -182,9 +187,15 @@ class FastAgent:
                         key = _same_check(intent)
                         failed_checks[key] = failed_checks.get(key, 0) + 1
                         if failed_checks[key] >= 2:
-                            # The planner asked the same question twice and the page said no twice:
-                            # that is a finding about the app, not a plan to keep correcting.
-                            stop_reason = f"the page fails the same check twice: {_intent_text(intent)}"
+                            if acted_since.get(key):
+                                # The plan acted, asked the same question again, and the page said no
+                                # again: a finding about the app, not a plan to keep correcting.
+                                stop_reason = f"the page fails the same check twice: {_intent_text(intent)}"
+                            else:
+                                # Nothing was done in between: the planner is repeating itself.
+                                stop_reason = (f"the plan repeats a failing check without acting on the page: "
+                                               f"{_intent_text(intent)}")
+                                self._no_finding = True
                     break
             if stop_reason:
                 break
@@ -295,8 +306,9 @@ class FastAgent:
             result["summary"] = error or stop_reason or "Nothing was recorded."
             self.history.append(f"{task[:80]} -> not recorded")
             return result
-        if stop_reason:
+        if stop_reason and not getattr(self, "_no_finding", False):
             result["finding"] = self._finding(task, steps, trace)
+        self._no_finding = False
         # Accept the test only if it runs on its own -- twice, in fresh browsers. The second
         # run is what a real backend needs: it meets the data the first one left behind.
         runs = []

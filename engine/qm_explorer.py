@@ -547,6 +547,10 @@ class Explorer:
         self._blocked_dialog = None
         outcome = self._record(step, check=op.startswith("expect"), state=self._state(obs), data=data,
                                obs=obs, element=element)
+        if not outcome["ok"] and outcome.get("reason") == "action_failed" and "on top of it" in (outcome.get("detail") or "") \
+                and self._close_popup_over(obs, element, loc, force=True):
+            # A list the test opened elsewhere covered the target; it is closed now: once more.
+            outcome = self._record(step, check=False, state=self._state(), data=data, obs=obs, element=element)
         if outcome["ok"] and self._blocked_dialog:
             # The app asked something irreversible-sounding and was answered "no": undo the
             # recording and ask the user; with a yes, do it again and answer "yes".
@@ -595,21 +599,26 @@ class Explorer:
         chosen = list(distinct.values())
         return chosen[wanted - 1] if wanted <= len(chosen) else None
 
-    def _close_popup_over(self, obs, element, loc):
+    def _close_popup_over(self, obs, element, loc, force=False):
         """A list or menu the test opened is still open (a dropdown that takes several choices
         stays open after each) and covers the next target: close it with Escape, as its own
-        step, instead of failing on "something else is on top of it"."""
+        step, instead of failing on "something else is on top of it". With `force` (the click
+        has just been blocked) the open list is closed even if the target looks like part of a
+        list: it was not part of that one."""
+        if force:
+            obs = observe(self.page)
         trigger = next((e for e in obs.elements if e.attrs.get("expanded") is True and e.role in ("combobox", "button")), None)
         if trigger is None or trigger is element or not any(e.role in ("listbox", "menu") for e in obs.elements):
             return False
-        if element.role in ("option", "menuitem", "menuitemcheckbox", "menuitemradio", "listbox", "menu") \
-                or any(role in ("listbox", "menu") for role, _ in element.regions):
+        if not force and (element.role in ("option", "menuitem", "menuitemcheckbox", "menuitemradio", "listbox", "menu")
+                          or any(role in ("listbox", "menu") for role, _ in element.regions)):
             return False                        # the target is in the open list itself
-        try:
-            self.page.locator(loc["selector"]).click(trial=True, timeout=400)
-            return False                        # nothing is in the way
-        except Exception:
-            pass
+        if not force:
+            try:
+                self.page.locator(loc["selector"]).click(trial=True, timeout=400)
+                return False                    # nothing is in the way
+            except Exception:
+                pass
         closed = self._record({"op": "press", "value": "Escape", "name": "Close the open list"})
         return closed["ok"]
 
