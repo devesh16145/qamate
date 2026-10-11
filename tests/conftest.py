@@ -683,12 +683,17 @@ def admin_user(ats_config):
 
 
 @pytest.fixture(scope="session")
-def browser_context_args(browser_context_args, results_dir):
-    """Extend playwright browser context with video recording and no forced viewport."""
-    args = {
-        **browser_context_args,
-        "no_viewport": True,
-    }
+def browser_context_args(browser_context_args, results_dir, pytestconfig):
+    """Extend playwright browser context with video recording. Headed runs use the real
+    window; headless runs use a fixed window (ATS_VIEWPORT, default 1280x800 -- the size the
+    agent authors at), because a responsive page renders, and names things, differently at
+    headless Chrome's small default size, and a test must see what its author saw."""
+    args = {**browser_context_args}
+    if pytestconfig.getoption("--headed", default=False):
+        args["no_viewport"] = True
+    else:
+        width, _, height = (os.environ.get("ATS_VIEWPORT") or "1280x800").lower().partition("x")
+        args["viewport"] = {"width": int(width or 1280), "height": int(height or 800)}
 
     # Video for every test, except quick authoring checks (ATS_VIDEO=off): the agent's
     # verification runs don't need a recording, and encoding 1080p slows every run.

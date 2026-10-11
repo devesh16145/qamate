@@ -89,6 +89,7 @@ Through Benchmark → Engine: Fast, each saved test re-run twice through pytest 
 | Ten workflows, run 2 (same engine) | 8/10 | 6/10 | 26 s | 79k |
 | 21 plain requests on apps never tuned to (`live/unseen.json`) | 16/21 | 6/21 | 33 s | 301k |
 | the same, after that day's fixes (20 tasks: a dead site dropped) | 16/20 | 8/20 | 36 s | 196k |
+| the same, third run (different tasks miss each time: planner variance) | 15/20 | 6/20 | 41 s | 216k |
 
 The two workflow runs show the run-to-run spread of a live planner: one test reliable in run 1
 failed in run 2 after eight re-plans on the same check. Of the twenty re-plans in run 1, about
@@ -104,6 +105,11 @@ that is only visible on hover (now: several named controls are a question, never
 one planner-endpoint timeout, one planner loop on a native dropdown it kept clicking (now told to
 select), one stepper test that passed once and failed once (rightly not counted). Pauses the
 planner adds without being asked are skipped.
+The third run showed the planner repeating a step the loop guard had refused, six times in a
+row, in three tasks; two of the refusals were wrong (a select of a value already chosen; a prompt
+answered with different text) and are no longer refused. Independent runs also used headless
+Chrome's default window instead of the authoring size, which renames controls on responsive
+pages; all runs now use 1280x800 (ATS_VIEWPORT).
 
 **What these probes do not measure:** the live planner (labels it invents, steps it forgets, how
 often it re-plans), the chooser model, cost and time with real models, anything behind a login the

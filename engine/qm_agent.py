@@ -302,7 +302,8 @@ class FastAgent:
         runs = []
         for _ in range(REPLAYS):
             verify = replay(self.browser, steps, data, base_url=self.base_url, storage_state=self.storage_state,
-                            secrets=explorer.secrets)
+                            secrets=explorer.secrets, context_options={"viewport": self.page.viewport_size}
+                            if self.page.viewport_size else None)
             runs.append(verify)
             if not verify["ok"]:
                 break

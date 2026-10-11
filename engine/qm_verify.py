@@ -18,6 +18,7 @@ def replay(browser, steps, data=None, *, base_url=None, storage_state=None,
     run (as they will be on every later run) and `{secret:NAME}` read from `secrets`."""
     started = time.monotonic()
     options = dict(context_options or {})
+    options.setdefault("viewport", {"width": 1280, "height": 800})    # the size the agent authors at (see tests/conftest.py)
     if storage_state:
         options["storage_state"] = storage_state
     context = browser.new_context(**options)

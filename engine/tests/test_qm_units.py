@@ -921,3 +921,32 @@ def test_what_the_first_live_benchmark_taught():
     stream = planner.start.__func__      # a re-plan (a problem given) uses the quick provider
     from qm_planner import PlanStream
     assert PlanStream.__init__.__code__.co_varnames[:4] == ("self", "planner", "message", "replan")
+
+
+def test_replays_use_the_size_the_test_was_authored_at():
+    """A responsive page renders -- and names its controls -- differently at another window
+    size; a saved test failed independently for that alone (an icon-only "Add to Cart")."""
+    import qm_verify
+    seen = {}
+
+    class FakeContext:
+        def new_page(self):
+            raise RuntimeError("stop here")
+        def close(self):
+            pass
+
+    class FakeBrowser:
+        def new_context(self, **options):
+            seen.update(options)
+            return FakeContext()
+    try:
+        qm_verify.replay(FakeBrowser(), [], {})
+    except RuntimeError:
+        pass
+    assert seen["viewport"] == {"width": 1280, "height": 800}
+    seen.clear()
+    try:
+        qm_verify.replay(FakeBrowser(), [], {}, context_options={"viewport": {"width": 1440, "height": 900}})
+    except RuntimeError:
+        pass
+    assert seen["viewport"] == {"width": 1440, "height": 900}

@@ -144,7 +144,8 @@ def verify_independently(root, project_id, test_path, tc_id, runs, out_dir):
         junit = os.path.join(out_dir, f"{tc_id}-run{n + 1}.xml")
         env = {**os.environ, "ATS_ROOT": root, "ATS_APP_ROOT": APP_ROOT, "ATS_PROJECT_ID": project_id,
                "PYTHONPATH": APP_ROOT, "ATS_VIDEO": "off", "ATS_TRACING": "off", "ATS_NETWORK": "off",
-               "ATS_RESULTS_DIR": os.path.join(out_dir, "pytest-results"), "ATS_NO_MANUAL_INPUT": "1"}
+               "ATS_RESULTS_DIR": os.path.join(out_dir, "pytest-results"), "ATS_NO_MANUAL_INPUT": "1",
+               "ATS_VIEWPORT": "1280x800"}        # the size the task was authored at
         started = time.monotonic()
         try:
             proc = subprocess.run([sys.executable, "-m", "pytest", os.path.dirname(test_path), "-q",
