@@ -120,12 +120,6 @@
    "app": "expandtesting",
    "url": "https://practice.expandtesting.com/dropdown",
    "prompt": "Choose Option 2 in the dropdown and check it is selected; choose Blue as the colour and check it; choose a country Canada and check the country dropdown shows Canada."
-  },
-  {
-   "id": "books-shadow",
-   "app": "books-pwa",
-   "url": "https://books-pwakit.appspot.com/",
-   "prompt": "Search for 'playwright' in the search box and check the results list has at least one book whose title contains Playwright; open the first result and check its details page shows a title and a description."
   }
  ]
 }

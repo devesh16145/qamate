@@ -395,3 +395,23 @@ def test_a_model_that_can_see_gets_the_candidates_marked_on_a_screenshot(page, p
     sent.clear()
     blind = qm_decide.choose(config, {**step, "within": "Bach"}, candidates)
     assert not blind["saw"] and "images" not in sent[0]
+
+
+def test_what_the_unseen_apps_run_taught(page, patterns, browser):
+    """From the first live run on apps never tuned to (2026-10-11): an option of a native
+    dropdown "clicked" by name is chosen in that dropdown; a row the planner copied from its
+    page view ("cell | cell") is checked cell by cell inside that row; the page view's bars are
+    never expected on the page."""
+    ex = Explorer(page)
+    assert ex.run([{"do": "goto", "url": patterns + "select"}, {"do": "click", "target": "High"},
+                   {"do": "expect_page_text", "value": "Priority set to High"}])["ok"]
+    assert render(ex.steps[1]).startswith("flow.select(") and replay(browser, ex.steps, ex.data)["ok"]
+    ex = Explorer(page)
+    result = ex.run([{"do": "goto", "url": patterns + "rows"}, {"do": "expect_page_text", "value": "Bach | Viewer"}])
+    assert result["ok"] and [render(s) for s in ex.steps[1:]] == [
+        'flow.expect_text(page.get_by_role("row").filter(has_text="Bach"), "Bach", "Row Bach shows \'Bach\'")',
+        'flow.expect_text(page.get_by_role("row").filter(has_text="Bach"), "Viewer", "Row Bach shows \'Viewer\'")']
+    wrong = ex.run_intent({"do": "expect_page_text", "value": "Bach | Admin"})
+    assert not wrong["ok"] and "no row shows all of" in wrong["detail"]
+    held = ex.run_intent({"do": "expect_page_text", "value": "Smith"})     # plain text: as before
+    assert held["ok"]

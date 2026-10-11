@@ -338,11 +338,21 @@ def scoped_locator(page, element, anchors):
 
 def anchored_locator(page, element, text):
     """page.get_by_role(<role>).filter(has_text=<text>) when that is exactly this element --
-    a row, card or section found by what it says. None otherwise."""
+    a row, card or section found by what it says; for a box with no role of its own, its
+    element: page.locator("example-viewer").filter(has_text=<text>). None otherwise."""
     target = page.locator(handle(element))
-    for hidden in ({}, {"include_hidden": True}):
+    scopes = []
+    if element.role not in ("generic", "group"):
+        scopes += [page.get_by_role(element.role, **hidden) for hidden in ({}, {"include_hidden": True})]
+    try:
+        tag = target.evaluate("el => el.tagName.toLowerCase()", timeout=1000)
+        if tag.count("-") or tag in ("section", "article", "fieldset", "form", "li", "tr", "details", "aside", "dialog"):
+            scopes.append(page.locator(tag))
+    except Exception:
+        pass
+    for scope in scopes:
         try:
-            selector = selector_of(page.get_by_role(element.role, **hidden).filter(has_text=text))
+            selector = selector_of(scope.filter(has_text=text))
         except Exception:
             continue
         if selector and _same_element(page, target, selector):

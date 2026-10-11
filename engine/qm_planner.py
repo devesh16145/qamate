@@ -61,6 +61,9 @@ Rules:
   identical (marked "[x4, identical]") add "nth": 1 for the first, 2 for the second, ...
 - expect_url only right after a step that navigates there, with the path the app really uses
   (known_pages show them); never for the page you are already on.
+- Table rows appear in "text" as cells joined by " | "; the page does not show the bars. Check a
+  row with expect_text and "within": one of its cells (its name), never the joined line.
+- A field's current value is not page text: check it with expect_value.
 - Set "done": true when your steps complete the whole task, including its checks. Use
   "done": false only if you genuinely need to see a page before planning further. "done" is a
   key of the reply, never a step.

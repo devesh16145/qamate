@@ -31,7 +31,7 @@ import time
 from urllib.parse import urljoin
 
 from qm_decide import choose
-from qm_ground import _norm, decide, plain_pick, rank, reading_text, shown_text, words
+from qm_ground import _norm, context, decide, plain_pick, rank, reading_text, shown_text, words
 from qm_map import route_of
 from qm_observe import Element, observe
 from qm_runtime import _SECRET, Flow, download_pattern, generic_url, relative_url
@@ -52,6 +52,7 @@ ELEMENT_OPS = {"click", "dblclick", "rightclick", "hover", "fill", "select", "ch
 CHOICE_ROLES = {"radio", "menuitemradio", "option", "tab", "button", "switch"}
 MAX_REVEAL_TABS = 6          # other tabs of a panel that are opened to look for a target
 MAX_LOADING_S = 8            # how long a step waits for its target while the last action's requests are still open
+_REAL_LINK = re.compile(r"^(?!#|javascript:|about:|mailto:|tel:)\S+")
 # Words that name a kind of place rather than an item: a `within` made only of these is no scope.
 GENERIC_PLACES = {"the", "a", "an", "page", "list", "table", "row", "rows", "grid", "card", "cards", "cart", "form",
                   "dialog", "modal", "popup", "panel", "section", "area", "header", "footer", "sidebar", "menu",
@@ -248,10 +249,43 @@ class Explorer:
         if intent.get("within"):
             return self._scoped_text_check(intent, live)
         present = intent.get("present", True)
+        if " | " in str(live["value"]) and present:
+            return self._row_check(intent, live)
         step = {"op": "expect_page_text", "value": live["value"], "present": present,
                 "name": intent.get("name") or (f"Page shows '{intent['value']}'" if present
                                                else f"Page does not show '{intent['value']}'")}
-        return self._record(step, check=True)
+        outcome = self._record(step, check=True)
+        if not outcome["ok"] and present and outcome.get("reason") == "check_failed":
+            wanted = " ".join(str(live["value"]).split())
+            held = next((e for e in observe(self.page).elements if e.role in ("textbox", "searchbox", "spinbutton", "combobox")
+                         and " ".join((e.inline or "").split()) == wanted), None)
+            if held is not None:
+                outcome["detail"] = (outcome.get("detail") or "")[:300] + \
+                    f" -- but the field '{held.label}' holds it: a field's value is checked with expect_value"
+        return outcome
+
+    def _row_check(self, intent, live):
+        """'Asha | Probe | 31 | asha@example.com': the planner is shown table rows as cells joined
+        by bars, which the page does not show. One row must hold all the cells; each is then
+        checked inside that row."""
+        cells = [c.strip() for c in str(live["value"]).split("|") if c.strip()]
+        obs = observe(self.page)
+        rows = [e for e in obs.elements if e.role in ("row", "listitem", "article")
+                and all(_norm(c) in _norm(shown_text(e, limit=80)) for c in cells)]
+        if not rows:
+            return {"ok": False, "reason": "check_failed",
+                    "detail": f"no row shows all of {cells}; the bars in the page view separate cells and are not on the page"}
+        row = rows[0]
+        loc = anchored_locator(self.page, row, cells[0]) or locator_for(self.page, row)
+        if not loc["unique"]:
+            return {"ok": False, "reason": "no_stable_locator", "detail": f"could not pin down {row.summary()}"}
+        outcome = None
+        for cell in cells:
+            outcome = self._record({"op": "expect_text", "target": loc["python"], "value": cell, "present": True,
+                                    "name": f"Row {cells[0]} shows '{cell}'"}, check=True, element=row)
+            if not outcome["ok"]:
+                return outcome
+        return outcome
 
     def _scoped_text_check(self, intent, live):
         """'<value> is shown for <within>': the text must be in the row, card or section
@@ -272,6 +306,25 @@ class Explorer:
                                         (now < deadline - 1.5 + MAX_LOADING_S and self._loading())):
                 break
             self.page.wait_for_timeout(200)
+        if best is None:
+            # No row, card or named section says this -- a section of the page may, as a box
+            # with no role of its own (a component's element, a styled <div>): the smallest one
+            # that shows both the item's name and, if present, the text.
+            for el in sorted(obs.elements, key=lambda e: -e.depth):
+                if el.role in ("generic", "group") and el.depth >= 2 and el.children and not el.attrs.get("aria-hidden") \
+                        and want <= set(words(shown_text(el, limit=120))):
+                    if not present or _norm(value) in _norm(shown_text(el, limit=200)):
+                        # only a box a test can name by what it says (its element and the item's name)
+                        node = el
+                        for _ in range(4):
+                            if node is None or node.role not in ("generic", "group"):
+                                break
+                            if anchored_locator(self.page, node, within) is not None:
+                                best = node
+                                break
+                            node = node.parent
+                    if best is not None:
+                        break
         if best is None and not (want - GENERIC_PLACES):
             # "in the cart", "in the transfer row": a kind of place, not an item's name. Checked on
             # the page as a whole, and said so, rather than failed for the wording.
@@ -346,6 +399,24 @@ class Explorer:
             choice = self._choice_in_group(intent, live, obs)
             if choice is not None:
                 return self._element_intent(*choice, reveal=False, ask=False)
+        if pick is None and op == "click" and not any(c.exact for c in candidates):
+            # "click Saab" where Saab is an option of a native dropdown: options are chosen, not clicked.
+            owners = [e for e in obs.elements if e.role in ("combobox", "listbox") and e.label
+                      and any(_norm(label) == _norm(target) for label, _ in e.options)]
+            if len(owners) > 1 and live.get("within"):
+                want = set(words(live["within"]))
+                owners = [e for e in owners if want <= context(e)[0]] or owners
+            if len(owners) == 1:
+                owner = owners[0]
+                return self._element_intent({"do": "select", "target": owner.label, "value": intent.get("target"),
+                                             "within": intent.get("within"),
+                                             "label": intent.get("label") or f"{owner.label}: {intent.get('target')}"},
+                                            {"do": "select", "target": owner.label, "value": target, "within": live.get("within")},
+                                            reveal=False, ask=False)
+            if len(owners) > 1:
+                return {"ok": False, "reason": "ambiguous",
+                        "detail": f"{target!r} is an option of {len(owners)} dropdowns; select it in one by the dropdown's name",
+                        "candidates": [e.summary() for e in owners[:5]]}
         if reveal:                         # (the clicks that open things run through here too, with reveal=False)
             self._reveal_note = None
         if pick is None and reveal and not any(c.exact for c in candidates) and self._reveal(ground):
@@ -381,6 +452,18 @@ class Explorer:
                         "detail": f"'{element.label}' looks irreversible; confirm before running it",
                         "element": element.summary()}
             self._destructive_ok = True
+        if getattr(element, "offscreen", False) and op == "click" and element.role == "link" \
+                and element.url and _REAL_LINK.match(element.url) and not intent.get("download"):
+            # A link on a slide that is not showing, or in a closed drawer: its address is the
+            # same from anywhere, so the test opens it -- what the click would have done.
+            url = urljoin(self.page.url, element.url)
+            outcome = self._record({"op": "goto", "value": self._url_value(url),
+                                    "name": intent.get("label") or f"Open {element.label}"}, obs=obs)
+            if outcome["ok"]:
+                self.notes.append(f"'{element.label}' is a link that is off-screen (a closed drawer or a slide not "
+                                  f"showing); the test opens its address instead of clicking it")
+                outcome.update({"how": "address", "element": element.summary()})
+            return outcome
         if getattr(element, "offscreen", False) and op in ("click", "dblclick", "hover"):
             # No scrolling brings it into view: the click could only time out. Say why instead.
             return {"ok": False, "reason": "off_screen", "element": element.summary(),
@@ -403,6 +486,8 @@ class Explorer:
             if op == "fill":
                 key = intent.get("data_key") or data_key_for(raw_target or label, self.data)
                 stored = str(intent.get("value", ""))        # as written: "QA Vendor {unique}", "{secret:password}"
+                if self.flow.unique and self.flow.unique in stored:
+                    stored = stored.replace(self.flow.unique, "{unique}")    # copied from the page: it is this run's token
                 if "{secret:" not in stored and self._secret_field(loc, element):
                     self.secrets[key] = step["value"]
                     stored = "{secret:%s}" % key
@@ -648,7 +733,9 @@ class Explorer:
             # ...and for as long as a request the last action made is still open (a slow API
             # behind a route change), within reason.
             waiting = (now < deadline and self._settling()) or (now < started + MAX_LOADING_S and self._loading())
-            if (candidates and candidates[0].exact) or not waiting or (also is not None and also(obs)):
+            # Done when the step can be decided (a name match alone is not that: its `within`
+            # may still be unknown while labels are being completed), or when waiting is pointless.
+            if decide(candidates, ground) is not None or not waiting or (also is not None and also(obs)):
                 return obs, candidates
             self.page.wait_for_timeout(200)
 

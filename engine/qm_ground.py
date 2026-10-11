@@ -402,6 +402,8 @@ def rank(step, observation, limit=10):
             tier += 10                      # a disabled control is the last resort
         around_words, around_labels = context(el) if want else (set(), set())
         context_share = len(want & around_words) / len(want) if want else None
+        if want and _norm(step.get("within")) in {_norm(el.label), _norm(el.name), *(_norm(a) for a in getattr(el, "aliases", ()))}:
+            context_share = 1.0            # "0 in cart total drawer": the within names the control itself
         in_item = 0
         if want:
             in_item = 2 if _strict(step.get("within")) in around_labels else \
