@@ -415,3 +415,12 @@ def test_what_the_unseen_apps_run_taught(page, patterns, browser):
     assert not wrong["ok"] and "no row shows all of" in wrong["detail"]
     held = ex.run_intent({"do": "expect_page_text", "value": "Smith"})     # plain text: as before
     assert held["ok"]
+
+
+def test_several_named_controls_are_a_question_never_a_text_click(page, patterns):
+    """Three "Edit" links and no `within`: the answer is "say which", not a click on whichever
+    text happens to be visible (that locator broke a saved test on replay)."""
+    ex = Explorer(page)
+    ex.run_intent({"do": "goto", "url": patterns + "rows"})
+    out = ex.run_intent({"do": "click", "target": "Edit"})
+    assert not out["ok"] and out["reason"] == "ambiguous" and len(ex.steps) == 1

@@ -277,3 +277,15 @@ def test_the_same_failed_check_twice_ends_the_task_with_the_finding(monkeypatch,
     assert len(scripted.calls) == 2 and "fails the same check twice" in result["stop_reason"]
     assert result["finding"]["expected"] == "'Status: Delivered' is shown" and result["saved"] is None
     page.close()
+
+
+def test_a_pause_the_task_did_not_ask_for_is_skipped(monkeypatch, browser, server, tmp_path):
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [
+        {"steps": [{"do": "wait", "seconds": 3}, {"do": "click", "target": "New transfer"}, {"do": "wait", "seconds": 2},
+                   {"do": "expect_text", "value": "New transfer"}], "done": True, "test": {"flow": "transfers"}}])
+    result = agent.run_task("Open the new transfer form")
+    assert result["saved"] and "flow.wait(" not in "\n".join(result["code"]) and result["authoring_s"] < 20
+    assert sum(1 for t in agent.trace if t.get("how") == "skipped") == 2
+    page.close()

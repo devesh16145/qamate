@@ -435,7 +435,7 @@ def url_pattern(expected):
     if not rel.startswith(("/", "#", "?")):
         rel = "/" + rel
     body = r"[^/?#]+".join(re.escape(piece) for piece in _ID_TOKEN.split(rel))
-    tail = r"$" if "?" in rel else r"/?(?:\?[^#]*)?$"
+    tail = r"(?:&[^#]*)?$" if "?" in rel else r"/?(?:\?[^#]*)?$"     # extra parameters are not another page
     return re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+" + body + tail)
 
 

@@ -26,6 +26,7 @@ from qm_verify import replay
 
 
 _EXPLORE = re.compile(r"^\s*(?:please\s+)?(?:explore|scan|map|learn)\b", re.I)
+_ASKS_TO_WAIT = re.compile(r"\b(?:wait|pause|sleep)\b|\d+\s*(?:s|sec|secs|seconds?)\b", re.I)
 
 
 def is_exploration(task):
@@ -153,6 +154,12 @@ class FastAgent:
             plan_items = [p for p in plan_items if p["status"] == "done"]
             problem, ran = None, 0
             for intent in stream.steps():
+                if intent.get("do") == "wait" and not _ASKS_TO_WAIT.search(task):
+                    # A pause the task never asked for: a planner's guess at timing. Steps wait for
+                    # what they need themselves; a fixed pause would only make the test slower.
+                    self.trace.append({"intent": public_intent(intent), "ok": True, "ms": 0, "how": "skipped",
+                                       "reason": None, "detail": "a pause the task did not ask for", "weak": None})
+                    continue
                 item = {"step": _intent_text(intent), "status": "active"}
                 plan_items.append(item)
                 self._emit_plan(plan_items, stream)

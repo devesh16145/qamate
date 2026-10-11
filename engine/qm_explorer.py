@@ -292,6 +292,22 @@ class Explorer:
         that names the item -- not merely somewhere on the page."""
         within, value, present = live["within"], live["value"], intent.get("present", True)
         want = set(words(within))
+        # "China in Select": `within` names a field; what it holds or shows is the check.
+        field = decide(rank({"op": "expect_value", "target": within}, observe(self.page)),
+                       {"op": "expect_value", "target": within})
+        if field is not None and present:
+            loc = locator_for(self.page, field.element)
+            if loc["unique"]:
+                step = {"op": "expect_value", "target": loc["python"], "value": value,
+                        "name": intent.get("name") or f"{intent['within']} holds '{intent['value']}'"}
+                outcome = self._record(step, check=True, element=field.element)
+                if outcome["ok"]:
+                    return outcome
+                step = {"op": "expect_text", "target": loc["python"], "value": value, "present": True,
+                        "name": intent.get("name") or f"{intent['within']} shows '{intent['value']}'"}
+                outcome = self._record(step, check=True, element=field.element)
+                if outcome["ok"]:
+                    return outcome
         deadline = time.monotonic() + 1.5
         while True:
             obs = observe(self.page)
@@ -423,7 +439,8 @@ class Explorer:
             obs, candidates = self._look(ground)
             pick = decide(candidates, ground)
         how = "match" if pick is None or pick.match == "exact" else pick.match   # decorated | synonym
-        found = self._beyond_the_tree(op, ground, candidates, obs) if pick is None else None
+        # Only when no control is named this at all: several that are is a question, not a cue to click text.
+        found = self._beyond_the_tree(op, ground, candidates, obs) if pick is None and not any(c.exact for c in candidates) else None
         if pick is None and found is None and ask and candidates:
             choice = choose(self.config, ground, candidates[:8], page_title=obs.title,
                             page_path=relative_url(obs.url), emit=self.emit, page=self.page)
@@ -510,6 +527,11 @@ class Explorer:
             step["dialog"], step["dialog_text"] = "accept", str(live["dialog_text"])
         if op == "select" and not self._is_native_select(loc["selector"]):
             return self._custom_select(intent, live, step, element, how, confidence, loc)
+        if op == "click" and element.role == "combobox" and self._is_native_select(loc["selector"]):
+            return {"ok": False, "reason": "use_select", "element": element.summary(),
+                    "detail": f"'{element.label}' is a dropdown: clicking it does nothing in a test; choose with "
+                              f"select and the option's text" + (f" (options: {' | '.join(o for o, _ in element.options[:8])})"
+                                                                   if element.options else "")}
         if not op.startswith("expect"):
             self._close_popup_over(obs, element, loc)
         before = self.page.url

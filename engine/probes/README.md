@@ -79,6 +79,32 @@ it out. Pictures helped on look-alike items (the namesake cards) and cost one co
 (two "Save" buttons in sibling sections). Perplexity's decider is not served on OpenRouter;
 Mistral Small was rate-limited.
 
+## Live runs with the real planner (MiMo V2.6 Flash), 2026-10-11
+
+Through Benchmark → Engine: Fast, each saved test re-run twice through pytest independently.
+
+| Run | Reliable | First plan | Median authoring | Tokens |
+|---|---|---|---|---|
+| Ten workflows, run 1 (engine `12623f1`) | 9/10 | 2/10 | 50 s | 85k |
+| Ten workflows, run 2 (same engine) | 8/10 | 6/10 | 26 s | 79k |
+| 21 plain requests on apps never tuned to (`live/unseen.json`) | 16/21 | 6/21 | 33 s | 301k |
+| the same, after that day's fixes (20 tasks: a dead site dropped) | 16/20 | 8/20 | 36 s | 196k |
+
+The two workflow runs show the run-to-run spread of a live planner: one test reliable in run 1
+failed in run 2 after eight re-plans on the same check. Of the twenty re-plans in run 1, about
+two thirds were the planner's (a URL asserted before navigating, a description used as `within`,
+text invented); the rest were engine gaps, fixed the same day (a label's own role word, a
+generic `within`, a combobox that wraps its input). The unseen run's failures: one dead site,
+the planner copying the page view's "cell | cell" row format as expected text, an option of a
+native dropdown "clicked" by name, a section with no ARIA role, an off-screen link -- all but
+the first fixed the same day; a re-run follows. Re-plans now run without the thinking phase.
+A task ends after the same check fails twice, as a finding (a bug draft with reproduction).
+The second unseen run's misses: one saved test leaned on a text locator for an "Add to Cart"
+that is only visible on hover (now: several named controls are a question, never a text click),
+one planner-endpoint timeout, one planner loop on a native dropdown it kept clicking (now told to
+select), one stepper test that passed once and failed once (rightly not counted). Pauses the
+planner adds without being asked are skipped.
+
 **What these probes do not measure:** the live planner (labels it invents, steps it forgets, how
 often it re-plans), the chooser model, cost and time with real models, anything behind a login the
 probes may not use, canvas-drawn apps, and file contents of downloads. The live numbers come from
