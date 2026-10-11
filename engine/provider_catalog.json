@@ -229,6 +229,23 @@
       "validate": {
         "method": "key",
         "path": "/key"
+      },
+      "thinking": {
+        "default": "on",
+        "on": {
+          "extra_body": {
+            "reasoning": {
+              "effort": "low"
+            }
+          }
+        },
+        "off": {
+          "extra_body": {
+            "reasoning": {
+              "effort": "none"
+            }
+          }
+        }
       }
     },
     "deepseek": {

@@ -286,15 +286,34 @@ class PlanStream:
         prompt = self.message + "\n\nRespond with ONLY valid JSON. No prose, no code fences."
         provider = self.planner.quick if (self.replan and self.planner.quick is not None) else self.planner.provider
         try:
-            if hasattr(provider, "stream"):
-                self.text = provider.stream(SYSTEM, prompt, self._on_text, temperature=0.1)
-            else:   # a provider that can only answer in one piece
-                self.text = provider.complete(SYSTEM, prompt, temperature=0.1)
-                self._on_text(self.text)
+            try:
+                self.text = self._ask(provider, prompt)
+            except LLMError as exc:
+                # A gateway or model that rejects the reasoning setting: once more without it.
+                extras = ((provider.cfg.get("model_settings") or {}).get("extra_body") or {})
+                if getattr(exc, "status_code", None) not in (400, 422) or "reasoning" not in extras:
+                    raise
+                plain = dict(provider.cfg)
+                plain["model_settings"] = {**provider.cfg["model_settings"],
+                                           "extra_body": {k: v for k, v in extras.items() if k != "reasoning"}}
+                provider.cfg = plain
+                self.text = self._ask(provider, prompt)
+            if not self.text.strip():
+                usage = provider.last_usage or {}
+                spent = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+                raise LLMError("the model's reply was empty" + (f" after {spent} tokens of thinking: its thinking used up "
+                                                                   f"the reply's budget (lower its reasoning effort)" if spent else ""))
         except Exception as exc:   # surfaced by result(); the caller decides what it means
             self.error = exc
         finally:
             self.queue.put(None)
+
+    def _ask(self, provider, prompt):
+        if hasattr(provider, "stream"):
+            return provider.stream(SYSTEM, prompt, self._on_text, temperature=0.1)
+        text = provider.complete(SYSTEM, prompt, temperature=0.1)   # a provider that can only answer in one piece
+        self._on_text(text)
+        return text
 
     def _on_text(self, piece):
         if self.cancelled:
