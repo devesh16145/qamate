@@ -105,7 +105,10 @@ def ask(config, name, cfg, step_text, options, page):
         key = os.environ.get(cfg.get("api_key_env") or "", "")
         if not key:
             raise LLMError("decision key not set")
-        payload = {"model": cfg["model"], "state": {"step": step_text, "page": page},
+        state = {"step": step_text, "page": page}
+        if cfg.get("preset") == "liquid":
+            state = json.dumps(state, ensure_ascii=False)        # Liquid's d1 takes its situation as text
+        payload = {"model": cfg["model"], "state": state,
                    "questions": {"element": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": options}}}
         path = "/decisions" if cfg["protocol"] == "openrouter_decisions" else "/systemone"
         result = _http_post_json(cfg["base_url"].rstrip("/") + path, {"Authorization": f"Bearer {key}"}, payload,
@@ -128,8 +131,11 @@ def ask(config, name, cfg, step_text, options, page):
 
 
 def family(cfg):
-    if "jev" in str(cfg.get("model", "")).lower():
+    model = str(cfg.get("model", "")).lower()
+    if "jev" in model:
         return "jev"
+    if "d1" in model.split("/")[-1] or cfg.get("preset") == "liquid":
+        return "d1"
     return "decision" if cfg.get("protocol") in DECISION_PROTOCOLS else "llm"
 
 

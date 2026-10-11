@@ -3037,7 +3037,7 @@ function BenchPanel({ toast }) {
           <div style={{ flex: 1 }}></div>
           <input className="setting-input" value={chooserModels} onChange={e => setChooserModels(e.target.value)} disabled={running} spellCheck={false}
                  placeholder="models (optional)" style={{ fontSize: 12, padding: '4px 8px', width: 300, fontFamily: 'var(--mono)' }}
-                 title={'Leave empty to compare your decision model with a shortlist on OpenRouter. Or list models, separated by spaces: role · profile:<name> · decisions:<OpenRouter model id> · chat:<OpenRouter model id>'} />
+                 title={'Leave empty to compare your decision model with a shortlist on OpenRouter (and Liquid d1 when its key is set). Or list models, separated by spaces: role · profile:<name> · decisions:<OpenRouter model id> · chat:<OpenRouter model id> · liquid:d1'} />
           <button className="rv-cta" onClick={compareChoosers} disabled={running}>
             <I.Play size={12} /> Compare
           </button>

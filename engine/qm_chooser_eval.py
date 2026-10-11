@@ -18,8 +18,10 @@ Models:  role                    the profile in config.json llm.roles.decision
          profile:<name>          any profile in config.json
          decisions:<model id>    a decision model on OpenRouter's decisions endpoint
          chat:<model id>         a chat model on OpenRouter
-OpenRouter specs use OPENROUTER_API_KEY from the environment (the app passes the keys it
-holds in the keychain). A model id OpenRouter does not serve is reported as unavailable.
+         liquid:<model id>       a decision model on Liquid's own API (d1, d1:free)
+OpenRouter specs use OPENROUTER_API_KEY, Liquid specs LIQUID_API_KEY, from the environment (the
+app passes the keys it holds in the keychain). A model id a service does not serve is reported
+as unavailable.
 Scorecards: results/_chooser_eval/<timestamp>/scorecard.json
 """
 import copy
@@ -37,9 +39,11 @@ from model_profiles import resolve_profile
 CASES = os.path.join(ENGINE, "probes", "chooser_cases.json")
 # Candidates to measure against the configured model (ids as listed on OpenRouter in
 # October 2026; none of them has been measured on this task -- that is what this is for).
-SHORTLIST = ["decisions:typesafe/jev-1.13", "decisions:perplexity/pplx-decider-v1-27b", "decisions:cloudflare/clef-flash",
+SHORTLIST = ["decisions:typesafe/jev-1.13", "decisions:liquid/d1", "decisions:perplexity/pplx-decider-v1-27b",
+             "decisions:cloudflare/clef-flash",
              "chat:google/gemini-3.5-flash-lite", "chat:qwen/qwen3.8-27b", "chat:openai/gpt-6-luna",
              "chat:mistralai/mistral-small-2603", "chat:anthropic/claude-haiku-4.5"]
+LIQUID = ["liquid:d1"]                     # on Liquid's own API, when its key is present
 
 
 def profile_for(config, spec):
@@ -53,7 +57,7 @@ def profile_for(config, spec):
     kind, _, model = spec.partition(":")
     if kind == "profile":
         return config, model, resolve_profile(config, model, "decision")[1]
-    preset = {"decisions": "jev-openrouter", "chat": "openrouter"}.get(kind)
+    preset = {"decisions": "jev-openrouter", "chat": "openrouter", "liquid": "liquid"}.get(kind)
     if not preset or not model:
         raise ValueError(f"unknown model spec {spec!r}")
     patched = copy.deepcopy(config or {})
@@ -133,6 +137,8 @@ def main(argv=None):
         specs = ["role"] if ((config.get("llm") or {}).get("roles") or {}).get("decision") else []
         if os.environ.get("OPENROUTER_API_KEY"):
             specs += SHORTLIST
+        if os.environ.get("LIQUID_API_KEY"):
+            specs += LIQUID
     if not specs:
         print("No decision model is configured and no OpenRouter key is available: nothing to compare.")
         return 1

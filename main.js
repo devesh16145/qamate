@@ -574,7 +574,7 @@ async function _probeProvider(r, key) {
     const question = { action: { type: 'choice', instructions: 'Connection test. Choose "ok".', criteria: { ok: 'Connection works', stop: 'Stop' } } };
     res = await _fetchJson(`${base}${r.protocol === 'typesafe' ? '/systemone' : '/decisions'}`, {
       method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: r.model, state: {}, questions: question }),
+      body: JSON.stringify({ model: r.model, state: r.preset === 'liquid' ? 'Connection test.' : {}, questions: question }),
     });
   } else if (r.protocol === 'anthropic') {
     res = await _fetchJson(`${base}${base.endsWith('/v1') ? '' : '/v1'}/models?limit=100`, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } });

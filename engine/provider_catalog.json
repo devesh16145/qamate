@@ -332,7 +332,7 @@
       }
     },
     "jev-openrouter": {
-      "label": "Jev via OpenRouter (decision model)",
+      "label": "Decision models via OpenRouter (Jev, d1)",
       "protocol": "openrouter_decisions",
       "role": "decision",
       "api_key_env": "OPENROUTER_API_KEY",
@@ -350,6 +350,43 @@
         {
           "id": "typesafe/jev-1.13",
           "label": "Jev 1.13",
+          "vision": false
+        },
+        {
+          "id": "liquid/d1",
+          "label": "Liquid d1 (text only on OpenRouter)",
+          "vision": false
+        }
+      ],
+      "timeout": 30,
+      "validate": {
+        "method": "decision"
+      }
+    },
+    "liquid": {
+      "label": "Liquid d1 (decision model, text + images)",
+      "protocol": "typesafe",
+      "role": "decision",
+      "api_key_env": "LIQUID_API_KEY",
+      "key_url": "https://console.liquid.ai",
+      "docs_url": "https://docs.liquid.ai/lfm/models/decision-models",
+      "endpoints": [
+        {
+          "id": "default",
+          "label": "Liquid AI API",
+          "base_url": "https://api.liquid.ai/decisions/v1"
+        }
+      ],
+      "default_model": "d1",
+      "models": [
+        {
+          "id": "d1",
+          "label": "d1 (text + images)",
+          "vision": true
+        },
+        {
+          "id": "d1:free",
+          "label": "d1 free (text only)",
           "vision": false
         }
       ],

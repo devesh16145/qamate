@@ -202,3 +202,28 @@ def test_native_vision_endpoint(monkeypatch):
     assert llm.call_vision_oracle(cfg, b"fake png", "What is shown?") == "a button"
     assert calls[0][0] == "http://localhost:1234/v1/messages"
     assert calls[0][1]["messages"][0]["content"][0]["source"]["type"] == "base64"
+
+
+def test_liquid_d1_preset_speaks_the_decision_protocol_as_text(monkeypatch):
+    """Liquid's d1 shares TypeSafe's request shape and /systemone path, but takes its
+    situation as text; it is the preset that can also look at images."""
+    import json
+    import qm_decide
+    cfg = {"llm": {"providers": {"d1": {"preset": "liquid"}}}}
+    _, resolved = resolve_profile(cfg, "d1", "decision")
+    assert (resolved["protocol"], resolved["base_url"], resolved["model"], resolved["api_key_env"]) == \
+        ("typesafe", "https://api.liquid.ai/decisions/v1", "d1", "LIQUID_API_KEY")
+    sent = {}
+
+    def fake_post(url, headers, payload, timeout=30):
+        sent.update(url=url, payload=payload, auth=headers.get("Authorization"))
+        return {"answers": {"element": {"type": "choice", "choice": "kav", "confidence": 0.8,
+                                        "probabilities": {"kav": 0.8, "none": 0.2}}}, "usage": {"input_tokens": 90}}
+    monkeypatch.setattr(qm_decide, "_http_post_json", fake_post)
+    monkeypatch.setenv("LIQUID_API_KEY", "liquid_test")
+    reply = qm_decide.ask(cfg, "d1", resolved, 'click "Save"', {"kav": 'button "Save"', "none": qm_decide.NONE_TEXT},
+                          {"title": "t", "path": "/"})
+    assert reply["choice"] == "kav" and reply["confidence"] == 0.8
+    assert sent["url"] == "https://api.liquid.ai/decisions/v1/systemone" and sent["auth"] == "Bearer liquid_test"
+    assert isinstance(sent["payload"]["state"], str) and json.loads(sent["payload"]["state"])["step"] == 'click "Save"'
+    assert qm_decide.family(resolved) == "d1"
