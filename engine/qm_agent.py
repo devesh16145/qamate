@@ -91,8 +91,9 @@ REPLAYS = 2      # fresh-browser runs a test must pass before it is saved
 class FastAgent:
     def __init__(self, page, browser, config, *, provider_name=None, base_url=None, tests_root=None,
                  storage_state=None, test_data=None, emit=lambda e: None, confirm=None,
-                 max_rounds=8, max_seconds=300, log_dir=None, page_map=None, scan="auto"):
+                 max_rounds=8, max_seconds=300, log_dir=None, page_map=None, scan="auto", bug_store=None):
         self.page, self.browser, self.config = page, browser, config
+        self.bug_store = bug_store   # the app's bug & story list (jira_items.json): a found bug is drafted there
         self.base_url, self.tests_root, self.storage_state = base_url, tests_root, storage_state
         self.emit, self.confirm = emit, confirm
         # Secrets in the test data (a project's saved password) are kept here and the planner
@@ -110,6 +111,8 @@ class FastAgent:
         started = time.monotonic()
         explorer = Explorer(self.page, base_url=self.base_url, config=self.config, emit=self.emit,
                             confirm=self.confirm, page_map=self.page_map, secrets=self.secrets)
+        if self.log_dir:
+            explorer.evidence_dir = os.path.join(self.log_dir, "evidence")
         self.planner.timings = []
         self.trace = []   # one entry per executed intent: what ran, how, how long
         self.scan_ms = None
@@ -128,6 +131,7 @@ class FastAgent:
                 return self._explore(task, started)
             if self.scan == "auto" and len(self.page_map) < 3:
                 self._learn_app(task)
+                explorer.flow._hook(self.page)      # the scan drove the page with a Flow of its own: this one decides again
         elif is_exploration(task):
             return {"task": task, "steps": 0, "authoring_s": 0, "stop_reason": None, "saved": None, "replay": None,
                     "ask": "Which site should I explore? Include its address, for example: "
@@ -156,7 +160,9 @@ class FastAgent:
                 ran += 1
                 self.trace.append({"intent": public_intent(intent), "ok": outcome["ok"], "ms": outcome.get("ms"),
                                    "how": outcome.get("how"), "reason": outcome.get("reason"),
-                                   "detail": outcome.get("detail"), "weak": outcome.get("weak")})
+                                   "detail": outcome.get("detail"), "weak": outcome.get("weak"),
+                                   "url": outcome.get("url"), "screenshot": outcome.get("screenshot"),
+                                   "issues": outcome.get("issues"), "done_steps": len(explorer.steps)})
                 self.emit({"event": "tool_result", "tool": "step", "outcome": "ok" if outcome["ok"] else "error",
                            "summary": json.dumps(_brief(outcome), ensure_ascii=False)[:1500]})
                 item["status"] = "done" if outcome["ok"] else "failed"
@@ -272,6 +278,8 @@ class FastAgent:
             result["summary"] = error or stop_reason or "Nothing was recorded."
             self.history.append(f"{task[:80]} -> not recorded")
             return result
+        if stop_reason:
+            result["finding"] = self._finding(task, steps, trace)
         # Accept the test only if it runs on its own -- twice, in fresh browsers. The second
         # run is what a real backend needs: it meets the data the first one left behind.
         runs = []
@@ -295,6 +303,34 @@ class FastAgent:
         self.history.append(f"{task[:80]} -> {result['saved']['tc_id'] if result['saved'] else 'not saved'}")
         self._write_log(result, calls, trace)
         return result
+
+    def _finding(self, task, steps, trace):
+        """A task that ended on a check the app failed, not on a step the plan got wrong: a
+        possible bug, written up so a developer can reproduce it -- the steps that led there,
+        what was expected, what the page showed, a screenshot, what the app itself reported.
+        None when nothing of the kind happened. Drafted into the app's bug list when there is one."""
+        failed = [t for t in trace if not t["ok"] and t["reason"] == "check_failed"]
+        if not failed:
+            return None
+        last = failed[-1]
+        intent = last["intent"]
+        what = intent.get("value") or intent.get("url") or intent.get("target") or ""
+        where = (f" in {intent['within']}" if intent.get("within") else "")
+        expected = (f"'{what}' is not shown{where}" if intent.get("present") is False else
+                    f"'{what}' is shown{where}" if intent.get("do") in ("expect_text", "expect_page_text") else
+                    f"{intent.get('target') or ''} {intent.get('do', '').replace('expect_', '')} {what}".strip())
+        path = [render(s) for s in steps[:last.get("done_steps") or len(steps)]]
+        words = [s.get("name") or s["op"] for s in steps[:last.get("done_steps") or len(steps)] if s["op"] != "goto"]
+        finding = {"title": f"{expected} -- but it is not"[:120], "task": task, "expected": expected,
+                   "actual": (last.get("detail") or "")[:600], "url": last.get("url"), "steps": words,
+                   "code": path, "screenshot": last.get("screenshot"),
+                   "issues": [f"{i['kind']}: {i['text']}" for i in (last.get("issues") or [])]}
+        if self.bug_store:
+            try:
+                finding["draft"] = draft_bug(self.bug_store, finding)
+            except Exception:
+                finding["draft"] = None
+        return finding
 
     def _write_log(self, result, calls, trace):
         """One JSON file per task: planner calls, every executed step, replay -- for tuning."""
@@ -329,6 +365,36 @@ class _Planned:
 
     def result(self):
         return self.plan
+
+
+def draft_bug(store, finding):
+    """Add the finding to the app's bug & story list (DATA_ROOT/jira_items.json, the Bug
+    manager window's store) as a draft, with the screenshot attached. Returns its id."""
+    import random
+    items = []
+    try:
+        with open(store, encoding="utf-8") as f:
+            data = json.load(f)
+        items = data if isinstance(data, list) else list(data.get("items") or [])
+    except Exception:
+        pass
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    repro = "\n".join(f"{n}. {s}" for n, s in enumerate(finding["steps"], 1)) or "(open the app)"
+    description = (f"Found by QAmate while working on: {finding['task']}\n\n"
+                   f"Steps to reproduce:\n{repro}\n\nExpected: {finding['expected']}\n"
+                   f"Actual: {finding['actual']}\n\nPage: {finding.get('url') or ''}")
+    if finding.get("issues"):
+        description += "\n\nWhat the app reported meanwhile:\n" + "\n".join("- " + i for i in finding["issues"][:8])
+    description += "\n\nReproduction as a test (QAmate step runtime):\n" + "\n".join(finding["code"])
+    item = {"id": "JI-" + format(int(time.time() * 1000), "x") + format(random.randrange(16 ** 4), "04x"),
+            "type": "bug", "title": finding["title"], "description": description, "labels": ["qamate", "found-by-agent"],
+            "status": "draft", "attachments": [p for p in [finding.get("screenshot")] if p],
+            "createdAt": now, "updatedAt": now}
+    items.append(item)
+    os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
+    with open(store, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+    return item["id"]
 
 
 def _brief(outcome):
@@ -379,6 +445,18 @@ def summary_text(result):
         lines.append(f"Not saved: {result.get('summary') or result.get('stop_reason') or 'the task did not finish'}.")
     if result.get("stop_reason") and result.get("saved") is None and result.get("replay"):
         lines.append(f"Stopped early: {result['stop_reason']}.")
+    finding = result.get("finding")
+    if finding:
+        lines.append(f"\n**Possible bug:** {finding['expected']}, but the page did not show that.")
+        lines.append(f"What it showed: {finding['actual'][:300]}")
+        if finding["steps"]:
+            lines.append("To reproduce: " + " → ".join(finding["steps"][:12]))
+        if finding.get("issues"):
+            lines.append("The app reported meanwhile: " + "; ".join(finding["issues"][:3]))
+        if finding.get("screenshot"):
+            lines.append(f"Screenshot: {finding['screenshot']}")
+        lines.append("Saved as a draft in Bugs & stories (with the steps as a test)." if finding.get("draft")
+                     else "Not drafted as a bug: no project bug list here.")
     checks = result.get("checks") or {}
     if checks.get("total"):
         weak = checks.get("weak") or []

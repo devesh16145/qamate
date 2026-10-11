@@ -458,6 +458,7 @@ class Flow:
         self.dialogs = []                      # every dialog seen: {type, message, action}
         self.downloads = []                    # every download started by a page this Flow drives
         self.last_download = None              # file name of the download the last step waited for
+        self.issues = []                       # what the app complained about: console errors, failed requests
         self.dialog_decider = None             # authoring only: (type, message) -> "accept" | "dismiss"
         self._dialog_policy = self._dialog_text = None
         self._pages = [page]                   # tab stack; self.page is the top
@@ -480,6 +481,16 @@ class Flow:
             page._qm_dialog_hook = True
             page.on("dialog", lambda dialog: page._qm_flow._on_dialog(dialog))
             page.on("download", lambda download: page._qm_flow.downloads.append(download))
+            # Evidence for a bug report: what the app itself reported while the steps ran.
+            page.on("console", lambda m: m.type == "error" and page._qm_flow._issue("console", m.text, page.url))
+            page.on("pageerror", lambda e: page._qm_flow._issue("exception", str(e), page.url))
+            page.on("requestfailed", lambda r: page._qm_flow._issue("request", f"{r.method} {r.url} failed: {r.failure}", page.url))
+            page.on("response", lambda r: r.status >= 400 and r.request.resource_type in ("xhr", "fetch", "document")
+                    and page._qm_flow._issue("response", f"{r.request.method} {r.url} -> {r.status}", page.url))
+
+    def _issue(self, kind, text, url):
+        if len(self.issues) < 60:
+            self.issues.append({"kind": kind, "text": str(text)[:300], "url": url, "at": time.time()})
 
     def _on_dialog(self, dialog):
         policy = self._dialog_policy

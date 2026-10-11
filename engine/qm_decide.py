@@ -210,7 +210,7 @@ def choose(config, step, candidates, *, page_title="", page_path="", emit=lambda
         return {"index": None, "confidence": None, "by": None}
     shown = candidates[:len(OPTION_IDS)]
     texts = [c.element.summary()[:240] for c in shown]
-    image = None
+    image, numbers = None, {}
     if page is not None and sees(cfg):
         try:
             from qm_selectors import handle
@@ -221,8 +221,19 @@ def choose(config, step, candidates, *, page_title="", page_path="", emit=lambda
             texts = [(f"box {numbers[i]}: " if i in numbers else "not on screen: ") + t for i, t in enumerate(texts)]
     result = vote(config, name, cfg, describe(step), texts, {"title": page_title, "path": page_path}, emit=emit,
                   image=image)
+    looked_closer = False
+    if image and not result.get("error") and not result["agreed"]:
+        # Unsure from the whole window: look closer at the part that holds the candidates.
+        try:
+            closer, numbers2 = marked_screenshot(page, [page.locator(handle(c.element)) for c in shown], zoom=True)
+        except Exception:
+            closer = None
+        if closer and numbers2 == numbers:
+            result = vote(config, name, cfg, describe(step), texts, {"title": page_title, "path": page_path}, emit=emit,
+                          image=closer)
+            looked_closer = True
     out = {"index": result["index"], "confidence": result["confidence"], "by": family(cfg),
-           "agreed": result["agreed"], "ms": result["ms"], "saw": bool(image)}
+           "agreed": result["agreed"], "ms": result["ms"], "saw": bool(image), "looked_closer": looked_closer}
     if result.get("error"):
         out["error"] = result["error"]
     elif not result["agreed"]:

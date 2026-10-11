@@ -150,6 +150,7 @@ class Explorer:
         self._blocked_dialog = None
         self._reveal_note = None   # why opening things did not settle where a target is
         self._opened, self._kept = set(), set()   # refs in what recent steps opened (see _mark_opened)
+        self.evidence_dir = None   # where a screenshot of a failed check is kept (set by the agent)
 
     @property
     def page(self):
@@ -919,8 +920,12 @@ class Explorer:
             if fresh_key:
                 self.data.pop(data[0], None)
                 self._refresh_data()
-            return {"ok": False, "reason": "check_failed" if check else "action_failed",
-                    "detail": _short(exc), "step": step}
+            failed = {"ok": False, "reason": "check_failed" if check else "action_failed",
+                      "detail": _short(exc), "step": step, "url": self.page.url}
+            if check:
+                failed["issues"] = [i for i in self.flow.issues if i["at"] >= time.time() - 90][-12:]
+                failed["screenshot"] = self._evidence(f"check-{len(self.steps) + 1}")
+            return failed
         finally:
             self.flow.timeout_ms = saved
         waited = time.monotonic() - started
@@ -980,6 +985,18 @@ class Explorer:
             self.notes.append(f"'{step.get('name')}' downloads a file ({name}); the test expects a file named "
                               f"{step['download']}")
         return None
+
+    def _evidence(self, name):
+        """A screenshot kept for a bug report; None when there is nowhere to keep it."""
+        if not self.evidence_dir:
+            return None
+        try:
+            os.makedirs(self.evidence_dir, exist_ok=True)
+            path = os.path.join(self.evidence_dir, f"{name}-{int(time.time())}.png")
+            self.page.screenshot(path=path)
+            return path
+        except Exception:
+            return None
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _url_value(self, url):

@@ -4813,7 +4813,8 @@ class AgentRuntime:
                                       tests_root=tests_root, storage_state=self.fast_ctx["storage_state"],
                                       test_data=self.fast_ctx["test_data"], emit=emit, confirm=confirm,
                                       log_dir=os.path.join(self.ats_root, "results", "_fast_runs"),
-                                      page_map=page_map, scan=scan)
+                                      page_map=page_map, scan=scan,
+                                      bug_store=os.path.join(self.ats_root, "jira_items.json"))
             return self.fast.run_task(task)
 
         try:
@@ -4826,7 +4827,7 @@ class AgentRuntime:
                 self.session_tokens["total"] = self.session_tokens.get("input", 0) + self.session_tokens.get("output", 0)
                 emit({"event": "usage", **self.session_tokens})
             emit({"event": "turn_complete", "text": text, "fast_result": {
-                k: result.get(k) for k in ("saved", "replay", "steps", "authoring_s", "stop_reason")}})
+                k: result.get(k) for k in ("saved", "replay", "steps", "authoring_s", "stop_reason", "finding")}})
             self._persist_fast_turn(message, attachment_names, text)
         except Exception as e:
             msg = f"{type(e).__name__}: {e}"

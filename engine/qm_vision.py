@@ -14,10 +14,13 @@ from PIL import Image, ImageDraw, ImageFont
 MAX_WIDTH = 1280       # wider screenshots are scaled down: tokens grow with the picture's area
 
 
-def marked_screenshot(page, locators, limit=12):
+def marked_screenshot(page, locators, limit=12, zoom=False):
     """(PNG data URL, {candidate index: box number}) for the candidates that are on screen
     now, each outlined and numbered 1..n on a screenshot of the window. None when fewer
-    than two are on screen: a picture with one box answers nothing."""
+    than two are on screen: a picture with one box answers nothing. With `zoom`, the
+    picture is cut down to the part of the window that holds the candidates and enlarged
+    -- a closer look when the first answer was unsure. None if that part is most of the
+    window anyway."""
     boxes = {}
     for index, locator in enumerate(locators[:limit]):
         try:
@@ -29,9 +32,23 @@ def marked_screenshot(page, locators, limit=12):
     if len(boxes) < 2:
         return None, {}
     shot = Image.open(io.BytesIO(page.screenshot(type="png"))).convert("RGB")
-    scale = min(1.0, MAX_WIDTH / shot.width)
-    if scale < 1.0:
-        shot = shot.resize((int(shot.width * scale), int(shot.height * scale)))
+    if zoom:
+        left = max(0, min(b["x"] for b in boxes.values()) - 40)
+        top = max(0, min(b["y"] for b in boxes.values()) - 40)
+        right = min(shot.width, max(b["x"] + b["width"] for b in boxes.values()) + 40)
+        bottom = min(shot.height, max(b["y"] + b["height"] for b in boxes.values()) + 40)
+        if right <= left or bottom <= top or (right - left) * (bottom - top) > 0.6 * shot.width * shot.height:
+            return None, {}
+        shot = shot.crop((int(left), int(top), int(right), int(bottom)))
+        boxes = {i: {"x": b["x"] - left, "y": b["y"] - top, "width": b["width"], "height": b["height"]}
+                 for i, b in boxes.items()}
+        grow = min(2.0, MAX_WIDTH / shot.width)
+        shot = shot.resize((int(shot.width * grow), int(shot.height * grow)))
+        scale = grow
+    else:
+        scale = min(1.0, MAX_WIDTH / shot.width)
+        if scale < 1.0:
+            shot = shot.resize((int(shot.width * scale), int(shot.height * scale)))
     draw = ImageDraw.Draw(shot)
     try:
         font = ImageFont.load_default(size=16)

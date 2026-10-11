@@ -224,3 +224,38 @@ def test_a_relative_goto_without_a_project_url_records_the_full_address(browser,
     assert outcome["ok"], outcome
     assert explorer.steps[-1]["value"] == server + "operations.html#/inventory" and page.url.endswith("#/inventory")
     page.close()
+
+
+def test_a_check_the_app_fails_becomes_a_bug_draft_with_reproduction(monkeypatch, browser, server, tmp_path):
+    """The task ends on a check the page does not satisfy (not on a step the plan got wrong):
+    the result carries a finding -- steps that led there, expected, actual, a screenshot,
+    what the app reported -- and a draft lands in the app's bug list."""
+    page = browser.new_page()
+    page.goto(server + "operations.html#/transfers")
+    store = tmp_path / "jira_items.json"
+    agent, scripted, _ = make_agent(monkeypatch, page, browser, server, tmp_path, [
+        {"steps": [{"do": "click", "target": "New transfer"},
+                   {"do": "fill", "target": "Transfer name", "value": "Batch 9"},
+                   {"do": "click", "target": "Save transfer"},
+                   {"do": "expect_text", "value": "Status: Delivered"}], "test": {"flow": "transfers"}},
+        {"steps": [], "done": True, "blocked": "the transfer is Scheduled, not Delivered"},
+    ], log_dir=str(tmp_path / "logs"), bug_store=str(store))
+    planned = scripted.plan
+
+    def plan_while_the_app_complains(*a, **k):          # what the app says while the steps run
+        page.evaluate("() => console.error('inventory service: 503')")
+        return planned(*a, **k)
+    scripted.plan = plan_while_the_app_complains
+    result = agent.run_task("Create transfer Batch 9 and check it is delivered")
+    assert result["saved"] is None and result["stop_reason"].startswith("blocked")
+    finding = result["finding"]
+    assert finding["expected"] == "'Status: Delivered' is shown" and "does not show" in finding["actual"]
+    assert finding["steps"] == ["New transfer", "Transfer name", "Save transfer"]
+    assert finding["code"][-1].startswith('flow.click(') and os.path.exists(finding["screenshot"])
+    assert any("503" in issue for issue in finding["issues"])
+    items = json.load(open(store, encoding="utf-8"))
+    assert len(items) == 1 and items[0]["id"] == finding["draft"] and items[0]["status"] == "draft"
+    assert "Steps to reproduce:\n1. New transfer" in items[0]["description"] and items[0]["attachments"] == [finding["screenshot"]]
+    text = summary_text(result)
+    assert "**Possible bug:**" in text and "Saved as a draft in Bugs & stories" in text
+    page.close()
