@@ -137,6 +137,10 @@ def label_variants(label, keep_numbers):
         if not tokens:
             continue
         out.append(tokens)
+        if len(tokens) > 1 and tokens[-1] in ROLE_WORDS:
+            out.append(tokens[:-1])            # "shopping cart link" (a label read from an id) is the shopping cart
+        if len(tokens) > 1 and tokens[0] in ROLE_WORDS:
+            out.append(tokens[1:])
         if keep_numbers or not any(_NUMBER.fullmatch(t) for t in tokens):
             continue
         no_counts = [t for t in tokens if not _NUMBER.fullmatch(t)]

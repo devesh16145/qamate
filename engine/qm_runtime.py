@@ -820,11 +820,17 @@ class Flow:
             try:
                 loc.fill(value, timeout=self.timeout_ms)
             except Exception as exc:
-                if "not an <input>" not in str(exc) or loc.get_attribute("role", timeout=1000) != "slider":
+                if "not an <input>" not in str(exc):
                     raise
-                self._set_slider(loc, value)       # a slider drawn without an <input>: moved with the keyboard
-                self.settle()
-                return
+                if loc.get_attribute("role", timeout=1000) == "slider":
+                    self._set_slider(loc, value)   # a slider drawn without an <input>: moved with the keyboard
+                    self.settle()
+                    return
+                inner = loc.locator("input:not([type=hidden]), textarea, [contenteditable]").first
+                if not inner.count():
+                    raise
+                loc = inner                        # a combobox or box that wraps its real input
+                loc.fill(value, timeout=self.timeout_ms)
             if not self._shows(loc, value):
                 loc.click(timeout=self.timeout_ms)
                 loc.press("ControlOrMeta+a")
@@ -1024,10 +1030,15 @@ class Flow:
             loc = self._find(target)
             try:
                 kind = loc.evaluate("el => el.tagName === 'SELECT' ? 'choice' : 'value' in el && !el.isContentEditable ? 'value' :"
-                                    " el.isContentEditable ? 'text' : el.hasAttribute('aria-valuenow') ? 'aria' : 'value'",
+                                    " el.isContentEditable ? 'text' : el.hasAttribute('aria-valuenow') ? 'aria' :"
+                                    " el.querySelector('input, textarea, select') ? 'inner' : 'text'",
                                     timeout=2000)
             except Exception:
                 kind = "value"
+            if kind == "inner":                    # a box that wraps its real input
+                loc, kind = loc.locator("input, textarea, select").first, "value"
+                if loc.evaluate("el => el.tagName === 'SELECT'", timeout=2000):
+                    kind = "choice"
             if kind == "choice":
                 self._expect_choice(loc, str(value), self._ms(timeout))
             elif kind == "text":

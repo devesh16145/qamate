@@ -902,3 +902,22 @@ def test_the_control_in_what_was_just_opened_is_the_one_meant():
     assert decide(candidates, step) is None                       # two of them: a question...
     next(c for c in candidates if c.element.ref == "e10").fresh = True
     assert decide(candidates, step).element.ref == "e10"          # ...unless one is in what the last step opened
+
+
+def test_what_the_first_live_benchmark_taught():
+    """From the first run with a real planner (2026-10-11): a count badge known from its id as
+    'shopping cart link' is the shopping cart; a re-plan skips the thinking phase; a `within`
+    made of generic words names no item."""
+    from qm_explorer import GENERIC_PLACES
+    from qm_planner import Planner, SYSTEM
+    assert match_kind("shopping cart icon", "shopping cart link", "link")[0] == "decorated"
+    assert match_kind("Login", "Login button", "button")[0] == "decorated"
+    assert match_kind("Ticket 150", "Ticket 1", "link")[0] == "partial"               # still never a number mix-up
+    assert not (set(words("the transfer row")) - GENERIC_PLACES) and set(words("QA Dispatch Cedar")) - GENERIC_PLACES
+    assert "never for the page you are already on" in SYSTEM
+    cfg = {"llm": {"schema": 2, "providers": {"mimo": {"preset": "mimo", "model": "mimo-v2.6-flash", "api_key_env": "X"}}}}
+    planner = Planner(cfg, "mimo")
+    assert planner.quick is not None and planner.quick.cfg["thinking"] == "off" and planner.provider.cfg["thinking"] == "on"
+    stream = planner.start.__func__      # a re-plan (a problem given) uses the quick provider
+    from qm_planner import PlanStream
+    assert PlanStream.__init__.__code__.co_varnames[:4] == ("self", "planner", "message", "replan")

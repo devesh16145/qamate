@@ -52,6 +52,13 @@ ELEMENT_OPS = {"click", "dblclick", "rightclick", "hover", "fill", "select", "ch
 CHOICE_ROLES = {"radio", "menuitemradio", "option", "tab", "button", "switch"}
 MAX_REVEAL_TABS = 6          # other tabs of a panel that are opened to look for a target
 MAX_LOADING_S = 8            # how long a step waits for its target while the last action's requests are still open
+# Words that name a kind of place rather than an item: a `within` made only of these is no scope.
+GENERIC_PLACES = {"the", "a", "an", "page", "list", "table", "row", "rows", "grid", "card", "cards", "cart", "form",
+                  "dialog", "modal", "popup", "panel", "section", "area", "header", "footer", "sidebar", "menu",
+                  "results", "result", "summary", "details", "detail", "view", "screen", "tab", "toolbar", "body",
+                  "main", "content", "item", "items", "entry", "entries", "record", "records", "new", "current",
+                  "selected", "first", "last", "top", "bottom", "left", "right", "transfer", "transfers", "company",
+                  "companies", "contact", "contacts", "product", "products", "order", "orders", "search", "filter"}
 DIALOG_OPS = {"click", "dblclick", "press", "select", "check"}
 PART_ROLES = {"spinbutton", "textbox", "searchbox"}     # what a segmented field is made of
 SCOPE_ROLES = {"row", "listitem", "article", "group", "region", "dialog", "alertdialog", "form", "link"}
@@ -265,6 +272,16 @@ class Explorer:
                                         (now < deadline - 1.5 + MAX_LOADING_S and self._loading())):
                 break
             self.page.wait_for_timeout(200)
+        if best is None and not (want - GENERIC_PLACES):
+            # "in the cart", "in the transfer row": a kind of place, not an item's name. Checked on
+            # the page as a whole, and said so, rather than failed for the wording.
+            step = {"op": "expect_page_text", "value": value, "present": present,
+                    "name": intent.get("name") or (f"Page shows '{intent['value']}'" if present
+                                                   else f"Page does not show '{intent['value']}'")}
+            outcome = self._record(step, check=True)
+            if outcome["ok"]:
+                self.notes.append(f"'{within}' names no row, card or section: '{value}' was checked on the whole page")
+            return outcome
         if best is None:
             return self._adjacent_text_check(intent, within, value, present, obs)
         loc = anchored_locator(self.page, best, within) or locator_for(self.page, best)

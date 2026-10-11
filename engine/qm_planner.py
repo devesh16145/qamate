@@ -6,6 +6,7 @@ it sees a compact page summary -- element lines and visible text -- instead of a
 tool list and full DOM dumps. It plans only as far as it can see; after those steps run
 it is shown the new page.
 """
+import copy
 import json
 import queue
 import re
@@ -13,6 +14,7 @@ import threading
 import time
 
 from llm import make_provider, extract_json, LLMError
+from model_profiles import resolve_profile
 from qm_ground import canonical_words
 from qm_observe import on_screen
 from qm_runtime import relative_url
@@ -54,8 +56,11 @@ Rules:
 - Use labels exactly as they appear: on the current page from its elements, on other pages from
   known_pages. A target must be the control's own name, not a description of it.
 - When several elements share a label (e.g. "Add to cart" on every product), say which one
-  with "within": the item's name, row text or section. Only when the items themselves are
+  with "within": text the item itself shows (its name, a cell of its row, its section's heading)
+  -- never a description like "cart" or "transfer row". Only when the items themselves are
   identical (marked "[x4, identical]") add "nth": 1 for the first, 2 for the second, ...
+- expect_url only right after a step that navigates there, with the path the app really uses
+  (known_pages show them); never for the page you are already on.
 - Set "done": true when your steps complete the whole task, including its checks. Use
   "done": false only if you genuinely need to see a page before planning further. "done" is a
   key of the reply, never a step.
@@ -152,6 +157,17 @@ class Planner:
     def __init__(self, config, provider_name=None, emit=lambda e: None):
         self.config, self.provider_name, self.emit = config, provider_name, emit
         self.provider = make_provider(config, provider_name, role="planner")
+        # A re-plan after a surprise is a small correction to a plan the model has already
+        # thought through: made without a thinking phase where the preset offers the switch.
+        self.quick = None
+        try:
+            name, cfg = resolve_profile(config, provider_name, "planner")
+            if cfg.get("thinking") == "on" and (config.get("agent_execution") or {}).get("fast_replan_thinking", "off") == "off":
+                quick = copy.deepcopy(config)
+                quick["llm"]["providers"][name] = {**quick["llm"]["providers"][name], "thinking": "off"}
+                self.quick = make_provider(quick, name, role="planner")
+        except Exception:
+            self.quick = None
         self.usage = {"input": 0, "output": 0}   # running totals, drained by the caller
         self.timings = []                        # per call: {ms, first_step_ms, input, output, reasoning}
 
@@ -180,7 +196,7 @@ class Planner:
         """Start planning and return a PlanStream: its steps can be executed while the model
         is still writing the rest of the plan."""
         return PlanStream(self, self._message(task, observation, done_steps, problem, test_data, history,
-                                              known_pages))
+                                              known_pages), replan=problem is not None)
 
     def _account(self, started, first_step_ms, cancelled):
         usage = self.provider.last_usage or {}
@@ -253,8 +269,8 @@ class PlanStream:
     page, so the model would only be writing steps that won't be used); `result()` gives
     the final {steps, done, blocked, test}."""
 
-    def __init__(self, planner, message):
-        self.planner, self.message = planner, message
+    def __init__(self, planner, message, replan=False):
+        self.planner, self.message, self.replan = planner, message, replan
         self.queue, self.scanner = queue.Queue(), StepScanner()
         self.started = time.monotonic()
         self.first_step_ms = None
@@ -265,7 +281,7 @@ class PlanStream:
 
     def _run(self):
         prompt = self.message + "\n\nRespond with ONLY valid JSON. No prose, no code fences."
-        provider = self.planner.provider
+        provider = self.planner.quick if (self.replan and self.planner.quick is not None) else self.planner.provider
         try:
             if hasattr(provider, "stream"):
                 self.text = provider.stream(SYSTEM, prompt, self._on_text, temperature=0.1)
