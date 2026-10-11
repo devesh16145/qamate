@@ -1,0 +1,279 @@
+{
+ "note": "Chooser cases with the candidates marked on a screenshot; gold is the engine's own verified choice given the step's `within` (None: nothing listed is meant). See record_chooser_cases.py.",
+ "cases": [
+  {
+   "id": "rows-edit-bach",
+   "kind": "within",
+   "step": {
+    "target": "Edit",
+    "within": "Bach",
+    "op": "click"
+   },
+   "options": [
+    "box 1: link \"Edit\" in row near Smith · Admin · Disable",
+    "box 2: link \"Edit\" in row near Bach · Viewer · Disable",
+    "box 3: link \"Edit\" in row near Doe · Editor · Disable"
+   ],
+   "gold": 1,
+   "image": "chooser_images/rows-edit-bach.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=rows"
+   }
+  },
+  {
+   "id": "namesakes-s20",
+   "kind": "within",
+   "step": {
+    "target": "Add to cart",
+    "within": "Galaxy S20",
+    "op": "click"
+   },
+   "options": [
+    "box 1: generic \"Add to cart\" near Galaxy S20",
+    "box 2: generic \"Add to cart\" near Galaxy S20+",
+    "box 3: generic \"Add to cart\" near Galaxy S20 Ultra"
+   ],
+   "gold": 0,
+   "image": "chooser_images/namesakes-s20.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=namesakes"
+   }
+  },
+  {
+   "id": "namesakes-ultra",
+   "kind": "within",
+   "step": {
+    "target": "Add to cart",
+    "within": "Galaxy S20 Ultra",
+    "op": "click"
+   },
+   "options": [
+    "box 1: generic \"Add to cart\" near Galaxy S20",
+    "box 2: generic \"Add to cart\" near Galaxy S20+",
+    "box 3: generic \"Add to cart\" near Galaxy S20 Ultra"
+   ],
+   "gold": 2,
+   "image": "chooser_images/namesakes-ultra.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=namesakes"
+   }
+  },
+  {
+   "id": "dup-shipping-city",
+   "kind": "within",
+   "step": {
+    "target": "City",
+    "within": "Shipping address",
+    "value": "Pune",
+    "op": "fill"
+   },
+   "options": [
+    "box 1: textbox \"City\" near City",
+    "box 2: textbox \"City\" near City",
+    "box 3: generic \"City\"",
+    "box 4: generic \"City\""
+   ],
+   "gold": 1,
+   "image": "chooser_images/dup-shipping-city.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=dup"
+   }
+  },
+  {
+   "id": "dup-billing-save",
+   "kind": "within",
+   "step": {
+    "target": "Save",
+    "within": "Billing address",
+    "op": "click"
+   },
+   "options": [
+    "box 1: button \"Save\" near City",
+    "box 2: button \"Save\" near City"
+   ],
+   "gold": 0,
+   "image": "chooser_images/dup-billing-save.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=dup"
+   }
+  },
+  {
+   "id": "checkbox-sms",
+   "kind": "wording",
+   "step": {
+    "target": "SMS alerts",
+    "op": "check"
+   },
+   "options": [
+    "box 1: checkbox \"SMS alerts\" (unnamed, from the text beside it)",
+    "box 2: checkbox \"Email alerts\" (unnamed, from the text beside it)",
+    "box 3: main \"Email alerts SMS alerts\"",
+    "box 4: heading \"Alerts\" (level=2)",
+    "box 5: button \"Save alerts\""
+   ],
+   "gold": 0,
+   "image": "chooser_images/checkbox-sms.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=checkboxes"
+   }
+  },
+  {
+   "id": "rows-no-edit-profile",
+   "kind": "none",
+   "step": {
+    "target": "Edit profile",
+    "op": "click"
+   },
+   "options": [
+    "box 1: link \"Edit\" in row near Smith · Admin · Disable",
+    "box 2: link \"Edit\" in row near Bach · Viewer · Disable",
+    "box 3: link \"Edit\" in row near Doe · Editor · Disable"
+   ],
+   "gold": null,
+   "image": "chooser_images/rows-no-edit-profile.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=rows"
+   }
+  },
+  {
+   "id": "namesakes-no-wishlist",
+   "kind": "none",
+   "step": {
+    "target": "Add to wishlist",
+    "op": "click"
+   },
+   "options": [
+    "box 1: generic \"Add to cart\" near Galaxy S20",
+    "box 2: generic \"Add to cart\" near Galaxy S20+",
+    "box 3: generic \"Add to cart\" near Galaxy S20 Ultra"
+   ],
+   "gold": null,
+   "image": "chooser_images/namesakes-no-wishlist.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=namesakes"
+   }
+  },
+  {
+   "id": "slowswap-withdraw",
+   "kind": "wording",
+   "step": {
+    "target": "Withdraw money",
+    "op": "click"
+   },
+   "options": [
+    "box 1: button \"Withdraw money\"",
+    "box 2: button \"Withdraw\""
+   ],
+   "gold": 0,
+   "image": "chooser_images/slowswap-withdraw.png",
+   "page": {
+    "title": "Ops console",
+    "path": "http://127.0.0.1:56321/patterns.html?p=slowswap"
+   }
+  },
+  {
+   "id": "bank-deposit-button",
+   "kind": "within",
+   "step": {
+    "target": "Deposit",
+    "within": "Amount to be Deposited",
+    "op": "click"
+   },
+   "options": [
+    "box 1: button \"Deposit\"",
+    "box 2: button \"Deposit\" in form near Amount to be Deposited :"
+   ],
+   "gold": 1,
+   "image": "chooser_images/bank-deposit-button.png",
+   "page": {
+    "title": "XYZ Bank",
+    "path": "https://www.globalsqa.com/angularJs-protractor/BankingProject/#/account"
+   }
+  },
+  {
+   "id": "opencart-add-main",
+   "kind": "within",
+   "step": {
+    "target": "Add to Cart",
+    "within": "iPhone",
+    "op": "click"
+   },
+   "options": [
+    "box 1: button \"Add to Cart\" near minus circle",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "not on screen: button \"Add to Cart\" near Apple Cinema 30&quot; · Apple Cinema 30\" · $122.00",
+    "box 10: spinbutton \"Qty\" (labelled \"ADD TO CART BUY NOW\")",
+    "not on screen: button \"Edit cart\" (off-screen)",
+    "box 12: button \"0\" (labelled \"cart total drawer\")"
+   ],
+   "gold": 0,
+   "image": "chooser_images/opencart-add-main.png",
+   "page": {
+    "title": "iPhone",
+    "path": "https://ecommerce-playground.lambdatest.io/index.php?route=product/product&product_id=40"
+   }
+  },
+  {
+   "id": "ngdate-popup-day",
+   "kind": "opened",
+   "step": {
+    "target": "October 20, 2026",
+    "op": "click"
+   },
+   "options": [
+    "box 1: button \"October 20, 2026\" in row near 18 · 19 · 20 · 21 · 22 · 23 · 24",
+    "not on screen: button \"October 20, 2026\" in row near 18 · 19 · 20 · 21 · 22 · 23 · 24",
+    "box 3: button \"October 1, 2026\" in row near OCT · 1 · 2 · 3",
+    "box 4: button \"October 2, 2026\" in row near OCT · 1 · 2 · 3",
+    "box 5: button \"October 3, 2026\" in row near OCT · 1 · 2 · 3",
+    "box 6: button \"October 4, 2026\" in row near 4 · 5 · 6 · 7 · 8 · 9 · 10",
+    "box 7: button \"October 5, 2026\" (pressed) in row near 4 · 5 · 6 · 7 · 8 · 9 · 10",
+    "box 8: button \"October 6, 2026\" in row near 4 · 5 · 6 · 7 · 8 · 9 · 10",
+    "box 9: button \"October 7, 2026\" in row near 4 · 5 · 6 · 7 · 8 · 9 · 10",
+    "box 10: button \"October 8, 2026\" in row near 4 · 5 · 6 · 7 · 8 · 9 · 10",
+    "box 11: button \"October 9, 2026\" in row near 4 · 5 · 6 · 7 · 8 · 9 · 10",
+    "box 12: button \"October 10, 2026\" in row near 4 · 5 · 6 · 7 · 8 · 9 · 10"
+   ],
+   "gold": 0,
+   "image": "chooser_images/ngdate-popup-day.png",
+   "page": {
+    "title": "Datepicker • Angular Material",
+    "path": "https://material.angular.dev/components/datepicker/examples"
+   }
+  },
+  {
+   "id": "antd-item2-radio",
+   "kind": "wording",
+   "step": {
+    "target": "item 2",
+    "op": "check"
+   },
+   "options": [
+    "box 1: radio \"item 2\"",
+    "box 2: generic \"item 2\"",
+    "box 3: generic \"item 2\"",
+    "box 4: generic \"item 2\" near Radio.Button · item 1 · item 3"
+   ],
+   "gold": 0,
+   "image": "chooser_images/antd-item2-radio.png",
+   "page": {
+    "title": "",
+    "path": "https://ant.design/~demos/form-demo-validate-other"
+   }
+  }
+ ]
+}

@@ -23,6 +23,7 @@ import time
 
 from llm import _http_post_json, make_provider, LLMError
 from model_profiles import load_catalog, resolve_profile, ProfileError
+from qm_vision import marked_screenshot, sees
 
 DECISION_PROTOCOLS = {"typesafe", "openrouter_decisions"}
 INSTRUCTIONS = ("A browser test is about to perform the step below on a web page. Choose the one page element "
@@ -30,6 +31,9 @@ INSTRUCTIONS = ("A browser test is about to perform the step below on a web page
                 "around it. Choose the NONE option when no listed element is what the step means: a label that "
                 "only shares some words with the step, or the right label on the wrong kind of control, is not "
                 "a match.")
+SEEING = (" The picture is the page as it looks now; the red numbered boxes on it mark the options that are on "
+          "screen (\"box 3\" in an option is the box numbered 3). Use what the picture shows -- icons, what is "
+          "next to what, what is highlighted or greyed out -- as well as the words.")
 OPTION_IDS = ["kav", "mip", "tor", "zel", "dun", "raf", "wix", "bog", "yem", "hul", "pim", "sot"]   # no order, no meaning
 NONE_ID = "none"
 NONE_TEXT = "NONE - no listed element is the one the step means"
@@ -97,9 +101,10 @@ def _complete(provider, system, prompt, max_tokens):
     return provider.complete(system, prompt, max_tokens=max_tokens, temperature=0)
 
 
-def ask(config, name, cfg, step_text, options, page):
+def ask(config, name, cfg, step_text, options, page, image=None):
     """One call: {option id: text} in presentation order -> {"choice", "confidence", "usage", "ms"}.
-    `choice` is an option id from `options`, or None when the model answered something else."""
+    `choice` is an option id from `options`, or None when the model answered something else.
+    `image` (a PNG data URL with the options marked, see qm_vision) goes to a model that can see."""
     started = time.monotonic()
     if cfg.get("protocol") in DECISION_PROTOCOLS:
         key = os.environ.get(cfg.get("api_key_env") or "", "")
@@ -108,8 +113,11 @@ def ask(config, name, cfg, step_text, options, page):
         state = {"step": step_text, "page": page}
         if cfg.get("preset") == "liquid":
             state = json.dumps(state, ensure_ascii=False)        # Liquid's d1 takes its situation as text
+        instructions = INSTRUCTIONS + (SEEING if image else "")
         payload = {"model": cfg["model"], "state": state,
-                   "questions": {"element": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": options}}}
+                   "questions": {"element": {"type": "choice", "instructions": instructions, "criteria": options}}}
+        if image:
+            payload["images"] = [image]
         path = "/decisions" if cfg["protocol"] == "openrouter_decisions" else "/systemone"
         result = _http_post_json(cfg["base_url"].rstrip("/") + path, {"Authorization": f"Bearer {key}"}, payload,
                                  timeout=cfg.get("timeout", 30))
@@ -127,7 +135,7 @@ def ask(config, name, cfg, step_text, options, page):
             choice = None
         confidence, usage = None, provider.last_usage or {}
     return {"choice": choice if choice in options else None, "answered": choice, "confidence": confidence,
-            "usage": usage, "ms": round((time.monotonic() - started) * 1000)}
+            "usage": usage, "ms": round((time.monotonic() - started) * 1000), "saw": bool(image)}
 
 
 def family(cfg):
@@ -139,7 +147,7 @@ def family(cfg):
     return "decision" if cfg.get("protocol") in DECISION_PROTOCOLS else "llm"
 
 
-def vote(config, name, cfg, step_text, texts, page, rounds=2, emit=lambda e: None):
+def vote(config, name, cfg, step_text, texts, page, rounds=2, emit=lambda e: None, image=None):
     """Ask in `rounds` arrangements at once. Returns {"index", "agreed", "votes", "confidence", "ms", "error"}:
     index is the element all runs chose (None for NONE, a split or an error)."""
     plans = arrangements(len(texts))[:max(1, rounds)]
@@ -149,7 +157,7 @@ def vote(config, name, cfg, step_text, texts, page, rounds=2, emit=lambda e: Non
         last = None
         for _ in range(2):                       # one retry: a transient error must not cost a re-plan
             try:
-                reply = ask(config, name, cfg, step_text, options, page)
+                reply = ask(config, name, cfg, step_text, options, page, image=image)
                 break
             except Exception as exc:
                 last = exc
@@ -158,7 +166,8 @@ def vote(config, name, cfg, step_text, texts, page, rounds=2, emit=lambda e: Non
         usage = reply["usage"]
         emit({"event": "model_usage", "role": "decision", "profile": name, "model": cfg.get("model"),
               "input": usage.get("input_tokens", usage.get("prompt_tokens")),
-              "output": usage.get("output_tokens", usage.get("completion_tokens")), "duration_ms": reply["ms"]})
+              "output": usage.get("output_tokens", usage.get("completion_tokens")), "duration_ms": reply["ms"],
+              "saw": reply.get("saw", False)})
         if reply["choice"] is None:
             return {"error": f"answered {reply['answered']!r}, which is not an option", "ms": reply["ms"]}
         return {"index": dict(plan)[reply["choice"]], "none": reply["choice"] == NONE_ID,
@@ -184,11 +193,13 @@ def vote(config, name, cfg, step_text, texts, page, rounds=2, emit=lambda e: Non
     return out
 
 
-def choose(config, step, candidates, *, page_title="", page_path="", emit=lambda e: None):
+def choose(config, step, candidates, *, page_title="", page_path="", emit=lambda e: None, page=None):
     """Pick one of `candidates` (best-first) for `step`.
 
-    Returns {"index": int|None, "confidence": float|None, "by": "jev"|"decision"|"llm"|None, ...}.
-    index None means 'none of these', the two runs disagreed, an error, or no model."""
+    Returns {"index": int|None, "confidence": float|None, "by": "jev"|"d1"|"decision"|"llm"|None, ...}.
+    index None means 'none of these', the two runs disagreed, an error, or no model. With
+    `page` (the live page) and a model that can see, the question is asked about a screenshot
+    with the candidates marked as well as about their descriptions."""
     if not candidates:
         return {"index": None, "confidence": None, "by": None}
     name, cfg = decision_profile(config)
@@ -197,10 +208,21 @@ def choose(config, step, candidates, *, page_title="", page_path="", emit=lambda
         # (slow, reasoning) planner model as a chooser costs as much as a re-plan and tells
         # the planner nothing.
         return {"index": None, "confidence": None, "by": None}
-    texts = [c.element.summary()[:240] for c in candidates[:len(OPTION_IDS)]]
-    result = vote(config, name, cfg, describe(step), texts, {"title": page_title, "path": page_path}, emit=emit)
+    shown = candidates[:len(OPTION_IDS)]
+    texts = [c.element.summary()[:240] for c in shown]
+    image = None
+    if page is not None and sees(cfg):
+        try:
+            from qm_selectors import handle
+            image, numbers = marked_screenshot(page, [page.locator(handle(c.element)) for c in shown])
+        except Exception:
+            image, numbers = None, {}
+        if image:
+            texts = [(f"box {numbers[i]}: " if i in numbers else "not on screen: ") + t for i, t in enumerate(texts)]
+    result = vote(config, name, cfg, describe(step), texts, {"title": page_title, "path": page_path}, emit=emit,
+                  image=image)
     out = {"index": result["index"], "confidence": result["confidence"], "by": family(cfg),
-           "agreed": result["agreed"], "ms": result["ms"]}
+           "agreed": result["agreed"], "ms": result["ms"], "saw": bool(image)}
     if result.get("error"):
         out["error"] = result["error"]
     elif not result["agreed"]:

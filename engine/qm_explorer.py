@@ -337,7 +337,7 @@ class Explorer:
         found = self._beyond_the_tree(op, ground, candidates, obs) if pick is None else None
         if pick is None and found is None and ask and candidates:
             choice = choose(self.config, ground, candidates[:8], page_title=obs.title,
-                            page_path=relative_url(obs.url), emit=self.emit)
+                            page_path=relative_url(obs.url), emit=self.emit, page=self.page)
             if choice.get("index") is not None and (choice.get("confidence") is None or choice["confidence"] >= 0.6):
                 pick, how, confidence = candidates[choice["index"]], choice["by"], choice.get("confidence")
             elif choice.get("error"):

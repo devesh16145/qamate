@@ -660,7 +660,7 @@ def _chooser(monkeypatch, answer):
     asked = []
     monkeypatch.setattr(qm_decide, "decision_profile", lambda config: ("dec", {"protocol": "typesafe", "model": "jev-test"}))
 
-    def fake_ask(config, name, cfg, step_text, options, page):
+    def fake_ask(config, name, cfg, step_text, options, page, image=None):
         asked.append(list(options.items()))
         choice = answer(options)
         return {"choice": choice if choice in options else None, "answered": choice, "confidence": 0.9, "usage": {}, "ms": 5}
@@ -707,7 +707,7 @@ def test_chooser_comparison_scores_models_and_reports_unreachable_ones(monkeypat
     cases = json.load(open(qm_chooser_eval.CASES, encoding="utf-8"))["cases"]
     gold = {qm_decide.describe(c["step"]) + "|" + "|".join(sorted(c["options"])): c for c in cases}
 
-    def fake_ask(config, name, cfg, step_text, options, page):
+    def fake_ask(config, name, cfg, step_text, options, page, image=None):
         if cfg["model"] == "missing/model":
             raise qm_decide.LLMError("HTTP 404: no such model")
         texts = sorted(t for k, t in options.items() if k != "none")

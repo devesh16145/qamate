@@ -12,15 +12,27 @@ sys.path.insert(0, ENGINE)
 import qm_chooser_eval
 import qm_decide
 
-CASES = json.load(open(qm_chooser_eval.CASES, encoding="utf-8"))["cases"]
-BY_STEP = {qm_decide.describe(c["step"]) + "|" + "|".join(sorted(c["options"])): c for c in CASES}
+import re
+
+CASES = json.load(open(qm_chooser_eval.CASES, encoding="utf-8"))["cases"] + \
+    json.load(open(qm_chooser_eval.VISION_CASES, encoding="utf-8"))["cases"]      # the latter have pictures
+_plain = lambda t: re.sub(r"^(box \d+|not on screen): ", "", t)                      # words only, as a text model sees them
+BY_STEP = {qm_decide.describe(c["step"]) + "|" + "|".join(sorted(_plain(o) for o in c["options"])): c for c in CASES}
 
 
 def right_answer(step_text, options):
-    case = BY_STEP[step_text + "|" + "|".join(sorted(t for k, t in options.items() if k != qm_decide.NONE_ID))]
+    case = BY_STEP[step_text + "|" + "|".join(sorted(_plain(t) for k, t in options.items() if k != qm_decide.NONE_ID))]
     if case["gold"] is None:
         return qm_decide.NONE_ID
-    return next(k for k, t in options.items() if t == case["options"][case["gold"]])
+    # Options may read the same (two calendars with the same day buttons): answer by position,
+    # in whichever of the two orders the question came.
+    keys = [k for k in options if k != qm_decide.NONE_ID]
+    shown = [_plain(options[k]) for k in keys]
+    listed = [_plain(o) for o in case["options"]]
+    assert shown in (listed, listed[::-1]), (shown, listed)
+    if shown == listed[::-1] and shown != listed:
+        return keys[len(keys) - 1 - case["gold"]]
+    return keys[case["gold"]]       # (when both orders read the same, words alone cannot tell: see the test)
 
 
 class Server(http.server.BaseHTTPRequestHandler):
@@ -70,8 +82,13 @@ def test_comparison_speaks_both_wire_formats_and_scores(tmp_path, monkeypatch, c
         srv.shutdown()
     card = json.load(open(next((tmp_path / "results" / "_chooser_eval").glob("*/scorecard.json"))))
     decider, chatty, missing = card["models"]
+    # A case whose options read the same in both orders cannot be answered from words alone
+    # (two "Save" buttons marked only on the picture): the stand-in answers one way, which is
+    # "not sure", never a wrong pick.
+    same_both_ways = sum(1 for c in CASES if [_plain(o) for o in c["options"]] == [_plain(o) for o in c["options"]][::-1])
     for row in (decider, chatty):
-        assert row["correct"] == len(CASES) and row["wrong_pick"] == 0 and row["error"] == 0, row
+        assert row["correct"] == len(CASES) - same_both_ways and row["wrong_pick"] == 0 and row["error"] == 0, row
+        assert row["not_sure"] == same_both_ways
         assert row["p50_ms"] is not None
     assert decider["resolved_model"] == "acme/decider-1" and "Unknown model profile" in missing["unavailable"]
     paths = {path for path, _, _ in Server.seen}

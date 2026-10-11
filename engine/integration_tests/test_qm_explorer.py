@@ -358,3 +358,40 @@ def test_editors_the_accessibility_tree_hides_are_fields(page, patterns, browser
                    {"do": "click", "target": "Save ticket"},
                    {"do": "expect_page_text", "value": "Saved: Printer is offline"}])["ok"]
     assert replay(browser, ex.steps, ex.data)["ok"]
+
+
+def test_a_model_that_can_see_gets_the_candidates_marked_on_a_screenshot(page, patterns, monkeypatch):
+    """With Liquid's d1 as the decision model, the chooser sends a screenshot with numbered
+    boxes over the candidates that are on screen, and names them by box number."""
+    import base64
+    import qm_decide
+    from qm_ground import rank
+    from qm_observe import observe
+    page.goto(patterns + "rows")
+    obs = observe(page)
+    step = {"op": "click", "target": "Edit"}
+    candidates = rank(step, obs)
+    assert len(candidates) == 3
+    config = {"llm": {"roles": {"decision": "d1"}, "providers": {"d1": {"preset": "liquid"}}}}
+    monkeypatch.setenv("LIQUID_API_KEY", "liquid_test")
+    sent = []
+
+    def fake_post(url, headers, payload, timeout=30):
+        sent.append(payload)
+        criteria = payload["questions"]["element"]["criteria"]
+        bach = next(k for k, v in criteria.items() if "Bach" in v)      # the row that says Bach
+        return {"answers": {"element": {"type": "choice", "choice": bach, "confidence": 0.9}}, "usage": {"input_tokens": 1600}}
+    monkeypatch.setattr(qm_decide, "_http_post_json", fake_post)
+    choice = qm_decide.choose(config, {**step, "within": "Bach"}, candidates, page=page)
+    assert choice["by"] == "d1" and choice["saw"] and choice["agreed"]
+    assert candidates[choice["index"]].element.context.startswith("Bach")
+    assert len(sent) == 2 and all(p["images"][0].startswith("data:image/png;base64,") for p in sent)
+    png = base64.b64decode(sent[0]["images"][0].split(",", 1)[1])
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and 5000 < len(png) < 2_000_000
+    options = [v for k, v in sent[0]["questions"]["element"]["criteria"].items() if k != "none"]
+    assert sorted(o.split(":")[0] for o in options) == ["box 1", "box 2", "box 3"]
+    assert "box" in sent[0]["questions"]["element"]["instructions"]
+    # Without a page to look at, or with a model that cannot see, nothing is drawn.
+    sent.clear()
+    blind = qm_decide.choose(config, {**step, "within": "Bach"}, candidates)
+    assert not blind["saw"] and "images" not in sent[0]

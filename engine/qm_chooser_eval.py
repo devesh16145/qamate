@@ -19,15 +19,20 @@ Models:  role                    the profile in config.json llm.roles.decision
          decisions:<model id>    a decision model on OpenRouter's decisions endpoint
          chat:<model id>         a chat model on OpenRouter
          liquid:<model id>       a decision model on Liquid's own API (d1, d1:free)
+         <spec>#text             the same model, shown only words even for cases that have a picture
+Cases with a picture (chooser_cases_vision.json, real decisions recorded by probes/record_chooser_cases.py)
+are shown to a model that can see; every model gets their words.
 OpenRouter specs use OPENROUTER_API_KEY, Liquid specs LIQUID_API_KEY, from the environment (the
 app passes the keys it holds in the keychain). A model id a service does not serve is reported
 as unavailable.
 Scorecards: results/_chooser_eval/<timestamp>/scorecard.json
 """
+import base64
 import copy
 import datetime
 import json
 import os
+import re
 import sys
 import time
 
@@ -35,8 +40,10 @@ ENGINE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ENGINE)
 import qm_decide
 from model_profiles import resolve_profile
+from qm_vision import sees
 
 CASES = os.path.join(ENGINE, "probes", "chooser_cases.json")
+VISION_CASES = os.path.join(ENGINE, "probes", "chooser_cases_vision.json")   # with the candidates marked on a screenshot
 # Candidates to measure against the configured model (ids as listed on OpenRouter in
 # October 2026; none of them has been measured on this task -- that is what this is for).
 SHORTLIST = ["decisions:typesafe/jev-1.13", "decisions:liquid/d1", "decisions:perplexity/pplx-decider-v1-27b",
@@ -48,6 +55,7 @@ LIQUID = ["liquid:d1"]                     # on Liquid's own API, when its key i
 
 def profile_for(config, spec):
     """(config to use, profile name, resolved profile) for a model spec."""
+    spec = spec.split("#", 1)[0]
     llm = (config or {}).get("llm") or {}
     if spec == "role":
         name = (llm.get("roles") or {}).get("decision")
@@ -77,12 +85,18 @@ def evaluate(config, spec, cases, log=print):
         run_config, name, cfg = profile_for(config, spec)
     except Exception as exc:
         return {"model": spec, "unavailable": str(exc)[:200]}
-    log(f"- {spec} ({cfg.get('model')})")
+    looks = sees(cfg) and not spec.endswith("#text")
+    log(f"- {spec} ({cfg.get('model')}{', with pictures' if looks else ''})")
     rows, latencies = [], []
     first_taken = first_possible = unreachable = 0
     for number, case in enumerate(cases):
-        texts = case["options"]
-        result = qm_decide.vote(run_config, name, cfg, qm_decide.describe(case["step"]), texts, {"title": "", "path": ""})
+        image = None
+        if case.get("image") and looks:
+            with open(os.path.join(ENGINE, "probes", case["image"]), "rb") as f:
+                image = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+        texts = case["options"] if image else [re.sub(r"^(box \d+|not on screen): ", "", t) for t in case["options"]]
+        result = qm_decide.vote(run_config, name, cfg, qm_decide.describe(case["step"]), texts,
+                                case.get("page") or {"title": "", "path": ""}, image=image)
         votes = result["votes"]
         latencies += [v["ms"] for v in votes if "ms" in v]
         picks = ["error" if "error" in v else v["index"] for v in votes]
@@ -104,13 +118,16 @@ def evaluate(config, spec, cases, log=print):
             outcome = "missed"        # said NONE although the element was listed: safe, costs a re-plan
         else:
             outcome = "wrong_pick"
-        rows.append({"id": case["id"], "kind": case["kind"], "gold": case["gold"], "picks": picks, "outcome": outcome})
+        rows.append({"id": case["id"], "kind": ("seen " if image else "") + case["kind"], "gold": case["gold"],
+                     "picks": picks, "outcome": outcome})
     count = len(rows) or 1
     tally = {k: sum(r["outcome"] == k for r in rows) for k in ("correct", "wrong_pick", "not_sure", "missed", "error")}
     single = [p == r["gold"] for r in rows for p in r["picks"] if p != "error"]
     log(f"  {tally['correct']}/{len(rows)} correct, {tally['wrong_pick']} wrong pick(s), "
         f"{tally['not_sure'] + tally['missed']} not sure, {tally['error']} failed")
+    with_picture = [r for r in rows if r["kind"].startswith("seen ")]
     return {"model": spec, "resolved_model": cfg.get("model"), "cases": len(rows), **tally,
+            "seen_cases": len(with_picture), "seen_correct": sum(r["outcome"] == "correct" for r in with_picture),
             "correct_pct": round(100 * tally["correct"] / count, 1),
             "wrong_pick_pct": round(100 * tally["wrong_pick"] / count, 1),
             "single_call_correct_pct": round(100 * sum(single) / len(single), 1) if single else None,
@@ -132,13 +149,16 @@ def main(argv=None):
         config = json.load(f)
     with open(CASES, encoding="utf-8") as f:
         cases = json.load(f)["cases"]
+    if os.path.exists(VISION_CASES):
+        with open(VISION_CASES, encoding="utf-8") as f:
+            cases += json.load(f)["cases"]
     specs = [a for a in argv if not a.startswith("-")]
     if not specs:
         specs = ["role"] if ((config.get("llm") or {}).get("roles") or {}).get("decision") else []
         if os.environ.get("OPENROUTER_API_KEY"):
             specs += SHORTLIST
         if os.environ.get("LIQUID_API_KEY"):
-            specs += LIQUID
+            specs += LIQUID + [spec + "#text" for spec in LIQUID]      # d1 with and without the pictures
     if not specs:
         print("No decision model is configured and no OpenRouter key is available: nothing to compare.")
         return 1
